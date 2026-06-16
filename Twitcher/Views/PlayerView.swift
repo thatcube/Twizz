@@ -76,12 +76,13 @@ struct PlayerView: View {
                     .frame(width: chatWidth)
                     .frame(maxHeight: .infinity)
                     .transition(.move(edge: .trailing))
-                } else {
-                    collapsedChatTab
-                        .transition(.move(edge: .trailing))
                 }
             }
             .ignoresSafeArea()
+
+            if !showChat {
+                collapsedChatButton
+            }
 
             if showQualityPicker {
                 qualityPicker
@@ -117,13 +118,14 @@ struct PlayerView: View {
                 .ignoresSafeArea()
 
             // Invisible full-area catcher: pressing the remote reveals controls.
-            Button(action: revealControls) {
-                Color.clear
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focused($focus, equals: .video)
+            // A plain focusable view (not a Button) avoids tvOS's full-screen
+            // focus halo that made the whole video look like a giant card.
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .focusable()
+                .focused($focus, equals: .video)
+                .onTapGesture { revealControls() }
 
             if isLoading {
                 ProgressView("Loading \(channel)…")
@@ -141,7 +143,7 @@ struct PlayerView: View {
                 }
                 .padding(40)
                 .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 24))
-            } else if showControls {
+            } else if showControls && !showQualityPicker {
                 controlBar
                     .transition(.opacity)
             }
@@ -170,13 +172,6 @@ struct PlayerView: View {
             .focused($focus, equals: .captions)
 
             Spacer()
-
-            Button {
-                dismiss()
-            } label: {
-                Label("Exit", systemImage: "xmark")
-            }
-            .focused($focus, equals: .exit)
         }
         .buttonStyle(.bordered)
         .padding(.horizontal, 48)
@@ -190,23 +185,19 @@ struct PlayerView: View {
         )
     }
 
-    /// Thin focusable strip shown on the right edge when chat is collapsed.
-    private var collapsedChatTab: some View {
+    /// Small focusable button pinned to the top-right that re-opens chat when
+    /// it's collapsed (mirrors the collapse button in the chat header).
+    private var collapsedChatButton: some View {
         Button {
             setChat(true)
         } label: {
-            VStack(spacing: 12) {
-                Image(systemName: "chevron.left")
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-            }
-            .font(.title3)
-            .frame(maxHeight: .infinity)
-            .frame(width: 64)
-            .contentShape(Rectangle())
+            Image(systemName: "bubble.left.and.bubble.right.fill")
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
         .focused($focus, equals: .chatTab)
-        .background(Color(white: 0.07).opacity(0.96))
+        .padding(.top, 36)
+        .padding(.trailing, 48)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 
     private func setChat(_ shown: Bool) {
@@ -271,6 +262,13 @@ struct PlayerView: View {
             }
             .padding(40)
             .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 28))
+            .focusSection()
+        }
+        .onAppear {
+            // Move focus into the picker once it's on screen; the underlying
+            // control bar is hidden while the picker is open so it can't steal focus.
+            let target = qualityOptions.contains(preferredQuality) ? preferredQuality : (qualityOptions.first ?? "Auto")
+            focus = .qualityOption(target)
         }
     }
 
