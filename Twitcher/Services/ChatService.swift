@@ -23,6 +23,7 @@ final class ChatService {
     private var joinTask: Task<Void, Never>?
     private var channel: String?
     private var hasSentJoin = false
+    private var hasCapAck = false
 
     /// Connect and join `channel` (case-insensitive). Replaces any existing connection.
     func connect(to channel: String) {
@@ -30,6 +31,7 @@ final class ChatService {
         let normalized = channel.lowercased()
         self.channel = normalized
         hasSentJoin = false
+        hasCapAck = false
         emoteURLs = [:]
         badgeURLs = [:]
 
@@ -43,9 +45,10 @@ final class ChatService {
 
         joinTask?.cancel()
         joinTask = Task { [weak self] in
-            // Fallback path if CAP ACK is delayed: still join after a short delay.
-            try? await Task.sleep(for: .milliseconds(600))
-            self?.sendJoinIfNeeded()
+            // Fallback path if CAP ACK never arrives: still join after a delay.
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, !self.hasCapAck else { return }
+            self.sendJoinIfNeeded()
         }
 
         Task { [weak self] in
@@ -79,6 +82,7 @@ final class ChatService {
         badgeURLs.removeAll()
         channel = nil
         hasSentJoin = false
+        hasCapAck = false
     }
 
     private func sendJoinIfNeeded() {
@@ -117,6 +121,7 @@ final class ChatService {
                 continue
             }
             if piece.contains(" CAP ") && piece.contains(" ACK ") && piece.contains("twitch.tv/tags") {
+                hasCapAck = true
                 sendJoinIfNeeded()
                 continue
             }
