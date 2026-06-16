@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+DerivedData/
+build/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# SweetPad / build server
+buildServer.json
+.sourcekit-lsp/
+
+# Secrets — never commit Twitch client IDs/tokens
+Secrets.swift
+*.xcconfig.local
+.env
+
+# Misc
+*.log
