@@ -20,7 +20,6 @@ final class ChatService {
 
     private var socket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
-    private var joinTask: Task<Void, Never>?
     private var channel: String?
     private var hasSentJoin = false
     private var hasCapAck = false
@@ -43,14 +42,6 @@ final class ChatService {
         send("NICK justinfan\(Int.random(in: 10_000..<99_999))")
         send("CAP REQ :twitch.tv/tags twitch.tv/commands")
 
-        joinTask?.cancel()
-        joinTask = Task { [weak self] in
-            // Fallback path if CAP ACK never arrives: still join after a delay.
-            try? await Task.sleep(for: .seconds(2))
-            guard let self, !self.hasCapAck else { return }
-            self.sendJoinIfNeeded()
-        }
-
         Task { [weak self] in
             guard let self else { return }
             let catalog = await EmoteCatalogService.shared.catalog(for: normalized)
@@ -70,8 +61,6 @@ final class ChatService {
 
     /// Tear down the connection and clear the buffer.
     func disconnect() {
-        joinTask?.cancel()
-        joinTask = nil
         receiveTask?.cancel()
         receiveTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
