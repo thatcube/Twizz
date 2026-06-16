@@ -48,17 +48,25 @@ struct PlayerView: View {
     @State private var isLoading = true
     @State private var showChat = true
     @State private var showQualityPicker = false
+    @State private var showCaptionsPicker = false
     @State private var showControls = false
     @State private var captionsOn = UIAccessibility.isClosedCaptioningEnabled
+    @State private var captionGroup: AVMediaSelectionGroup?
+    @State private var captionOptions: [AVMediaSelectionOption] = []
+    @State private var captionSelectionKey: String?
     @State private var streamTitle: String = ""
     @State private var chatDraft: String = ""
     @State private var hideTask: Task<Void, Never>?
+    @State private var latencyTask: Task<Void, Never>?
+    @State private var wallClockLatencySeconds: Double?
+    @State private var liveEdgeLatencySeconds: Double?
     @State private var lastControlFocus: Focusable = .quality
 
     @FocusState private var focus: Focusable?
     private enum Focusable: Hashable {
         case video, quality, captions, chatToggle, chatInput, errorBack
         case qualityOption(Int)
+        case captionsOption(Int)
     }
 
     private let chatWidth: CGFloat = 460
@@ -81,8 +89,13 @@ struct PlayerView: View {
             if showQualityPicker {
                 qualityPicker
             }
+
+            if showCaptionsPicker {
+                captionsPicker
+            }
         }
         .task {
+            configurePlayerForLive()
             chat.connect(to: channel)
             await load()
             await refreshStreamTitle()
@@ -93,6 +106,7 @@ struct PlayerView: View {
         }
         .onDisappear {
             hideTask?.cancel()
+            stopLatencyMonitor()
             player.pause()
             chat.disconnect()
             setIdleTimer(disabled: false)
@@ -102,6 +116,10 @@ struct PlayerView: View {
                 showQualityPicker = false
                 focus = .quality
                 scheduleHide()
+            } else if showCaptionsPicker {
+                showCaptionsPicker = false
+                focus = .captions
+                scheduleHide()
             } else if showControls {
                 hideControls()
             } else {
@@ -109,7 +127,7 @@ struct PlayerView: View {
             }
         }
         .onMoveCommand { direction in
-            guard !showQualityPicker else { return }
+            guard !showQualityPicker, !showCaptionsPicker else { return }
 
             if !showControls {
                 // Directional movement should immediately surface controls and
@@ -122,7 +140,7 @@ struct PlayerView: View {
         .onChange(of: focus) { _, newFocus in
             // Keep control navigation deterministic: if tvOS drops focus to nil
             // while controls are visible, immediately restore last valid control.
-            guard showControls, !showQualityPicker else { return }
+            guard showControls, !showQualityPicker, !showCaptionsPicker else { return }
 
             if let newFocus, isControlFocus(newFocus) {
                 lastControlFocus = newFocus
@@ -141,6 +159,18 @@ struct PlayerView: View {
         ZStack(alignment: .bottom) {
             VideoSurface(player: player)
                 .ignoresSafeArea()
+
+            if measuredLatencySeconds != nil {
+                VStack {
+                    HStack {
+                        latencyBadge
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .padding(.top, 36)
+                .padding(.leading, 40)
+            }
 
             // Only expose the video focus target while controls are hidden.
             // Otherwise, left-edge movement from the control cluster can escape
@@ -191,6 +221,7 @@ struct PlayerView: View {
             HStack(spacing: 14) {
                 Button {
                     showQualityPicker = true
+                    showCaptionsPicker = false
                     hideTask?.cancel()
                 } label: {
                     Label("Quality", systemImage: "gauge.with.dots.needle.67percent")
@@ -210,9 +241,8 @@ struct PlayerView: View {
                 }
 
                 Button {
-                    captionsOn.toggle()
-                    applyCaptions()
-                    scheduleHide()
+                    showQualityPicker = false
+                    prepareCaptionsPicker()
                 } label: {
                     Label(captionsOn ? "Captions On" : "Captions Off",
                           systemImage: captionsOn ? "captions.bubble.fill" : "captions.bubble")
@@ -265,6 +295,28 @@ struct PlayerView: View {
                 .allowsHitTesting(false),
             alignment: .bottom
         )
+    }
+
+    private var latencyBadge: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(latencyColor)
+                .frame(width: 8, height: 8)
+
+            Text(latencyLabel)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
+
+            if wallClockLatencySeconds != nil, let edge = liveEdgeLatencySeconds {
+                Text("(edge \(formatLatencySeconds(edge)))")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.black.opacity(0.62), in: Capsule())
     }
 
     // MARK: - Controls visibility
@@ -386,6 +438,70 @@ struct PlayerView: View {
         }
     }
 
+    private var captionsPicker: some View {
+        ZStack {
+            Color.black.opacity(0.5).ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Captions")
+                    .font(.title2).bold()
+                    .padding(.bottom, 8)
+
+                Button {
+                    selectCaptionOption(at: 0)
+                } label: {
+                    HStack {
+                        Text("Off")
+                        Spacer()
+                        if !captionsOn {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                    .frame(width: 460)
+                }
+                .buttonStyle(.bordered)
+                .focused($focus, equals: .captionsOption(0))
+
+                if captionOptions.isEmpty {
+                    Text("No caption tracks available right now.")
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                } else {
+                    ForEach(Array(captionOptions.enumerated()), id: \.offset) { index, option in
+                        Button {
+                            selectCaptionOption(at: index + 1)
+                        } label: {
+                            HStack {
+                                Text(option.displayName)
+                                Spacer()
+                                if captionsOn, captionSelectionKey == captionKey(option) {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                            .frame(width: 460)
+                        }
+                        .buttonStyle(.bordered)
+                        .focused($focus, equals: .captionsOption(index + 1))
+                    }
+                }
+            }
+            .padding(40)
+            .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 28))
+            .focusSection()
+        }
+        .onAppear {
+            let selectedIndex: Int
+            if captionsOn,
+               let selected = captionSelectionKey,
+               let optionIndex = captionOptions.firstIndex(where: { captionKey($0) == selected }) {
+                selectedIndex = optionIndex + 1
+            } else {
+                selectedIndex = 0
+            }
+            focus = .captionsOption(selectedIndex)
+        }
+    }
+
     private var qualityOptions: [String] {
         ["Auto"] + (playback?.qualities.map(\.name) ?? [])
     }
@@ -395,11 +511,40 @@ struct PlayerView: View {
         let option = qualityOptions[index]
         preferredQuality = option
         showQualityPicker = false
-        if let url = url(for: option) {
-            player.replaceCurrentItem(with: makeItem(url: url))
-            player.play()
-        }
+        applyQualityPreference(option)
         focus = .quality
+        scheduleHide()
+    }
+
+    private func prepareCaptionsPicker() {
+        hideTask?.cancel()
+
+        Task {
+            let item = player.currentItem
+            let group = try? await item?.asset.loadMediaSelectionGroup(for: .legible)
+            await MainActor.run {
+                captionGroup = group
+                captionOptions = group?.options ?? []
+                showCaptionsPicker = true
+            }
+        }
+    }
+
+    private func selectCaptionOption(at index: Int) {
+        guard index == 0 || captionOptions.indices.contains(index - 1) else { return }
+
+        if index == 0 {
+            captionsOn = false
+            captionSelectionKey = nil
+        } else {
+            let option = captionOptions[index - 1]
+            captionsOn = true
+            captionSelectionKey = captionKey(option)
+        }
+
+        applyCaptions()
+        showCaptionsPicker = false
+        focus = .captions
         scheduleHide()
     }
 
@@ -413,11 +558,13 @@ struct PlayerView: View {
         do {
             let resolved = try await PlaybackService.resolve(for: channel)
             playback = resolved
-            let startURL = url(for: preferredQuality) ?? resolved.master
-            player.replaceCurrentItem(with: makeItem(url: startURL))
+            player.replaceCurrentItem(with: makeItem(url: resolved.master))
+            applyQualityPreference(preferredQuality)
             player.play()
+            startLatencyMonitor()
             isLoading = false
         } catch {
+            stopLatencyMonitor()
             errorMessage = error.localizedDescription
             isLoading = false
         }
@@ -429,14 +576,45 @@ struct PlayerView: View {
         }
     }
 
-    /// Resolves a quality option name to a playable URL. "Auto" (or an unknown
-    /// name, e.g. a persisted quality this stream doesn't offer) uses the master
-    /// playlist so AVPlayer does adaptive bitrate.
-    private func url(for option: String) -> URL? {
-        guard let playback else { return nil }
-        if option == "Auto" { return playback.master }
-        if let match = playback.qualities.first(where: { $0.name == option }) { return match.url }
-        return playback.master
+    /// Keeps the player on the master playlist for video qualities so caption
+    /// tracks remain discoverable. We bias ABR with preferredPeakBitRate.
+    private func applyQualityPreference(_ option: String) {
+        guard let playback else { return }
+
+        if option == "Auto" {
+            switchToMasterItemIfNeeded(playback.master)
+            player.currentItem?.preferredPeakBitRate = 0
+            return
+        }
+
+        guard let match = playback.qualities.first(where: { $0.name == option }) else {
+            switchToMasterItemIfNeeded(playback.master)
+            player.currentItem?.preferredPeakBitRate = 0
+            return
+        }
+
+        if match.isAudioOnly {
+            player.replaceCurrentItem(with: makeItem(url: match.url))
+            player.currentItem?.preferredPeakBitRate = 0
+            player.play()
+            return
+        }
+
+        switchToMasterItemIfNeeded(playback.master)
+        let targetBitrate = match.bitrate > 0 ? Double(match.bitrate) * 1.08 : 0
+        player.currentItem?.preferredPeakBitRate = targetBitrate
+    }
+
+    private func switchToMasterItemIfNeeded(_ masterURL: URL) {
+        guard let asset = player.currentItem?.asset as? AVURLAsset else {
+            player.replaceCurrentItem(with: makeItem(url: masterURL))
+            player.play()
+            return
+        }
+
+        guard asset.url != masterURL else { return }
+        player.replaceCurrentItem(with: makeItem(url: masterURL))
+        player.play()
     }
 
     private func makeItem(url: URL) -> AVPlayerItem {
@@ -445,13 +623,101 @@ struct PlayerView: View {
             options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
         )
         let item = AVPlayerItem(asset: asset)
+        // Keep live delay lower by avoiding a large prebuffer window.
+        item.preferredForwardBufferDuration = 1
         applyCaptions(to: item, retries: 12)
         return item
+    }
+
+    private var measuredLatencySeconds: Double? {
+        wallClockLatencySeconds ?? liveEdgeLatencySeconds
+    }
+
+    private var latencyColor: Color {
+        guard let seconds = measuredLatencySeconds else { return .gray }
+        if seconds <= 8 { return .green }
+        if seconds <= 15 { return .yellow }
+        return .orange
+    }
+
+    private var latencyLabel: String {
+        if let wallClockLatencySeconds {
+            return "Live latency \(formatLatencySeconds(wallClockLatencySeconds))"
+        }
+        if let liveEdgeLatencySeconds {
+            return "Live edge \(formatLatencySeconds(liveEdgeLatencySeconds))"
+        }
+        return "Measuring latency"
+    }
+
+    private func formatLatencySeconds(_ seconds: Double) -> String {
+        let clamped = max(0, seconds)
+        if clamped < 10 {
+            let tenths = (clamped * 10).rounded() / 10
+            return "\(tenths)s"
+        }
+        return "\(Int(clamped.rounded()))s"
+    }
+
+    private func configurePlayerForLive() {
+        // Prefer immediacy for live streams over additional anti-stall buffering.
+        player.automaticallyWaitsToMinimizeStalling = false
+    }
+
+    private func startLatencyMonitor() {
+        stopLatencyMonitor()
+        latencyTask = Task {
+            while !Task.isCancelled {
+                await MainActor.run {
+                    updateLatencyMetrics()
+                }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    private func stopLatencyMonitor() {
+        latencyTask?.cancel()
+        latencyTask = nil
+        wallClockLatencySeconds = nil
+        liveEdgeLatencySeconds = nil
+    }
+
+    private func updateLatencyMetrics() {
+        guard let item = player.currentItem else {
+            wallClockLatencySeconds = nil
+            liveEdgeLatencySeconds = nil
+            return
+        }
+
+        if let playbackDate = item.currentDate() {
+            let wallClock = Date().timeIntervalSince(playbackDate)
+            wallClockLatencySeconds = wallClock.isFinite ? max(0, wallClock) : nil
+        } else {
+            wallClockLatencySeconds = nil
+        }
+
+        if let range = item.seekableTimeRanges.last?.timeRangeValue {
+            let liveEdge = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+            let current = CMTimeGetSeconds(item.currentTime())
+            if liveEdge.isFinite, current.isFinite, liveEdge > 0 {
+                liveEdgeLatencySeconds = max(0, liveEdge - current)
+            } else {
+                liveEdgeLatencySeconds = nil
+            }
+        } else {
+            liveEdgeLatencySeconds = nil
+        }
     }
 
     /// Applies the current captions preference to the active item.
     private func applyCaptions() {
         if let item = player.currentItem { applyCaptions(to: item, retries: 12) }
+    }
+
+    private func captionKey(_ option: AVMediaSelectionOption) -> String {
+        let language = option.extendedLanguageTag ?? option.locale?.identifier ?? ""
+        return "\(language)|\(option.displayName)"
     }
 
     /// Turns in-band closed captions on or off for a given item. Twitch streams
@@ -461,20 +727,27 @@ struct PlayerView: View {
     /// for a short window instead of failing one-shot.
     private func applyCaptions(to item: AVPlayerItem, retries: Int) {
         let wantCaptions = captionsOn
+        let preferredCaption = captionSelectionKey
         Task {
             for attempt in 0...retries {
                 if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) {
                     await MainActor.run {
+                        captionGroup = group
+                        captionOptions = group.options
                         guard !group.options.isEmpty else { return }
 
                         if wantCaptions {
                             let preferred = group.options.first {
+                                captionKey($0) == preferredCaption
+                            } ?? group.options.first {
                                 !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
                             } ?? group.options.first
                             if let option = preferred {
+                                captionSelectionKey = captionKey(option)
                                 item.select(option, in: group)
                             }
                         } else {
+                            captionSelectionKey = nil
                             item.select(nil, in: group)
                         }
                     }

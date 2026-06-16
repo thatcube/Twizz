@@ -91,6 +91,7 @@ final class ChatService {
 
     private func handle(_ raw: String) {
         // A single frame can batch multiple IRC lines.
+        var parsedMessages: [ChatMessage] = []
         for piece in raw.components(separatedBy: "\r\n") where !piece.isEmpty {
             if piece.hasPrefix("PING") {
                 send("PONG :tmi.twitch.tv")
@@ -101,11 +102,14 @@ final class ChatService {
                 continue
             }
             if let message = ChatMessage(ircLine: piece) {
-                messages.append(message)
-                if messages.count > maxMessages {
-                    messages.removeFirst(messages.count - maxMessages)
-                }
+                parsedMessages.append(message)
             }
+        }
+
+        guard !parsedMessages.isEmpty else { return }
+        messages.append(contentsOf: parsedMessages)
+        if messages.count > maxMessages {
+            messages.removeFirst(messages.count - maxMessages)
         }
     }
 }

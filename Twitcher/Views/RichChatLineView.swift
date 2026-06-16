@@ -4,7 +4,7 @@ import SDWebImageSwiftUI
 struct RichChatLineView: View {
     let message: ChatMessage
     let nameColor: Color
-    let emoteURLs: [String: URL]
+    let globalEmoteURLs: [String: URL]
     let badgeURLs: [String: URL]
 
     private enum Segment: Hashable {
@@ -95,7 +95,7 @@ struct RichChatLineView: View {
                 output.append(.text(String(leading)))
             }
 
-            if let url = emoteURLs[core] {
+            if let url = message.twitchEmoteURLs[core] ?? globalEmoteURLs[core] {
                 output.append(.emote(name: core, url: url))
             } else {
                 output.append(.text(core))

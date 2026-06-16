@@ -8,6 +8,7 @@ struct ChatView: View {
     var isConnected: Bool = false
     var emoteURLs: [String: URL] = [:]
     var badgeURLs: [String: URL] = [:]
+    @State private var pendingScrollWork: DispatchWorkItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,9 +51,18 @@ struct ChatView: View {
             .scrollIndicators(.hidden)
             .onChange(of: messages.count) {
                 guard let last = messages.last else { return }
-                withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo(last.id, anchor: .bottom)
+                pendingScrollWork?.cancel()
+                let work = DispatchWorkItem {
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
                 }
+                pendingScrollWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+            }
+            .onDisappear {
+                pendingScrollWork?.cancel()
+                pendingScrollWork = nil
             }
             .overlay {
                 if messages.isEmpty {
@@ -65,11 +75,10 @@ struct ChatView: View {
     }
 
     private func line(for message: ChatMessage) -> some View {
-        let mergedEmotes = emoteURLs.merging(message.twitchEmoteURLs) { _, twitch in twitch }
         return RichChatLineView(
             message: message,
             nameColor: color(for: message),
-            emoteURLs: mergedEmotes,
+            globalEmoteURLs: emoteURLs,
             badgeURLs: badgeURLs
         )
     }
