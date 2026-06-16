@@ -7,6 +7,82 @@ struct RichChatLineView: View {
     let globalEmoteURLs: [String: URL]
     let badgeURLs: [String: URL]
 
+    private struct BadgeDescriptor: Identifiable {
+        let key: String
+        let url: URL?
+        let fallback: BadgeFallback?
+
+        var id: String { key }
+    }
+
+    private enum BadgeFallback {
+        case broadcaster
+        case moderator
+        case subscriber
+        case vip
+        case founder
+        case staff
+        case partner
+        case turbo
+        case premium
+        case generic
+
+        init?(badgeKey: String) {
+            let setName = badgeKey.split(separator: "/", maxSplits: 1).first.map { String($0).lowercased() } ?? ""
+            switch setName {
+            case "broadcaster": self = .broadcaster
+            case "moderator": self = .moderator
+            case "subscriber": self = .subscriber
+            case "vip": self = .vip
+            case "founder": self = .founder
+            case "staff": self = .staff
+            case "partner": self = .partner
+            case "turbo": self = .turbo
+            case "premium": self = .premium
+            default: self = .generic
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .broadcaster: return "video.fill"
+            case .moderator: return "checkmark.shield.fill"
+            case .subscriber: return "star.fill"
+            case .vip: return "diamond.fill"
+            case .founder: return "sparkles"
+            case .staff: return "person.crop.square.badge.checkmark"
+            case .partner: return "checkmark.seal.fill"
+            case .turbo: return "bolt.fill"
+            case .premium: return "crown.fill"
+            case .generic: return "bookmark.fill"
+            }
+        }
+
+        var foreground: Color {
+            switch self {
+            case .subscriber, .premium:
+                return .black
+            default:
+                return .white
+            }
+        }
+
+        var background: Color {
+            switch self {
+            case .broadcaster: return Color(red: 0.86, green: 0.12, blue: 0.2)
+            case .moderator: return Color(red: 0.0, green: 0.58, blue: 0.33)
+            case .subscriber: return Color(red: 0.98, green: 0.78, blue: 0.2)
+            case .vip: return Color(red: 0.85, green: 0.34, blue: 0.72)
+            case .founder: return Color(red: 0.3, green: 0.55, blue: 0.95)
+            case .staff: return Color(red: 0.43, green: 0.43, blue: 0.43)
+            case .partner: return Color(red: 0.42, green: 0.21, blue: 0.68)
+            case .turbo: return Color(red: 0.24, green: 0.62, blue: 0.98)
+            case .premium: return Color(red: 0.8, green: 0.82, blue: 0.9)
+            case .generic: return Color(red: 0.22, green: 0.45, blue: 0.75)
+            }
+        }
+    }
+
     private enum Segment: Hashable {
         case text(String)
         case emote(name: String, url: URL)
@@ -16,14 +92,21 @@ struct RichChatLineView: View {
         message.isAction ? nameColor : .white
     }
 
-    private var resolvedBadgeURLs: [URL] {
-        message.badgeKeys.compactMap { badgeURLs[$0] }
+    private var badgeDescriptors: [BadgeDescriptor] {
+        message.badgeKeys.compactMap { key in
+            let fallback = BadgeFallback(badgeKey: key)
+            if let url = badgeURLs[key] {
+                return BadgeDescriptor(key: key, url: url, fallback: fallback)
+            }
+            return BadgeDescriptor(key: key, url: nil, fallback: fallback)
+        }
     }
 
     var body: some View {
         ChatFlowLayout(itemSpacing: 0, rowSpacing: 4) {
-            ForEach(Array(resolvedBadgeURLs.enumerated()), id: \.offset) { _, badgeURL in
-                badgeView(url: badgeURL)
+            ForEach(badgeDescriptors) { badge in
+                badgeView(for: badge)
+                    .padding(.trailing, 4)
             }
 
             Text(message.isAction ? "\(message.username) " : "\(message.username): ")
@@ -37,21 +120,41 @@ struct RichChatLineView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
-    private func badgeView(url: URL) -> some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let image):
-                image
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 22, height: 22)
-            default:
-                Color.clear
-                    .frame(width: 22, height: 22)
+    private func badgeView(for badge: BadgeDescriptor) -> some View {
+        Group {
+            if let url = badge.url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 22, height: 22)
+                    default:
+                        if let fallback = badge.fallback {
+                            badgeFallbackView(fallback)
+                        } else {
+                            Color.white.opacity(0).frame(width: 22, height: 22)
+                        }
+                    }
+                }
+            } else if let fallback = badge.fallback {
+                badgeFallbackView(fallback)
+            } else {
+                Color.white.opacity(0).frame(width: 22, height: 22)
             }
         }
         .frame(width: 22, height: 22)
+    }
+
+    private func badgeFallbackView(_ fallback: BadgeFallback) -> some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(fallback.background)
+            .overlay {
+                Image(systemName: fallback.symbolName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(fallback.foreground)
+            }
     }
 
     @ViewBuilder

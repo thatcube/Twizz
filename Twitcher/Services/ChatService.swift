@@ -20,13 +20,16 @@ final class ChatService {
 
     private var socket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
+    private var joinTask: Task<Void, Never>?
     private var channel: String?
+    private var hasSentJoin = false
 
     /// Connect and join `channel` (case-insensitive). Replaces any existing connection.
     func connect(to channel: String) {
         disconnect()
         let normalized = channel.lowercased()
         self.channel = normalized
+        hasSentJoin = false
         emoteURLs = [:]
         badgeURLs = [:]
 
@@ -34,9 +37,16 @@ final class ChatService {
         socket = task
         task.resume()
 
+        send("PASS SCHMOOPIIE")
         send("NICK justinfan\(Int.random(in: 10_000..<99_999))")
-        send("CAP REQ :twitch.tv/tags")
-        send("JOIN #\(normalized)")
+        send("CAP REQ :twitch.tv/tags twitch.tv/commands")
+
+        joinTask?.cancel()
+        joinTask = Task { [weak self] in
+            // Fallback path if CAP ACK is delayed: still join after a short delay.
+            try? await Task.sleep(for: .milliseconds(600))
+            self?.sendJoinIfNeeded()
+        }
 
         Task { [weak self] in
             guard let self else { return }
@@ -57,6 +67,8 @@ final class ChatService {
 
     /// Tear down the connection and clear the buffer.
     func disconnect() {
+        joinTask?.cancel()
+        joinTask = nil
         receiveTask?.cancel()
         receiveTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
@@ -66,6 +78,13 @@ final class ChatService {
         emoteURLs.removeAll()
         badgeURLs.removeAll()
         channel = nil
+        hasSentJoin = false
+    }
+
+    private func sendJoinIfNeeded() {
+        guard !hasSentJoin, let channel else { return }
+        send("JOIN #\(channel)")
+        hasSentJoin = true
     }
 
     private func send(_ command: String) {
@@ -95,6 +114,10 @@ final class ChatService {
         for piece in raw.components(separatedBy: "\r\n") where !piece.isEmpty {
             if piece.hasPrefix("PING") {
                 send("PONG :tmi.twitch.tv")
+                continue
+            }
+            if piece.contains(" CAP ") && piece.contains(" ACK ") && piece.contains("twitch.tv/tags") {
+                sendJoinIfNeeded()
                 continue
             }
             if piece.contains(" 366 ") {  // end-of-NAMES => join confirmed

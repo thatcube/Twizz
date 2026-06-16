@@ -60,7 +60,10 @@ extension ChatMessage {
 
         let display = tags["display-name"].flatMap { $0.isEmpty ? nil : $0 } ?? nickFromPrefix
         let color = tags["color"].flatMap { $0.isEmpty ? nil : $0 }
-        let badges = Self.parseBadgeKeys(tags["badges"])
+        let badges = Self.mergeBadgeKeys(
+            explicit: Self.parseBadgeKeys(tags["badges"]),
+            inferred: Self.inferRoleBadgeKeys(from: tags, nick: nickFromPrefix)
+        )
         let twitchEmoteURLs = Self.parseTwitchEmoteURLs(tags["emotes"], in: message)
 
         self.username = display
@@ -77,6 +80,34 @@ extension ChatMessage {
             .split(separator: ",")
             .map { String($0) }
             .filter { !$0.isEmpty }
+    }
+
+    private static func inferRoleBadgeKeys(from tags: [String: String], nick: String) -> [String] {
+        var out: [String] = []
+
+        if tags["mod"] == "1" { out.append("moderator/1") }
+        if tags["subscriber"] == "1" { out.append("subscriber/1") }
+        if tags["vip"] == "1" { out.append("vip/1") }
+        if tags["turbo"] == "1" { out.append("turbo/1") }
+
+        let userType = tags["user-type"]?.lowercased() ?? ""
+        if userType == "staff" || userType == "admin" || userType == "global_mod" {
+            out.append("staff/1")
+        }
+
+        if let roomID = tags["room-id"], let userID = tags["user-id"], roomID == userID {
+            out.append("broadcaster/1")
+        }
+
+        return out
+    }
+
+    private static func mergeBadgeKeys(explicit: [String], inferred: [String]) -> [String] {
+        var merged = explicit
+        for key in inferred where !merged.contains(key) {
+            merged.append(key)
+        }
+        return merged
     }
 
     private static func parseTwitchEmoteURLs(_ tag: String?, in message: String) -> [String: URL] {
