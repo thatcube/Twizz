@@ -1,29 +1,27 @@
 import SwiftUI
 import AVKit
 
-/// Hosts an `AVPlayerLayer` so the video keeps its aspect ratio (letterboxed and
-/// centered) inside whatever space the layout gives it — required for the
-/// side-by-side video + chat layout.
-struct VideoSurface: UIViewRepresentable {
+/// Hosts an embedded `AVPlayerViewController` with native controls disabled.
+/// This keeps custom Twitcher UI while preserving Apple media rendering paths
+/// (including subtitle/caption rendering) better than raw AVPlayerLayer.
+struct VideoSurface: UIViewControllerRepresentable {
     let player: AVPlayer
 
-    func makeUIView(context: Context) -> PlayerHostView {
-        let view = PlayerHostView()
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
-        view.backgroundColor = .black
-        return view
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.showsPlaybackControls = false
+        controller.videoGravity = .resizeAspect
+        controller.view.backgroundColor = .black
+        return controller
     }
 
-    func updateUIView(_ view: PlayerHostView, context: Context) {
-        if view.playerLayer.player !== player {
-            view.playerLayer.player = player
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        if controller.player !== player {
+            controller.player = player
         }
-    }
-
-    final class PlayerHostView: UIView {
-        override class var layerClass: AnyClass { AVPlayerLayer.self }
-        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        controller.showsPlaybackControls = false
+        controller.videoGravity = .resizeAspect
     }
 }
 
@@ -80,6 +78,10 @@ struct PlayerView: View {
                 }
             }
             .ignoresSafeArea()
+
+            if showChat {
+                chatComposerOverlay
+            }
 
             if showQualityPicker {
                 qualityPicker
@@ -181,6 +183,7 @@ struct PlayerView: View {
                 .focused($focus, equals: .quality)
                 .onMoveCommand { direction in
                     switch direction {
+                    case .left: focus = .quality
                     case .right: focus = .captions
                     default: break
                     }
@@ -206,6 +209,9 @@ struct PlayerView: View {
 
                 Button {
                     showChat.toggle()
+                    if !showChat, focus == .chatInput {
+                        focus = .chatToggle
+                    }
                     scheduleHide()
                 } label: {
                     Label(showChat ? "Hide Chat" : "Show Chat",
@@ -220,10 +226,6 @@ struct PlayerView: View {
                         focus = showChat ? .chatInput : .chatToggle
                     default: break
                     }
-                }
-
-                if showChat {
-                    chatInputField
                 }
             }
             .buttonStyle(.bordered)
@@ -268,27 +270,42 @@ struct PlayerView: View {
         }
     }
 
-    private var chatInputField: some View {
-        TextField("Send a message", text: $chatDraft)
+    private var chatComposerOverlay: some View {
+        HStack {
+            Spacer()
+
+            HStack(spacing: 10) {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .foregroundStyle(.green)
+
+                TextField("Send a message", text: $chatDraft)
+                    .textFieldStyle(.plain)
+                    .focused($focus, equals: .chatInput)
+                    .onMoveCommand { direction in
+                        switch direction {
+                        case .left:
+                            revealControls(preferredFocus: .chatToggle)
+                            focus = .chatToggle
+                        case .right:
+                            // Keep focus pinned; there is intentionally no
+                            // control to the right of chat input.
+                            focus = .chatInput
+                        default: break
+                        }
+                    }
+            }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .frame(width: 280)
-            .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
+            .frame(width: chatWidth - 24)
+            .background(Color(white: 0.08).opacity(0.98), in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(.white.opacity(0.24), lineWidth: 1)
             )
-            .focused($focus, equals: .chatInput)
-            .onMoveCommand { direction in
-                switch direction {
-                case .left: focus = .chatToggle
-                default: break
-                }
-            }
-            .onSubmit {
-                // Sending chat is not implemented yet; keep typed text local.
-                scheduleHide()
-            }
+            .padding(.trailing, 12)
+            .padding(.bottom, 14)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
     }
 
     // MARK: - Quality picker
