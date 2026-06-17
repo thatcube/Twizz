@@ -26,6 +26,8 @@ struct HomeView: View {
 
   @FocusState private var focusedItemID: String?
 
+  private let firstLaunchSignInPromptKey = "hasPromptedFirstLaunchSignIn"
+
   private enum TopTab: String, CaseIterable, Identifiable {
     case home = "Home"
     case browse = "Browse"
@@ -67,6 +69,7 @@ struct HomeView: View {
     }
     .task {
       auth.restore()
+      promptFirstLaunchSignInIfNeeded()
       await refreshFollowedChannelsIfNeeded(force: true)
       await refreshRecommendationsIfNeeded(force: true)
       requestFocusIfPossible(force: true)
@@ -353,6 +356,18 @@ struct HomeView: View {
       .padding(.top, 12)
       .focusSection()
     }
+  }
+
+  /// On the very first app launch (and only then), nudge a signed-out viewer to
+  /// the Account tab so they can connect their Twitch account. The flag is
+  /// persisted so we never prompt again, even if they skip signing in.
+  private func promptFirstLaunchSignInIfNeeded() {
+    let defaults = UserDefaults.standard
+    guard !defaults.bool(forKey: firstLaunchSignInPromptKey) else { return }
+    defaults.set(true, forKey: firstLaunchSignInPromptKey)
+
+    guard !auth.isAuthenticated else { return }
+    selectedTopTab = .account
   }
 
   private func requestFocusIfPossible(force: Bool) {
