@@ -102,6 +102,10 @@ Apple TV has no official Twitch playback SDK. Twizz resolves playback via Twitch
 
 This project is non-commercial and ad-respecting.
 
+## Not Supported: Auto-Redeeming Channel Points
+
+Twizz won't auto-claim channel points (the way the 7TV/FFZ browser extensions do). Twitch's official login that Twizz uses isn't accepted by the private API that claims points — that API only trusts a real twitch.tv web-session login. Supporting it would mean adding a second login where you type your Twitch password into the app and storing a full-account session token, plus fighting Twitch's anti-bot checks. It's also against Twitch's Terms of Service. Not worth the security risk and fragility, so we're not doing it.
+
 ## Roadmap
 
 See [Twizz-plan.md](Twizz-plan.md) for detailed phased planning.
