@@ -10,6 +10,7 @@ struct SignInView: View {
   var onSignedIn: () -> Void = {}
 
   @Environment(\.dismiss) private var dismiss
+  @State private var showSignOutConfirm = false
 
   private let displayURL = "twitch.tv/activate"
 
@@ -169,15 +170,25 @@ struct SignInView: View {
         }
 
         Button("Sign Out") {
-          auth.signOut()
-          onSignedIn()
-          dismiss()
+          showSignOutConfirm = true
         }
       }
       .buttonStyle(.bordered)
       .padding(.top, 12)
     }
     .padding(80)
+    .confirmationDialog(
+      "Sign out of Twitch?",
+      isPresented: $showSignOutConfirm,
+      titleVisibility: .visible
+    ) {
+      Button("Sign Out", role: .destructive) {
+        auth.signOut()
+        onSignedIn()
+        dismiss()
+      }
+      Button("Cancel", role: .cancel) {}
+    }
   }
 
   // MARK: - QR generation
