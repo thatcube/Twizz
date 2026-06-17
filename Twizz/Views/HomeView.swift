@@ -12,6 +12,7 @@ struct HomeView: View {
   private let minMediaWidth: CGFloat = 220
   private let maxMediaWidth: CGFloat = 560
   private let focusedCardScale: CGFloat = 1.07
+  private let autoRefreshStaleInterval: TimeInterval = 5 * 60
 
   @State private var selectedTopTab: TopTab = .home
   @State private var auth = TwitchAuthSession()
@@ -60,7 +61,7 @@ struct HomeView: View {
     }
     .task {
       auth.restore()
-      await follows.refresh(using: auth)
+      await refreshFollowedChannelsIfNeeded(force: true)
       requestFocusIfPossible(force: true)
     }
     .onChange(of: follows.channels) { _, _ in
@@ -68,8 +69,14 @@ struct HomeView: View {
     }
     .onChange(of: auth.isAuthenticated) { _, _ in
       Task {
-        await follows.refresh(using: auth)
+        await refreshFollowedChannelsIfNeeded(force: true)
         requestFocusIfPossible(force: true)
+      }
+    }
+    .onChange(of: selectedTopTab) { _, tab in
+      guard tab == .home else { return }
+      Task {
+        await refreshFollowedChannelsIfNeeded(force: false)
       }
     }
     .fullScreenCover(item: $selectedChannel) { channel in
@@ -78,7 +85,7 @@ struct HomeView: View {
     .fullScreenCover(isPresented: $showAccount) {
       SignInView(auth: auth) {
         Task {
-          await follows.refresh(using: auth)
+          await refreshFollowedChannelsIfNeeded(force: true)
           requestFocusIfPossible(force: true)
         }
       }
@@ -172,7 +179,7 @@ struct HomeView: View {
 
           Button("Refresh") {
             Task {
-              await follows.refresh(using: auth)
+              await refreshFollowedChannelsIfNeeded(force: true)
               requestFocusIfPossible(force: true)
             }
           }
@@ -296,6 +303,17 @@ struct HomeView: View {
         focusedChannelID = first.id
       }
     }
+  }
+
+  private func refreshFollowedChannelsIfNeeded(force: Bool) async {
+    guard force || shouldAutoRefreshFollowedChannels() else { return }
+    await follows.refresh(using: auth)
+  }
+
+  private func shouldAutoRefreshFollowedChannels() -> Bool {
+    guard !follows.isLoading else { return false }
+    guard let lastUpdatedAt = follows.lastUpdatedAt else { return true }
+    return Date().timeIntervalSince(lastUpdatedAt) >= autoRefreshStaleInterval
   }
 }
 

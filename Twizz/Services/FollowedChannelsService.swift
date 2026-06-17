@@ -47,21 +47,52 @@ final class FollowedChannelsService {
       return
     }
 
-    guard let accessToken = auth.accessToken,
-      let userID = auth.userID
+    guard let userID = auth.userID
     else {
       channels = await fetchDemoChannels()
       isUsingDemoData = true
       return
     }
 
+    let initialAccessToken: String
+    if let accessToken = auth.accessToken {
+      initialAccessToken = accessToken
+    } else {
+      do {
+        initialAccessToken = try await auth.refreshAccessTokenIfNeeded(force: true)
+      } catch {
+        channels = await fetchDemoChannels()
+        isUsingDemoData = true
+        let detail = describe(error)
+        errorMessage =
+          "Could not load followed channels (\(detail)). Showing trending channels instead."
+        return
+      }
+    }
+
     do {
       channels = try await fetchLiveFollowedChannels(
         clientID: clientID,
-        accessToken: accessToken,
+        accessToken: initialAccessToken,
         userID: userID
       )
       isUsingDemoData = false
+    } catch let error as TwitchHelixRequestError where error.status == 401 {
+      do {
+        let refreshedAccessToken = try await auth.refreshAccessTokenIfNeeded(force: true)
+        channels = try await fetchLiveFollowedChannels(
+          clientID: clientID,
+          accessToken: refreshedAccessToken,
+          userID: userID
+        )
+        isUsingDemoData = false
+      } catch {
+        channels = await fetchDemoChannels()
+        isUsingDemoData = true
+        let detail = describe(error)
+        errorMessage =
+          "Could not load followed channels (\(detail)). Showing trending channels instead."
+      }
     } catch {
       channels = await fetchDemoChannels()
       isUsingDemoData = true

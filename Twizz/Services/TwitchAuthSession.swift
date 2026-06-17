@@ -16,6 +16,7 @@ final class TwitchAuthSession {
     private(set) var userDisplayName: String?
     private(set) var profileImageURL: URL?
     private(set) var accessToken: String?
+    private(set) var refreshToken: String?
 
     private(set) var isAuthenticating = false
     private(set) var activationCode: String?
@@ -79,6 +80,7 @@ final class TwitchAuthSession {
 
     private enum StorageKey {
         static let accessToken = "twitch.auth.accessToken"
+        static let refreshToken = "twitch.auth.refreshToken"
         static let userID = "twitch.auth.userID"
         static let userLogin = "twitch.auth.userLogin"
         static let userDisplayName = "twitch.auth.userDisplayName"
@@ -94,6 +96,7 @@ final class TwitchAuthSession {
         }
 
         accessToken = userDefaults.string(forKey: StorageKey.accessToken)
+        refreshToken = userDefaults.string(forKey: StorageKey.refreshToken)
         userID = userDefaults.string(forKey: StorageKey.userID)
         userLogin = userDefaults.string(forKey: StorageKey.userLogin)
         userDisplayName = userDefaults.string(forKey: StorageKey.userDisplayName)
@@ -110,6 +113,7 @@ final class TwitchAuthSession {
         isAuthenticated = false
         isAuthenticating = false
         accessToken = nil
+        refreshToken = nil
         userID = nil
         userLogin = nil
         userDisplayName = nil
@@ -121,6 +125,7 @@ final class TwitchAuthSession {
         errorMessage = nil
 
         userDefaults.removeObject(forKey: StorageKey.accessToken)
+        userDefaults.removeObject(forKey: StorageKey.refreshToken)
         userDefaults.removeObject(forKey: StorageKey.userID)
         userDefaults.removeObject(forKey: StorageKey.userLogin)
         userDefaults.removeObject(forKey: StorageKey.userDisplayName)
@@ -129,6 +134,7 @@ final class TwitchAuthSession {
 
     private func clearStoredAuthState() {
         accessToken = nil
+        refreshToken = nil
         userID = nil
         userLogin = nil
         userDisplayName = nil
@@ -137,10 +143,47 @@ final class TwitchAuthSession {
         isAuthenticating = false
 
         userDefaults.removeObject(forKey: StorageKey.accessToken)
+        userDefaults.removeObject(forKey: StorageKey.refreshToken)
         userDefaults.removeObject(forKey: StorageKey.userID)
         userDefaults.removeObject(forKey: StorageKey.userLogin)
         userDefaults.removeObject(forKey: StorageKey.userDisplayName)
         userDefaults.removeObject(forKey: StorageKey.profileImageURL)
+    }
+
+    /// Refreshes the OAuth access token using the persisted refresh token.
+    /// If no refresh token exists, callers should prompt the user to sign in again.
+    func refreshAccessTokenIfNeeded(force: Bool = false) async throws -> String {
+        if !force, let accessToken {
+            return accessToken
+        }
+
+        guard let clientID else {
+            throw TwitchAuthRefreshError.missingClientID
+        }
+        guard let refreshToken else {
+            throw TwitchAuthRefreshError.missingRefreshToken
+        }
+
+        do {
+            let token = try await requestRefreshToken(clientID: clientID, refreshToken: refreshToken)
+            accessToken = token.accessToken
+            userDefaults.set(token.accessToken, forKey: StorageKey.accessToken)
+
+            if let nextRefreshToken = token.refreshToken,
+               !nextRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                self.refreshToken = nextRefreshToken
+                userDefaults.set(nextRefreshToken, forKey: StorageKey.refreshToken)
+            }
+
+            return token.accessToken
+        } catch let error as TwitchAuthHTTPError {
+            if isInvalidRefreshError(error) {
+                clearStoredAuthState()
+                errorMessage = "Session expired. Sign in again to reconnect Twitch."
+                throw TwitchAuthRefreshError.sessionExpired
+            }
+            throw error
+        }
     }
 
     func beginDeviceCodeSignIn() async {
@@ -193,7 +236,7 @@ final class TwitchAuthSession {
         while Date() < expiryDate && !Task.isCancelled {
             do {
                 let token = try await requestToken(clientID: clientID, deviceCode: deviceCode)
-                try await finishSignIn(accessToken: token.accessToken, clientID: clientID)
+                try await finishSignIn(token: token, clientID: clientID)
                 return
             } catch let error as OAuthPollingError {
                 switch error {
@@ -231,15 +274,16 @@ final class TwitchAuthSession {
         }
     }
 
-    private func finishSignIn(accessToken: String, clientID: String) async throws {
-        let identity = try await requestValidatedIdentity(accessToken: accessToken)
-        let profile = try? await requestUserProfile(accessToken: accessToken, clientID: clientID, userID: identity.userID)
+    private func finishSignIn(token: DeviceTokenResponse, clientID: String) async throws {
+        let identity = try await requestValidatedIdentity(accessToken: token.accessToken)
+        let profile = try? await requestUserProfile(accessToken: token.accessToken, clientID: clientID, userID: identity.userID)
 
         let resolvedLogin = profile?.login ?? identity.login
         let resolvedDisplayName = profile?.displayName ?? identity.login
         let resolvedImageURL = profile?.profileImageURL.flatMap(URL.init(string:))
 
-        self.accessToken = accessToken
+        self.accessToken = token.accessToken
+        self.refreshToken = token.refreshToken
         self.userID = identity.userID
         self.userLogin = resolvedLogin
         self.userDisplayName = resolvedDisplayName
@@ -249,7 +293,13 @@ final class TwitchAuthSession {
         self.statusMessage = "Signed in as \(resolvedDisplayName)."
         self.errorMessage = nil
 
-        userDefaults.set(accessToken, forKey: StorageKey.accessToken)
+        userDefaults.set(token.accessToken, forKey: StorageKey.accessToken)
+        if let refreshToken = token.refreshToken,
+           !refreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userDefaults.set(refreshToken, forKey: StorageKey.refreshToken)
+        } else {
+            userDefaults.removeObject(forKey: StorageKey.refreshToken)
+        }
         userDefaults.set(identity.userID, forKey: StorageKey.userID)
         userDefaults.set(resolvedLogin, forKey: StorageKey.userLogin)
         userDefaults.set(resolvedDisplayName, forKey: StorageKey.userDisplayName)
@@ -309,6 +359,24 @@ final class TwitchAuthSession {
         return try JSONDecoder().decode(DeviceTokenResponse.self, from: data)
     }
 
+    private func requestRefreshToken(clientID: String, refreshToken: String) async throws -> DeviceTokenResponse {
+        var req = URLRequest(url: URL(string: "https://id.twitch.tv/oauth2/token")!)
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let grantType = "refresh_token"
+        let body = "client_id=\(percentEncode(clientID))&grant_type=\(percentEncode(grantType))&refresh_token=\(percentEncode(refreshToken))"
+        req.httpBody = body.data(using: .utf8)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else {
+            throw makeHTTPError(context: "refreshing Twitch token", status: status, data: data)
+        }
+
+        return try JSONDecoder().decode(DeviceTokenResponse.self, from: data)
+    }
+
     private func requestValidatedIdentity(accessToken: String) async throws -> OAuthValidateResponse {
         var req = URLRequest(url: URL(string: "https://id.twitch.tv/oauth2/validate")!)
         req.httpMethod = "GET"
@@ -362,6 +430,12 @@ final class TwitchAuthSession {
         let payload = try? JSONDecoder().decode(TwitchAuthAPIErrorPayload.self, from: data)
         let message = payload?.message ?? payload?.error ?? String(data: data, encoding: .utf8)
         return TwitchAuthHTTPError(context: context, status: status, message: message)
+    }
+
+    private func isInvalidRefreshError(_ error: TwitchAuthHTTPError) -> Bool {
+        guard error.status == 400 || error.status == 401 else { return false }
+        guard let normalized = normalizedOAuthMessage(error.message) else { return false }
+        return normalized.contains("invalid_refresh_token") || normalized.contains("invalid_grant")
     }
 
     private func describe(_ error: Error) -> String {
@@ -529,9 +603,11 @@ private struct DeviceCodeResponse: Decodable {
 
 private struct DeviceTokenResponse: Decodable {
     let accessToken: String
+    let refreshToken: String?
 
     private enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
+        case refreshToken = "refresh_token"
     }
 }
 
@@ -581,6 +657,23 @@ private enum OAuthPollingError: Error {
     case slowDown
     case accessDenied
     case expiredToken
+}
+
+private enum TwitchAuthRefreshError: LocalizedError {
+    case missingClientID
+    case missingRefreshToken
+    case sessionExpired
+
+    var errorDescription: String? {
+        switch self {
+        case .missingClientID:
+            return "Missing Twitch client ID."
+        case .missingRefreshToken:
+            return "Session expired. Sign in again to reconnect Twitch."
+        case .sessionExpired:
+            return "Session expired. Sign in again to reconnect Twitch."
+        }
+    }
 }
 
 private struct UserProfileEnvelope: Decodable {
