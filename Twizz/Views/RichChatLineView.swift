@@ -39,24 +39,20 @@ struct RichChatLineView: View {
         message.source == .youtube
     }
 
-    private var sourceBadgeTitle: String {
-        "YT"
-    }
-
     private var sourceBadgeFill: Color {
         Color(twitchHex: "#FF0000") ?? .red
     }
 
-    private var sourceBadgeTextColor: Color {
-        .white
+    private var sourceBadgeWidth: CGFloat {
+        badgeSize * 1.42
     }
 
-    private var sourceBadgeFontSize: CGFloat {
-        switch textSize {
-        case .small: return 13
-        case .medium: return 15
-        case .large: return 16
-        }
+    private var sourceBadgeCornerRadius: CGFloat {
+        badgeSize * 0.28
+    }
+
+    private var sourceBadgePlayIconSize: CGFloat {
+        badgeSize * 0.44
     }
 
     private var nameFontSize: CGFloat {
@@ -85,7 +81,7 @@ struct RichChatLineView: View {
 
     private var rowSpacing: CGFloat {
         switch lineHeight {
-        case .tight: return 1
+        case .tight: return 0
         case .normal: return 2
         case .relaxed: return 6
         }
@@ -102,13 +98,9 @@ struct RichChatLineView: View {
     var body: some View {
         ChatFlowLayout(itemSpacing: 0, rowSpacing: rowSpacing) {
             if shouldShowSourceBadge {
-                Text(sourceBadgeTitle)
-                    .font(.system(size: sourceBadgeFontSize, weight: .bold, design: .rounded))
-                    .foregroundStyle(sourceBadgeTextColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(sourceBadgeFill, in: Capsule())
-                    .padding(.trailing, 6)
+                sourceBadgeView
+                    .padding(.top, 4)
+                    .padding(.trailing, 4)
             }
 
             ForEach(Array(resolvedBadgeURLs.enumerated()), id: \.offset) { _, badgeURL in
@@ -126,6 +118,20 @@ struct RichChatLineView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var sourceBadgeView: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: sourceBadgeCornerRadius, style: .continuous)
+                .fill(sourceBadgeFill)
+
+            Image(systemName: "play.fill")
+                .font(.system(size: sourceBadgePlayIconSize, weight: .bold))
+                .foregroundStyle(.white)
+                .offset(x: 0.8)
+        }
+        .frame(width: sourceBadgeWidth, height: badgeSize)
+        .accessibilityHidden(true)
     }
 
     private func badgeView(url: URL) -> some View {
