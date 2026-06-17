@@ -168,7 +168,7 @@ struct SignInView: View {
           dismiss()
         }
 
-        Button("Sign Out", role: .destructive) {
+        Button("Sign Out") {
           auth.signOut()
           onSignedIn()
           dismiss()
