@@ -58,7 +58,7 @@ struct SettingsView: View {
               isFocused: focusedTheme == theme
             )
           }
-          .buttonStyle(.plain)
+          .buttonStyle(PassthroughButtonStyle())
           .focused($focusedTheme, equals: theme)
         }
       }
@@ -154,6 +154,16 @@ struct SettingsView: View {
 }
 
 // MARK: - Theme option card
+
+/// Passthrough button style: keeps the Button focusable on tvOS while
+/// suppressing the platform button visuals. (`.plain` breaks focus on this
+/// tvOS version; focus visuals are driven manually via @FocusState.)
+private struct PassthroughButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .opacity(configuration.isPressed ? 0.92 : 1.0)
+  }
+}
 
 private struct ThemeOptionCard: View {
   let theme: AppTheme
