@@ -69,6 +69,7 @@ struct PlayerView: View {
   @State private var channelDisplayName: String = ""
   @State private var channelAvatarURL: URL?
   @State private var chatDraft: String = ""
+  @State private var chatInputActivationToken: Int = 0
   @State private var isSendingChat = false
   @State private var chatSendError: String?
   @State private var hideTask: Task<Void, Never>?
@@ -931,30 +932,35 @@ struct PlayerView: View {
 
       if auth.isAuthenticated {
         ZStack(alignment: .trailing) {
-          ChatInputField(
-            text: $chatDraft,
-            placeholder: "Send a message",
-            isFocused: focus == .chatInput
-          )
-          .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
-          .overlay(alignment: .leading) {
-            Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
-              .font(.callout)
-              .foregroundStyle(.white.opacity(chatDraft.isEmpty ? 0.45 : 1.0))
-              .lineLimit(1)
-              .padding(.leading, 18)
-              .padding(.trailing, hasChatDraft ? 118 : 24)
-              .allowsHitTesting(false)
-              .accessibilityHidden(true)
+          Button {
+            chatInputActivationToken &+= 1
+          } label: {
+            ChatInputField(
+              text: $chatDraft,
+              placeholder: "Send a message",
+              isFocused: focus == .chatInput,
+              activationToken: chatInputActivationToken
+            )
+            .allowsHitTesting(false)
+            .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
+            .overlay(alignment: .leading) {
+              Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
+                .font(.callout)
+                .foregroundStyle(.white.opacity(chatDraft.isEmpty ? 0.45 : 1.0))
+                .lineLimit(1)
+                .padding(.leading, 18)
+                .padding(.trailing, hasChatDraft ? 118 : 24)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            // Match the send button feel: the input grows when focused.
+            .frame(height: hasChatDraft ? chatInputFocusedHeight : (focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight))
+            .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+            // Reserve trailing text space only when the send button is visible.
+            .padding(.trailing, hasChatDraft ? 108 : 0)
+            .frame(maxWidth: .infinity)
           }
-          // Match the send button feel: the input grows when focused.
-          .frame(height: hasChatDraft ? chatInputFocusedHeight : (focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight))
-          .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
-          // Reserve trailing text space only when the send button is visible.
-          .padding(.trailing, hasChatDraft ? 108 : 0)
-          // Do not clip this field in SwiftUI: clipping trims the focused tvOS
-          // input platter and causes a broken-looking focus state.
-          .frame(maxWidth: .infinity)
+          .buttonStyle(.plain)
           .focusEffectDisabled()
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in
@@ -1004,32 +1010,34 @@ struct PlayerView: View {
         .frame(height: chatComposerRowHeight)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
-        ChatInputField(
-          text: .constant(""),
-          placeholder: "Sign in to send messages",
-          isFocused: focus == .chatInput,
-          allowsEditing: false,
-          onActivate: {
-            showSignInSheet = true
-            scheduleHide()
+        Button {
+          showSignInSheet = true
+          scheduleHide()
+        } label: {
+          ChatInputField(
+            text: .constant(""),
+            placeholder: "Sign in to send messages",
+            isFocused: focus == .chatInput,
+            allowsEditing: false
+          )
+          .allowsHitTesting(false)
+          .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
+          .overlay(alignment: .leading) {
+            Text("Sign in to send messages")
+              .font(.callout)
+              .foregroundStyle(.white.opacity(0.45))
+              .lineLimit(1)
+              .padding(.leading, 18)
+              .padding(.trailing, 24)
+              .allowsHitTesting(false)
+              .accessibilityHidden(true)
           }
-        )
-        .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
-        .overlay(alignment: .leading) {
-          Text("Sign in to send messages")
-            .font(.callout)
-            .foregroundStyle(.white.opacity(0.45))
-            .lineLimit(1)
-            .padding(.leading, 18)
-            .padding(.trailing, 24)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+          // Keep the signed-out prompt visually aligned with the active input.
+          .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
+          .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+          .frame(maxWidth: .infinity)
         }
-        // Keep the signed-out prompt visually aligned with the active input.
-        .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
-        .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
-        // Same focus guardrail as the authenticated field above.
-        .frame(maxWidth: .infinity)
+        .buttonStyle(.plain)
         .focusEffectDisabled()
         .focused($focus, equals: .chatInput)
         .onMoveCommand { direction in
@@ -1843,6 +1851,7 @@ private struct ChatInputField: UIViewRepresentable {
   @Binding var text: String
   let placeholder: String
   let isFocused: Bool
+  var activationToken: Int = 0
   var allowsEditing: Bool = true
   var onActivate: (() -> Void)? = nil
 
@@ -1868,7 +1877,7 @@ private struct ChatInputField: UIViewRepresentable {
       action: #selector(Coordinator.editingChanged(_:)),
       for: .editingChanged
     )
-    field.alpha = 1
+    field.alpha = 0.001
     return field
   }
 
@@ -1880,7 +1889,20 @@ private struct ChatInputField: UIViewRepresentable {
     context.coordinator.allowsEditing = allowsEditing
     context.coordinator.onActivate = onActivate
 
-    uiView.alpha = 1
+    if context.coordinator.lastActivationToken != activationToken {
+      context.coordinator.lastActivationToken = activationToken
+      if allowsEditing {
+        uiView.becomeFirstResponder()
+      } else {
+        onActivate?()
+      }
+    }
+
+    if !isFocused, uiView.isFirstResponder {
+      uiView.resignFirstResponder()
+    }
+
+    uiView.alpha = 0.001
     uiView.backgroundColor = .clear
     uiView.textColor = .clear
     uiView.tintColor = .clear
@@ -1891,18 +1913,30 @@ private struct ChatInputField: UIViewRepresentable {
   }
 
   func makeCoordinator() -> Coordinator {
-    Coordinator(text: $text, allowsEditing: allowsEditing, onActivate: onActivate)
+    Coordinator(
+      text: $text,
+      allowsEditing: allowsEditing,
+      onActivate: onActivate,
+      lastActivationToken: activationToken
+    )
   }
 
   final class Coordinator: NSObject, UITextFieldDelegate {
     private let text: Binding<String>
     var allowsEditing: Bool
     var onActivate: (() -> Void)?
+    var lastActivationToken: Int
 
-    init(text: Binding<String>, allowsEditing: Bool, onActivate: (() -> Void)?) {
+    init(
+      text: Binding<String>,
+      allowsEditing: Bool,
+      onActivate: (() -> Void)?,
+      lastActivationToken: Int
+    ) {
       self.text = text
       self.allowsEditing = allowsEditing
       self.onActivate = onActivate
+      self.lastActivationToken = lastActivationToken
     }
 
     func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
