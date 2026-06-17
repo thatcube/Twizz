@@ -6,9 +6,11 @@ struct SettingsView: View {
   let auth: TwitchAuthSession
   var onRequestSignIn: () -> Void = {}
   var onAccountChanged: () -> Void = {}
+  var onRepublishTopShelf: () -> Void = {}
 
   @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
+  @State private var topShelfStatus = TopShelfStore.diagnosticsSummary()
   @FocusState private var focusedTheme: AppTheme?
   @FocusState private var focusedCardSize: StreamCardSize?
 
@@ -31,6 +33,7 @@ struct SettingsView: View {
           appearanceSection
           streamCardSection
           accountSection
+          topShelfSection
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.horizontal, AppLayout.horizontalPadding)
@@ -189,9 +192,57 @@ struct SettingsView: View {
       }
     }
   }
-}
 
-// MARK: - Theme option card
+  // MARK: - Top Shelf diagnostics
+
+  private var topShelfSection: some View {
+    VStack(alignment: .leading, spacing: 24) {
+      VStack(alignment: .leading, spacing: 6) {
+        Text("Top Shelf")
+          .font(.system(size: 32, weight: .bold))
+          .foregroundStyle(.secondary)
+
+        Text("Diagnostics for the stream cards shown above the app on the Home screen.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      }
+
+      HStack(spacing: 24) {
+        Image(systemName: "rectangle.topthird.inset.filled")
+          .font(.system(size: 44))
+          .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
+
+        VStack(alignment: .leading, spacing: 6) {
+          Text("Snapshot status")
+            .font(.title3.weight(.semibold))
+          Text(topShelfStatus)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
+
+        Spacer(minLength: 24)
+
+        Button("Republish") {
+          onRepublishTopShelf()
+          topShelfStatus = TopShelfStore.diagnosticsSummary()
+        }
+        .font(.headline)
+      }
+      .padding(28)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(
+        RoundedRectangle(cornerRadius: 24)
+          .fill(Color.primary.opacity(0.07))
+      )
+      .focusSection()
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .onAppear {
+      onRepublishTopShelf()
+      topShelfStatus = TopShelfStore.diagnosticsSummary()
+    }
+  }
+}
 
 private struct ThemeOptionCard: View {
   let theme: AppTheme

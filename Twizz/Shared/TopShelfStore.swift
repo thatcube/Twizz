@@ -52,17 +52,42 @@ enum TopShelfStore {
         containerURL?.appendingPathComponent(TopShelf.snapshotFileName)
     }
 
-    /// Persists the snapshot. Writes atomically so the extension never reads a
-    /// half-written file. Silently no-ops if the App Group is unavailable.
+    /// Records the outcome of the most recent `save` so the in-app diagnostics
+    /// can surface why a write failed instead of silently swallowing it.
+    private(set) nonisolated(unsafe) static var lastSaveOutcome: String?
+
+    /// Persists the snapshot into the shared App Group container.
+    ///
+    /// The container directory is created on demand first: the system hands back
+    /// a valid container URL even before the directory itself exists on disk, so
+    /// a plain atomic write can fail with a "no permission" / "no such file"
+    /// error. Creating the directory (and falling back to a non-atomic write)
+    /// makes the first publish succeed.
     static func save(_ snapshot: TopShelfSnapshot) {
-        guard let url = snapshotURL else { return }
+        guard let container = containerURL, let url = snapshotURL else {
+            lastSaveOutcome = "save skipped: no container URL"
+            return
+        }
         do {
+            try FileManager.default.createDirectory(
+                at: container,
+                withIntermediateDirectories: true
+            )
+
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(snapshot)
-            try data.write(to: url, options: .atomic)
+
+            do {
+                try data.write(to: url, options: .atomic)
+            } catch {
+                // Atomic writes stage a temp file + rename, which can be denied
+                // in some sandboxed container states; retry with a direct write.
+                try data.write(to: url)
+            }
+            lastSaveOutcome = "saved \(data.count) bytes OK"
         } catch {
-            // Non-fatal: the Top Shelf simply shows nothing/stale content.
+            lastSaveOutcome = "save failed: \(error.localizedDescription)"
         }
     }
 
@@ -75,5 +100,40 @@ enum TopShelfStore {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(TopShelfSnapshot.self, from: data)
+    }
+
+    /// Whether the shared App Group container is reachable. If this is `false`
+    /// the entitlement/provisioning for the App Group is not active at runtime
+    /// and neither the app nor the extension can exchange the snapshot.
+    static var isContainerAvailable: Bool {
+        containerURL != nil
+    }
+
+    /// Whether a snapshot file has actually been written to the container yet.
+    static var snapshotFileExists: Bool {
+        guard let url = snapshotURL else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    /// Human-readable one-line summary of the current Top Shelf state, used by
+    /// the in-app diagnostics row to pinpoint where publishing breaks.
+    static func diagnosticsSummary() -> String {
+        guard isContainerAvailable else {
+            return "App Group container unavailable (entitlement not active)."
+        }
+        guard snapshotFileExists else {
+            let outcome = lastSaveOutcome ?? "save never attempted"
+            return "Container OK, but no snapshot file. Last save: \(outcome)."
+        }
+        guard let snapshot = load() else {
+            return "Snapshot file exists but could not be decoded."
+        }
+        let itemCount = snapshot.sections.reduce(0) { $0 + $1.items.count }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .medium
+        let when = formatter.string(from: snapshot.generatedAt)
+        let outcome = lastSaveOutcome.map { " [\($0)]" } ?? ""
+        return "\(snapshot.sections.count) section(s), \(itemCount) item(s) — written \(when).\(outcome)"
     }
 }
