@@ -1,4 +1,5 @@
 import Foundation
+import TVServices
 
 /// Bridges the app's live channel data into the shared Top Shelf snapshot.
 ///
@@ -51,11 +52,23 @@ enum TopShelfPublisher {
         // If nothing live is available, clear the snapshot so the Top Shelf
         // falls back to the app's default banner instead of stale content.
         guard !sections.isEmpty else {
-            TopShelfStore.save(TopShelfSnapshot(sections: []))
+            persist(TopShelfSnapshot(sections: []))
             return
         }
 
-        TopShelfStore.save(TopShelfSnapshot(sections: sections))
+        persist(TopShelfSnapshot(sections: sections))
+    }
+
+    /// Saves the snapshot and tells tvOS its Top Shelf content changed.
+    ///
+    /// Writing the snapshot alone is not enough: the system caches whatever the
+    /// extension returned the last time it queried it (often empty, captured at
+    /// install time before the app had published anything). Without this
+    /// notification tvOS never re-invokes the extension, so the shelf stays
+    /// stale. This call forces a reload from the freshly written snapshot.
+    private static func persist(_ snapshot: TopShelfSnapshot) {
+        TopShelfStore.save(snapshot)
+        TVTopShelfContentProvider.topShelfContentDidChange()
     }
 
     private static func makeItems(from channels: [FollowedChannel]) -> [TopShelfSnapshot.Item] {

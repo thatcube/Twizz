@@ -3,8 +3,8 @@ import SwiftUI
 import UIKit
 
 /// Hosts an embedded `AVPlayerViewController` with native controls disabled.
-/// This keeps custom Twizz UI while preserving Apple media rendering paths
-/// (including subtitle/caption rendering) better than raw AVPlayerLayer.
+/// This keeps custom Twizz UI while preserving Apple's media rendering paths
+/// better than a raw `AVPlayerLayer`.
 struct VideoSurface: UIViewControllerRepresentable {
   let player: AVPlayer
 
@@ -64,17 +64,15 @@ struct PlayerView: View {
   @State private var playback: StreamPlayback?
   @State private var errorMessage: String?
   @State private var isLoading = true
-  @State private var showChat = true
+  @State private var showChat: Bool = UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
   @State private var chatReplayStartMessageID: ChatMessage.ID?
   @State private var showQualityPicker = false
-  @State private var showCaptionsPicker = false
   @State private var showSignInSheet = false
   @State private var showChatSettings = false
   @State private var showControls = false
-  @State private var captionsOn = UIAccessibility.isClosedCaptioningEnabled
-  @State private var captionGroup: AVMediaSelectionGroup?
-  @State private var captionOptions: [AVMediaSelectionOption] = []
-  @State private var captionSelectionKey: String?
+  @State private var isFollowing = false
+  @State private var followInProgress = false
+  @State private var followError: String?
   @State private var streamTitle: String = ""
   @State private var channelDisplayName: String = ""
   @State private var channelAvatarURL: URL?
@@ -172,11 +170,10 @@ struct PlayerView: View {
 
   @FocusState private var focus: Focusable?
   private enum Focusable: Hashable {
-    case video, streamInfo, quality, captions, chatToggle, chatInput, errorBack
+    case video, streamInfo, quality, follow, chatToggle, chatInput, errorBack
     case chatSend
     case chatSettingsButton
     case qualityOption(Int)
-    case captionsOption(Int)
     case chatTextSizeOption(Int)
     case chatLineHeightOption(Int)
     case chatLineSpacingOption(Int)
@@ -272,10 +269,6 @@ struct PlayerView: View {
         qualityPicker
       }
 
-      if showCaptionsPicker {
-        captionsPicker
-      }
-
       if let raid = chat.pendingRaid {
         raidBanner(raid)
           .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -299,8 +292,10 @@ struct PlayerView: View {
       applyExperimentalYouTubeSettings()
       chat.connect(to: activeChannel)
       async let metadataTask: Void = refreshChannelMetadata()
+      async let followStateTask: Void = refreshFollowState()
       await load()
       _ = await metadataTask
+      _ = await followStateTask
       focus = .video
     }
     .onAppear {
@@ -321,10 +316,6 @@ struct PlayerView: View {
         showQualityPicker = false
         focus = .quality
         scheduleHide()
-      } else if showCaptionsPicker {
-        showCaptionsPicker = false
-        focus = .captions
-        scheduleHide()
       } else if showChatSettings {
         showChatSettings = false
         focus = .chatSettingsButton
@@ -335,7 +326,7 @@ struct PlayerView: View {
       }
     }
     .onMoveCommand { direction in
-      guard !showQualityPicker, !showCaptionsPicker else { return }
+      guard !showQualityPicker else { return }
 
       if !showControls {
         // Directional movement should immediately surface controls and
@@ -362,7 +353,7 @@ struct PlayerView: View {
 
       // Keep control navigation deterministic: if tvOS drops focus to nil
       // while controls are visible, immediately restore last valid control.
-      guard showControls, !showQualityPicker, !showCaptionsPicker else {
+      guard showControls, !showQualityPicker else {
         return
       }
 
@@ -395,13 +386,26 @@ struct PlayerView: View {
       VideoSurface(player: player)
         .ignoresSafeArea()
 
-      if showControls, !showQualityPicker, !showCaptionsPicker, !isLoading,
+      if showControls, !showQualityPicker, !isLoading,
         errorMessage == nil
       {
         VStack {
           HStack {
             latencyBadge
             Spacer()
+            if let followError {
+              Text(followError)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                .overlay(
+                  Capsule(style: .continuous)
+                    .strokeBorder(.orange.opacity(0.6), lineWidth: 1)
+                )
+            }
           }
           if showLatencyDiagnostics {
             HStack {
@@ -508,7 +512,6 @@ struct PlayerView: View {
       HStack(spacing: 14) {
         Button {
           showQualityPicker = true
-          showCaptionsPicker = false
           hideTask?.cancel()
         } label: {
           Label("Quality", systemImage: "gauge.with.dots.needle.67percent")
@@ -520,23 +523,23 @@ struct PlayerView: View {
           case .left:
             focus = .streamInfo
           case .right:
-            focus = .captions
+            focus = .follow
           default:
             break
           }
         }
 
         Button {
-          showQualityPicker = false
-          prepareCaptionsPicker()
+          toggleFollow()
         } label: {
           Label(
-            captionsOn ? "Captions On" : "Captions Off",
-            systemImage: captionsOn ? "captions.bubble.fill" : "captions.bubble"
+            isFollowing ? "Following" : "Follow",
+            systemImage: isFollowing ? "heart.fill" : "heart"
           )
           .labelStyle(.iconOnly)
         }
-        .focused($focus, equals: .captions)
+        .disabled(followInProgress)
+        .focused($focus, equals: .follow)
         .onMoveCommand { direction in
           switch direction {
           case .left:
@@ -565,7 +568,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            focus = .captions
+            focus = .follow
           case .right:
             if showChat {
               focus = .chatInput
@@ -811,7 +814,6 @@ struct PlayerView: View {
       guard !Task.isCancelled else { return }
       await MainActor.run {
         guard !showQualityPicker else { return }
-        guard !showCaptionsPicker else { return }
         hideControls()
       }
     }
@@ -829,7 +831,7 @@ struct PlayerView: View {
 
   private func isControlFocus(_ focus: Focusable) -> Bool {
     switch focus {
-    case .streamInfo, .quality, .captions, .chatToggle, .chatInput:
+    case .streamInfo, .quality, .follow, .chatToggle, .chatInput:
       return true
     default:
       return false
@@ -1440,6 +1442,8 @@ struct PlayerView: View {
     raidBannerDismissTask?.cancel()
     chat.pendingRaid = nil
     activeChannel = login
+    isFollowing = false
+    followError = nil
     stopPlaybackWatchdog()
     stopLatencyMonitor()
     player.pause()
@@ -1455,8 +1459,10 @@ struct PlayerView: View {
     chat.connect(to: login)
     Task {
       async let metadataTask: Void = refreshChannelMetadata()
+      async let followStateTask: Void = refreshFollowState()
       await load(reason: "raid follow", resetMetadata: false)
       _ = await metadataTask
+      _ = await followStateTask
       focus = .video
     }
   }
@@ -1501,71 +1507,6 @@ struct PlayerView: View {
     }
   }
 
-  private var captionsPicker: some View {
-    ZStack {
-      Color.black.opacity(0.5).ignoresSafeArea()
-
-      VStack(alignment: .leading, spacing: 8) {
-        Text("Captions")
-          .font(.title2).bold()
-          .padding(.bottom, 8)
-
-        Button {
-          selectCaptionOption(at: 0)
-        } label: {
-          HStack {
-            Text("Off")
-            Spacer()
-            if !captionsOn {
-              Image(systemName: "checkmark")
-            }
-          }
-          .frame(width: 460)
-        }
-        .buttonStyle(.bordered)
-        .focused($focus, equals: .captionsOption(0))
-
-        if captionOptions.isEmpty {
-          Text("No caption tracks available right now.")
-            .foregroundStyle(.secondary)
-            .padding(.top, 8)
-        } else {
-          ForEach(Array(captionOptions.enumerated()), id: \.offset) { index, option in
-            Button {
-              selectCaptionOption(at: index + 1)
-            } label: {
-              HStack {
-                Text(option.displayName)
-                Spacer()
-                if captionsOn, captionSelectionKey == captionKey(option) {
-                  Image(systemName: "checkmark")
-                }
-              }
-              .frame(width: 460)
-            }
-            .buttonStyle(.bordered)
-            .focused($focus, equals: .captionsOption(index + 1))
-          }
-        }
-      }
-      .padding(40)
-      .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 28))
-      .focusSection()
-    }
-    .onAppear {
-      let selectedIndex: Int
-      if captionsOn,
-        let selected = captionSelectionKey,
-        let optionIndex = captionOptions.firstIndex(where: { captionKey($0) == selected })
-      {
-        selectedIndex = optionIndex + 1
-      } else {
-        selectedIndex = 0
-      }
-      focus = .captionsOption(selectedIndex)
-    }
-  }
-
   private var qualityOptions: [String] {
     ["Auto"] + (playback?.qualities.map(\.name) ?? [])
   }
@@ -1586,38 +1527,6 @@ struct PlayerView: View {
     showQualityPicker = false
     applyQualityPreference(option)
     focus = .quality
-    scheduleHide()
-  }
-
-  private func prepareCaptionsPicker() {
-    hideTask?.cancel()
-
-    Task {
-      let item = player.currentItem
-      let group = try? await item?.asset.loadMediaSelectionGroup(for: .legible)
-      await MainActor.run {
-        captionGroup = group
-        captionOptions = group?.options ?? []
-        showCaptionsPicker = true
-      }
-    }
-  }
-
-  private func selectCaptionOption(at index: Int) {
-    guard index == 0 || captionOptions.indices.contains(index - 1) else { return }
-
-    if index == 0 {
-      captionsOn = false
-      captionSelectionKey = nil
-    } else {
-      let option = captionOptions[index - 1]
-      captionsOn = true
-      captionSelectionKey = captionKey(option)
-    }
-
-    applyCaptions()
-    showCaptionsPicker = false
-    focus = .captions
     scheduleHide()
   }
 
@@ -1945,7 +1854,7 @@ struct PlayerView: View {
   }
 
   private func samplePlaybackHealth() {
-    guard !isLoading, errorMessage == nil, !showQualityPicker, !showCaptionsPicker
+    guard !isLoading, errorMessage == nil, !showQualityPicker
     else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
@@ -2219,55 +2128,62 @@ struct PlayerView: View {
     streamTitle = metadata.title
   }
 
-  /// Applies the current captions preference to the active item.
-  private func applyCaptions() {
-    if let item = player.currentItem { applyCaptions(to: item, retries: 12) }
+  // MARK: - Follow / unfollow
+
+  private func refreshFollowState() async {
+    guard auth.isAuthenticated else {
+      isFollowing = false
+      return
+    }
+    let target = activeChannel
+    guard let following = try? await auth.isFollowing(channelLogin: target) else {
+      return
+    }
+    // Ignore a stale result if the user raided to another channel meanwhile.
+    guard target == activeChannel else { return }
+    isFollowing = following
   }
 
-  private func captionKey(_ option: AVMediaSelectionOption) -> String {
-    let language = option.extendedLanguageTag ?? option.locale?.identifier ?? ""
-    return "\(language)|\(option.displayName)"
-  }
+  private func toggleFollow() {
+    guard auth.isAuthenticated else {
+      showSignInSheet = true
+      return
+    }
+    guard !followInProgress else { return }
 
-  /// Turns in-band closed captions on or off for a given item. Twitch streams
-  /// carry CEA-608 captions in the legible selection group.
-  ///
-  /// The legible group can appear slightly after playback starts, so we retry
-  /// for a short window instead of failing one-shot.
-  private func applyCaptions(to item: AVPlayerItem, retries: Int) {
-    let wantCaptions = captionsOn
-    let preferredCaption = captionSelectionKey
+    let target = activeChannel
+    let wantFollow = !isFollowing
+    followInProgress = true
+    followError = nil
+    // Optimistically reflect the new state; revert if the request fails.
+    isFollowing = wantFollow
+    scheduleHide()
+
     Task {
-      for attempt in 0...retries {
-        if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) {
-          await MainActor.run {
-            captionGroup = group
-            captionOptions = group.options
-            guard !group.options.isEmpty else { return }
-
-            if wantCaptions {
-              let preferred =
-                group.options.first {
-                  captionKey($0) == preferredCaption
-                } ?? group.options.first {
-                  !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
-                } ?? group.options.first
-              if let option = preferred {
-                captionSelectionKey = captionKey(option)
-                item.select(option, in: group)
-              }
-            } else {
-              captionSelectionKey = nil
-              item.select(nil, in: group)
-            }
-          }
-          return
+      do {
+        if wantFollow {
+          try await auth.followChannel(login: target)
+        } else {
+          try await auth.unfollowChannel(login: target)
         }
-
-        if attempt < retries {
-          try? await Task.sleep(for: .milliseconds(350))
+      } catch {
+        await MainActor.run {
+          if target == activeChannel {
+            isFollowing = !wantFollow
+          }
+          followError =
+            (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+          scheduleFollowErrorDismiss()
         }
       }
+      await MainActor.run { followInProgress = false }
+    }
+  }
+
+  private func scheduleFollowErrorDismiss() {
+    Task {
+      try? await Task.sleep(for: .seconds(5))
+      await MainActor.run { followError = nil }
     }
   }
 

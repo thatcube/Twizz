@@ -1,6 +1,18 @@
-# Twizz
+<p align="center">
+  <img src="Branding/twizz_logo.svg" alt="Twizz logo" width="128" />
+</p>
 
-A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
+<h1 align="center">Twizz</h1>
+
+<p align="center">
+  A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://www.apple.com/apple-tv-4k/"><img src="https://img.shields.io/badge/Platform-tvOS-black.svg?logo=apple" alt="Platform: tvOS" /></a>
+  <a href="https://github.com/sponsors/thatcube"><img src="https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white" alt="Donate" /></a>
+</p>
 
 ## Features
 
@@ -102,9 +114,23 @@ Apple TV has no official Twitch playback SDK. Twizz resolves playback via Twitch
 
 This project is non-commercial and ad-respecting.
 
+## Not Supported: Auto-Redeeming Channel Points
+
+Twizz won't auto-claim channel points (the way the 7TV/FFZ browser extensions do). Twitch's official login that Twizz uses isn't accepted by the private API that claims points — that API only trusts a real twitch.tv web-session login. Supporting it would mean adding a second login where you type your Twitch password into the app and storing a full-account session token, plus fighting Twitch's anti-bot checks. It's also against Twitch's Terms of Service. Not worth the security risk and fragility, so we're not doing it.
+
 ## Roadmap
 
 See [Twizz-plan.md](Twizz-plan.md) for detailed phased planning.
+
+## Donate
+
+Twizz is free and open source, and it always will be. There's no paywall, no ads, and no obligation to give anything.
+
+If the app has been useful to you and you'd like to chip in toward its upkeep — things like the Apple Developer Program fee and time spent maintaining it — donations are welcome and genuinely appreciated. Anything is plenty, and not donating is completely fine too.
+
+[![Donate](https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/thatcube)
+
+**[Donate via GitHub Sponsors](https://github.com/sponsors/thatcube)** — one-time or recurring, whatever suits you.
 
 ## License
 
