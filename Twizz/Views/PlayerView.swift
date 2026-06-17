@@ -45,13 +45,14 @@ struct PlayerView: View {
     .balanced.rawValue
   @AppStorage("chatWidthMode") private var chatWidthModeRaw = ChatWidthMode.medium.rawValue
   @AppStorage("chatLayoutMode") private var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
+  @AppStorage("experimentalYouTubeMergeEnabled") private var experimentalYouTubeMergeEnabled = false
+  @AppStorage("experimentalYouTubeMergeChannelOrURL") private var experimentalYouTubeMergeChannelOrURL = ""
 
   @State private var chat = ChatService()
   @State private var player = AVPlayer()
   @State private var playback: StreamPlayback?
   @State private var errorMessage: String?
   @State private var isLoading = true
-  @State private var loadingRotation: Double = 0
   @State private var showChat = true
   @State private var showQualityPicker = false
   @State private var showCaptionsPicker = false
@@ -124,6 +125,8 @@ struct PlayerView: View {
     case chatDensityOption(Int)
     case chatWidthOption(Int)
     case chatLayoutOption(Int)
+    case youtubeMergeToggle
+    case youtubeMergeURL
   }
 
   private var chatReadabilityMode: ChatReadabilityMode {
@@ -200,28 +203,11 @@ struct PlayerView: View {
     .task {
       configurePlayerForLive()
       applyChatReadabilitySettings()
+      applyExperimentalYouTubeSettings()
       chat.connect(to: channel)
       async let metadataTask: Void = refreshChannelMetadata()
-      
-      // Start loading animation
-      let animationTask = Task {
-        var rotation: Double = 0
-        while !Task.isCancelled {
-          rotation += 6  // 60 rotations per second at 100ms intervals
-          if rotation >= 360 {
-            rotation -= 360
-          }
-          withAnimation(.linear(duration: 0.016)) {
-            loadingRotation = rotation
-          }
-          try? await Task.sleep(nanoseconds: 16_000_000)  // ~60fps
-        }
-      }
-      
       await load()
       _ = await metadataTask
-      animationTask.cancel()
-      loadingRotation = 0
       focus = .video
     }
     .onAppear {
@@ -281,6 +267,12 @@ struct PlayerView: View {
     .onChange(of: chatReadabilityModeRaw) { _, _ in
       applyChatReadabilitySettings()
     }
+    .onChange(of: experimentalYouTubeMergeEnabled) { _, _ in
+      applyExperimentalYouTubeSettings()
+    }
+    .onChange(of: experimentalYouTubeMergeChannelOrURL) { _, _ in
+      applyExperimentalYouTubeSettings()
+    }
     .fullScreenCover(isPresented: $showSignInSheet) {
       SignInView(auth: auth)
     }
@@ -320,42 +312,8 @@ struct PlayerView: View {
       }
 
       if isLoading {
-        VStack(spacing: 40) {
-          ZStack {
-            // Multi-ring spinner (Apple Maps style)
-            // Outer ring
-            Circle()
-              .stroke(.white.opacity(0.3), lineWidth: 3)
-              .frame(width: 100, height: 100)
-            
-            // Middle ring
-            Circle()
-              .stroke(.white.opacity(0.5), lineWidth: 3)
-              .frame(width: 70, height: 70)
-              .rotationEffect(.degrees(loadingRotation))
-            
-            // Inner ring
-            Circle()
-              .stroke(.white.opacity(0.8), lineWidth: 3)
-              .frame(width: 40, height: 40)
-              .rotationEffect(.degrees(-loadingRotation * 1.5))
-            
-            // Center dot
-            Circle()
-              .fill(.white)
-              .frame(width: 8, height: 8)
-          }
-
-          VStack(spacing: 8) {
-            Text("Loading \(channel)")
-              .font(.title2.weight(.semibold))
-              .foregroundStyle(.white)
-            Text("Getting ready…")
-              .font(.caption)
-              .foregroundStyle(.white.opacity(0.6))
-          }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ProgressView("Loading \(channel)…")
+          .font(.title3)
       }
 
       if let errorMessage {
@@ -711,6 +669,53 @@ struct PlayerView: View {
         }
         .focusSection()
       }
+
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Experimental")
+          .font(.headline)
+          .foregroundStyle(.white)
+
+        Text("Merge YouTube live chat (no sign-in). This may break if YouTube changes internals.")
+          .font(.caption)
+          .foregroundStyle(.white.opacity(0.72))
+          .fixedSize(horizontal: false, vertical: true)
+
+        settingsPill(
+          title: experimentalYouTubeMergeEnabled ? "YouTube Merge On" : "YouTube Merge Off",
+          isSelected: experimentalYouTubeMergeEnabled,
+          focusTag: .youtubeMergeToggle
+        ) {
+          experimentalYouTubeMergeEnabled.toggle()
+        }
+
+        ChatInputField(
+          text: $experimentalYouTubeMergeChannelOrURL,
+          placeholder: "YouTube live URL or video ID",
+          isFocused: focus == .youtubeMergeURL
+        )
+        .frame(height: 52)
+        .frame(width: 440)
+        .padding(.horizontal, 14)
+        .background(.white.opacity(focus == .youtubeMergeURL ? 0.88 : 0.12), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+          RoundedRectangle(cornerRadius: 12)
+            .stroke(.white.opacity(0.18), lineWidth: 1)
+        )
+        .focused($focus, equals: .youtubeMergeURL)
+        .onMoveCommand { direction in
+          if direction == .left {
+            focus = .chatSettingsButton
+          }
+        }
+
+        if let status = chat.youtubeStatusMessage, experimentalYouTubeMergeEnabled {
+          Text(status)
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.78))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      .focusSection()
     }
     .padding(28)
     .fixedSize(horizontal: true, vertical: true)
@@ -1035,6 +1040,13 @@ struct PlayerView: View {
       mode: chatReadabilityMode,
       smartFilteringEnabled: false,
       collapseRepeatsEnabled: false
+    )
+  }
+
+  private func applyExperimentalYouTubeSettings() {
+    chat.configureExperimentalYouTubeMerge(
+      enabled: experimentalYouTubeMergeEnabled,
+      channelOrURL: experimentalYouTubeMergeChannelOrURL
     )
   }
 
@@ -1642,7 +1654,8 @@ private struct ChatInputField: UIViewRepresentable {
     // In the focused tvOS state, the system draws a bright field background.
     // Match text and placeholder colors so content remains readable.
     let foreground: UIColor = isFocused ? .black : .white
-    let placeholderColor = isFocused
+    let placeholderColor =
+      isFocused
       ? UIColor.black
       : UIColor.white.withAlphaComponent(0.45)
 

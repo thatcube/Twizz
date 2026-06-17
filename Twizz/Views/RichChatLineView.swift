@@ -21,6 +21,35 @@ struct RichChatLineView: View {
         message.badgeKeys.compactMap { badgeURLs[$0] }
     }
 
+    private var sourceBadgeTitle: String {
+        switch message.source {
+        case .twitch: return "TW"
+        case .youtube: return "YT"
+        }
+    }
+
+    private var sourceBadgeFill: Color {
+        switch message.source {
+        case .twitch: return Color(twitchHex: "#9146FF") ?? .purple
+        case .youtube: return Color(twitchHex: "#FF0000") ?? .red
+        }
+    }
+
+    private var sourceBadgeTextColor: Color {
+        switch message.source {
+        case .twitch: return .white
+        case .youtube: return .white
+        }
+    }
+
+    private var sourceBadgeFontSize: CGFloat {
+        switch readabilityMode {
+        case .comfortable: return 16
+        case .balanced: return 15
+        case .compact: return 13
+        }
+    }
+
     private var nameFontSize: CGFloat {
         switch readabilityMode {
         case .comfortable: return 28
@@ -63,6 +92,14 @@ struct RichChatLineView: View {
 
     var body: some View {
         ChatFlowLayout(itemSpacing: 0, rowSpacing: rowSpacing) {
+            Text(sourceBadgeTitle)
+                .font(.system(size: sourceBadgeFontSize, weight: .bold, design: .rounded))
+                .foregroundStyle(sourceBadgeTextColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(sourceBadgeFill, in: Capsule())
+                .padding(.trailing, 6)
+
             ForEach(Array(resolvedBadgeURLs.enumerated()), id: \.offset) { _, badgeURL in
                 badgeView(url: badgeURL)
                     .padding(.top, 4)

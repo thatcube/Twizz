@@ -1,6 +1,12 @@
 import Foundation
 
-/// A single chat line parsed from Twitch IRC.
+/// Which platform a chat message originated from.
+enum ChatSource: String, Codable {
+    case twitch
+    case youtube
+}
+
+/// A single chat line parsed from Twitch IRC or YouTube Live Chat.
 struct ChatMessage: Identifiable {
     let id = UUID()
     let username: String
@@ -14,6 +20,10 @@ struct ChatMessage: Identifiable {
     let twitchEmoteURLs: [String: URL]
     /// True for `/me` action messages (rendered in the user's color).
     let isAction: Bool
+    /// The platform this message came from (Twitch or YouTube).
+    let source: ChatSource
+    /// Timestamp when the message was received (for chronological merging).
+    let timestamp: Date
 }
 
 extension ChatMessage {
@@ -72,6 +82,19 @@ extension ChatMessage {
         self.text = message
         self.twitchEmoteURLs = twitchEmoteURLs
         self.isAction = action
+        self.source = .twitch
+        self.timestamp = Date()
+    }
+
+    init(youtubeAuthor: String, text: String, timestamp: Date = Date()) {
+        self.username = youtubeAuthor
+        self.colorHex = nil
+        self.badgeKeys = []
+        self.text = text
+        self.twitchEmoteURLs = [:]
+        self.isAction = false
+        self.source = .youtube
+        self.timestamp = timestamp
     }
 
     private static func parseBadgeKeys(_ tag: String?) -> [String] {
