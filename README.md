@@ -1,10 +1,18 @@
-# Twizz
+<p align="center">
+  <img src="Branding/twizz_logo.svg" alt="Twizz logo" width="128" />
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform: tvOS](https://img.shields.io/badge/Platform-tvOS-black.svg?logo=apple)](https://www.apple.com/apple-tv-4k/)
-[![Donate](https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/thatcube)
+<h1 align="center">Twizz</h1>
 
-A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
+<p align="center">
+  A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://www.apple.com/apple-tv-4k/"><img src="https://img.shields.io/badge/Platform-tvOS-black.svg?logo=apple" alt="Platform: tvOS" /></a>
+  <a href="https://github.com/sponsors/thatcube"><img src="https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white" alt="Donate" /></a>
+</p>
 
 ## Features
 
