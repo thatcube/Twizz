@@ -39,6 +39,9 @@ struct PlayerView: View {
   let channel: String
   var auth: TwitchAuthSession
 
+  /// The currently-active channel, which can change if the user follows a raid.
+  @State private var activeChannel: String = ""
+
   @Environment(\.dismiss) private var dismiss
   @AppStorage("preferredQuality") private var preferredQuality = "Auto"
   @AppStorage("chatTextSize") private var chatTextSizeRaw = ChatTextSizeOption.medium.rawValue
@@ -93,6 +96,7 @@ struct PlayerView: View {
   @State private var consecutiveLoadFailures = 0
   @State private var lastControlFocus: Focusable = .quality
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
+  @State private var raidBannerDismissTask: Task<Void, Never>?
 
   private let controlsAutoHideSeconds: Double = 10
   private let targetLiveEdgeSeconds: Double = 3.5
@@ -134,6 +138,8 @@ struct PlayerView: View {
     case chatLayoutOption(Int)
     case youtubeMergeToggle
     case youtubeMergeURL
+    case raidFollow
+    case raidStay
   }
 
   private var chatTextSize: ChatTextSizeOption {
@@ -222,11 +228,28 @@ struct PlayerView: View {
       if showCaptionsPicker {
         captionsPicker
       }
+
+      if let raid = chat.pendingRaid {
+        raidBanner(raid)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .zIndex(10)
+      }
+    }
+    .onChange(of: chat.pendingRaid) { _, newRaid in
+      guard newRaid != nil else { return }
+      raidBannerDismissTask?.cancel()
+      raidBannerDismissTask = Task {
+        try? await Task.sleep(for: .seconds(30))
+        guard !Task.isCancelled else { return }
+        withAnimation { chat.pendingRaid = nil }
+      }
+      withAnimation { focus = .raidFollow }
     }
     .task {
+      if activeChannel.isEmpty { activeChannel = channel }
       configurePlayerForLive()
       applyExperimentalYouTubeSettings()
-      chat.connect(to: channel)
+      chat.connect(to: activeChannel)
       async let metadataTask: Void = refreshChannelMetadata()
       await load()
       _ = await metadataTask
@@ -345,14 +368,14 @@ struct PlayerView: View {
       }
 
       if isLoading {
-        ProgressView("Loading \(channel)…")
+        ProgressView("Loading \(activeChannel)…")
           .font(.title3)
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       }
 
       if let errorMessage {
         VStack(spacing: 24) {
-          Text("Couldn't play \(channel)")
+          Text("Couldn't play \(activeChannel)")
             .font(.title2).bold()
           Text(errorMessage)
             .foregroundStyle(.secondary)
@@ -805,7 +828,7 @@ struct PlayerView: View {
 
         ChatInputField(
           text: $experimentalYouTubeMergeChannelOrURL,
-          placeholder: "YouTube handle/URL (defaults to @\(channel))",
+          placeholder: "YouTube handle/URL (defaults to @\(activeChannel))",
           isFocused: focus == .youtubeMergeURL
         )
         .frame(height: 44)
@@ -1082,12 +1105,87 @@ struct PlayerView: View {
     chatSendError = nil
     Task {
       do {
-        try await auth.sendChatMessage(text, toChannel: channel)
+        try await auth.sendChatMessage(text, toChannel: activeChannel)
         chatDraft = ""
       } catch {
         chatSendError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       }
       isSendingChat = false
+    }
+  }
+
+  // MARK: - Raid banner
+
+  @ViewBuilder
+  private func raidBanner(_ raid: RaidEvent) -> some View {
+    VStack {
+      Spacer()
+      HStack(spacing: 24) {
+        VStack(alignment: .leading, spacing: 6) {
+          Text("\(raid.displayName) is raiding!")
+            .font(.title2).bold()
+            .foregroundStyle(.white)
+          Text("\(raid.viewerCount) viewers incoming")
+            .font(.headline)
+            .foregroundStyle(.white.opacity(0.8))
+        }
+        Spacer()
+        Button {
+          withAnimation { followRaid(raid.login) }
+        } label: {
+          Text("Follow Raid")
+            .font(.headline).bold()
+            .padding(.horizontal, 28)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+        .background(Color.purple)
+        .clipShape(Capsule())
+        .focused($focus, equals: .raidFollow)
+
+        Button {
+          raidBannerDismissTask?.cancel()
+          withAnimation { chat.pendingRaid = nil }
+        } label: {
+          Text("Stay Here")
+            .font(.headline)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+        .background(.white.opacity(0.18))
+        .clipShape(Capsule())
+        .focused($focus, equals: .raidStay)
+      }
+      .padding(32)
+      .background(.black.opacity(0.75))
+      .clipShape(RoundedRectangle(cornerRadius: 20))
+      .padding(.horizontal, 60)
+      .padding(.bottom, 60)
+    }
+    .ignoresSafeArea()
+  }
+
+  private func followRaid(_ login: String) {
+    raidBannerDismissTask?.cancel()
+    chat.pendingRaid = nil
+    activeChannel = login
+    stopPlaybackWatchdog()
+    stopLatencyMonitor()
+    player.pause()
+    player.replaceCurrentItem(with: nil)
+    chat.disconnect()
+    isLoading = true
+    errorMessage = nil
+    streamTitle = ""
+    channelDisplayName = ""
+    channelAvatarURL = nil
+    chat.connect(to: login)
+    Task {
+      async let metadataTask: Void = refreshChannelMetadata()
+      await load(reason: "raid follow", resetMetadata: false)
+      _ = await metadataTask
+      focus = .video
     }
   }
 
@@ -1319,7 +1417,7 @@ struct PlayerView: View {
   private func resolvePlaybackWithTimeout() async throws -> StreamPlayback {
     try await withThrowingTaskGroup(of: StreamPlayback.self) { group in
       group.addTask {
-        try await PlaybackService.resolve(for: channel)
+        try await PlaybackService.resolve(for: activeChannel)
       }
       group.addTask {
         try await Task.sleep(for: .seconds(resolveTimeoutSeconds))
@@ -1734,8 +1832,8 @@ struct PlayerView: View {
   }
 
   private func refreshChannelMetadata() async {
-    guard let metadata = await PlaybackService.channelMetadata(for: channel) else {
-      channelDisplayName = channel
+    guard let metadata = await PlaybackService.channelMetadata(for: activeChannel) else {
+      channelDisplayName = activeChannel
       channelAvatarURL = nil
       return
     }
@@ -1868,13 +1966,6 @@ private struct ChatInputShellStyle: ViewModifier {
   }
 }
 
-/// UITextField subclass that opts out of the tvOS focus engine so the platform
-/// focus halo is never drawn, while still allowing becomeFirstResponder() for
-/// keyboard input.
-private final class FocusHidingTextField: UITextField {
-  override var canBecomeFocused: Bool { false }
-}
-
 /// A fully custom chat input backed by a `UITextField` so we control the
 /// background (clear — no native focus platter) and vertically center the text.
 /// SwiftUI's `TextField` on tvOS draws its own opaque focus platter that can't
@@ -1888,7 +1979,7 @@ private struct ChatInputField: UIViewRepresentable {
   var onActivate: (() -> Void)? = nil
 
   func makeUIView(context: Context) -> UITextField {
-    let field = FocusHidingTextField()
+    let field = UITextField()
     field.delegate = context.coordinator
     field.borderStyle = .none
     field.backgroundColor = .clear

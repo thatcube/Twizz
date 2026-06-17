@@ -110,7 +110,7 @@ enum ChatLayoutMode: String, CaseIterable {
 }
 
 /// Carries the info from a Twitch raid USERNOTICE.
-struct RaidEvent {
+struct RaidEvent: Equatable {
   let login: String
   let displayName: String
   let viewerCount: Int
