@@ -97,6 +97,21 @@ enum ChatWidthMode: String, CaseIterable {
     }
 }
 
+/// Where the chat panel is positioned relative to the video.
+enum ChatLayoutMode: String, CaseIterable {
+    /// Chat docks beside the video; the video shrinks to make room.
+    case side
+    /// Chat floats translucently on top of a full-width video.
+    case overlay
+
+    var title: String {
+        switch self {
+        case .side: return "Side"
+        case .overlay: return "Overlay"
+        }
+    }
+}
+
 private struct ChatReadabilityConfig: Equatable {
     var mode: ChatReadabilityMode = .balanced
     var smartFilteringEnabled = true

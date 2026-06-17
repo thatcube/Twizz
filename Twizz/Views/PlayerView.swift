@@ -44,6 +44,7 @@ struct PlayerView: View {
   @AppStorage("chatReadabilityMode") private var chatReadabilityModeRaw = ChatReadabilityMode
     .balanced.rawValue
   @AppStorage("chatWidthMode") private var chatWidthModeRaw = ChatWidthMode.medium.rawValue
+  @AppStorage("chatLayoutMode") private var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
 
   @State private var chat = ChatService()
   @State private var player = AVPlayer()
@@ -117,6 +118,7 @@ struct PlayerView: View {
     case captionsOption(Int)
     case chatDensityOption(Int)
     case chatWidthOption(Int)
+    case chatLayoutOption(Int)
   }
 
   private var chatReadabilityMode: ChatReadabilityMode {
@@ -127,6 +129,10 @@ struct PlayerView: View {
     ChatWidthMode(rawValue: chatWidthModeRaw) ?? .medium
   }
 
+  private var chatLayoutMode: ChatLayoutMode {
+    ChatLayoutMode(rawValue: chatLayoutModeRaw) ?? .side
+  }
+
   private var chatWidth: CGFloat {
     chatWidthMode.width
   }
@@ -135,16 +141,31 @@ struct PlayerView: View {
     ZStack {
       Color.black.ignoresSafeArea()
 
-      HStack(spacing: 0) {
+      if chatLayoutMode == .overlay {
         videoColumn
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .ignoresSafeArea()
 
         if showChat {
-          chatPane
-            .transition(.move(edge: .trailing))
+          HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            chatPane
+          }
+          .ignoresSafeArea()
+          .transition(.move(edge: .trailing))
         }
+      } else {
+        HStack(spacing: 0) {
+          videoColumn
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+          if showChat {
+            chatPane
+              .transition(.move(edge: .trailing))
+          }
+        }
+        .ignoresSafeArea()
       }
-      .ignoresSafeArea()
 
       if showQualityPicker {
         qualityPicker
@@ -585,6 +606,25 @@ struct PlayerView: View {
               focusTag: .chatWidthOption(index)
             ) {
               chatWidthModeRaw = mode.rawValue
+            }
+          }
+        }
+        .focusSection()
+      }
+
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Chat Position")
+          .font(.headline)
+          .foregroundStyle(.white)
+
+        HStack(spacing: 14) {
+          ForEach(Array(ChatLayoutMode.allCases.enumerated()), id: \.offset) { index, mode in
+            settingsPill(
+              title: mode.title,
+              isSelected: mode == chatLayoutMode,
+              focusTag: .chatLayoutOption(index)
+            ) {
+              chatLayoutModeRaw = mode.rawValue
             }
           }
         }
