@@ -2,29 +2,29 @@
 
 A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
 
-## Current State
+## Features
 
-Twizz is now usable for the core experience:
+Home & browse:
+
+- Sign in with Twitch (Device Code flow) with automatic token refresh.
+- Followed channels on Home, auto-refreshed when stale.
+- Browse tab for top categories and live streams.
+
+Playback:
 
 - Live playback on real Apple TV hardware.
 - Side-by-side layout: video on the left, chat pane on the right.
-- Read-only anonymous chat via Twitch IRC over WebSocket (`justinfan` guest).
 - Quality picker with persistence (`Auto` + explicit qualities), ordered highest-to-lowest.
 - Custom bottom overlay controls with tvOS focus navigation.
-- Chat composer UI in the chat pane (input UI only; sending not yet enabled).
-- Twitch badges in chat (global + channel-specific).
-- Emotes in chat:
-	- Twitch native emotes (including channel/subscriber emotes from IRC `emotes` tags).
-	- 7TV global + channel.
-	- BTTV global + channel/shared.
-	- FFZ global + channel.
 
-## What Is Not Done Yet
+Chat:
 
-- Sending chat messages.
-- Followed-streams home experience (OAuth/device flow + followed channels UI).
-- Animated emote playback polish (currently image-first rendering; first-time fetch may briefly delay).
-- Broader player polish and settings UX.
+- Anonymous read via Twitch IRC over WebSocket, with auto-reconnect.
+- Send messages when signed in (`user:write:chat`).
+- Twitch badges (global + channel-specific).
+- Emotes: Twitch native (incl. channel/sub), 7TV, BTTV, and FFZ (global + channel).
+- Raid detection with a "Follow Raid" banner to hop to the raid target.
+- Experimental: merge a YouTube live chat into the Twitch chat pane.
 
 ## Tech Stack
 
