@@ -174,6 +174,7 @@ struct SignInView: View {
           dismiss()
         }
       }
+      .buttonStyle(.bordered)
       .padding(.top, 12)
     }
     .padding(80)
