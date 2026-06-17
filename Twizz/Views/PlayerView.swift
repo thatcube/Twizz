@@ -55,7 +55,7 @@ struct PlayerView: View {
   @State private var errorMessage: String?
   @State private var isLoading = true
   @State private var showChat = true
-  @State private var chatReplayCutoff: Date?
+  @State private var chatReplayStartMessageID: ChatMessage.ID?
   @State private var showQualityPicker = false
   @State private var showCaptionsPicker = false
   @State private var showSignInSheet = false
@@ -114,7 +114,7 @@ struct PlayerView: View {
   private let startupPlaybackPollMilliseconds: UInt64 = 500
   private let stalledPlaybackThresholdSamples = 6
   private let playbackWatchdogIntervalSeconds: Double = 2
-  private let chatReplayWindowSeconds: TimeInterval = 60
+  private let chatReplayMessageCount = 30
   private let chatComposerRowHeight: CGFloat = 62
   private let chatInputFocusedHeight: CGFloat = 62
   private let chatInputUnfocusedHeight: CGFloat = 54
@@ -160,8 +160,11 @@ struct PlayerView: View {
   }
 
   private var visibleChatMessages: [ChatMessage] {
-    guard let cutoff = chatReplayCutoff else { return chat.messages }
-    return chat.messages.filter { $0.timestamp >= cutoff }
+    guard let startID = chatReplayStartMessageID else { return chat.messages }
+    guard let startIndex = chat.messages.firstIndex(where: { $0.id == startID }) else {
+      return chat.messages
+    }
+    return Array(chat.messages[startIndex...])
   }
 
   /// Trailing inset for the bottom control bar so its right-aligned buttons
@@ -571,9 +574,9 @@ struct PlayerView: View {
   private func toggleChatVisibility() {
     showChat.toggle()
     if showChat {
-      chatReplayCutoff = Date().addingTimeInterval(-chatReplayWindowSeconds)
+      chatReplayStartMessageID = chat.messages.suffix(chatReplayMessageCount).first?.id
     } else {
-      chatReplayCutoff = nil
+      chatReplayStartMessageID = nil
       showChatSettings = false
     }
   }
