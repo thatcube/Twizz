@@ -81,6 +81,19 @@ Important:
 
 `Config/TwitchSecrets.xcconfig.local` is gitignored (`*.xcconfig.local`), so your ID stays local.
 
+### Working in git worktrees
+
+Because the secrets file is gitignored, it does **not** exist in freshly created
+worktrees. After making a new worktree, run the bootstrap helper from inside it:
+
+```bash
+./tools/bootstrap-worktree.sh
+```
+
+This copies `Config/TwitchSecrets.xcconfig.local` from your primary checkout and
+regenerates the Xcode project. Without it, builds fail with
+"Missing Twitch client ID".
+
 On Apple TV, sign-in uses Twitch Device Code flow: start sign-in on TV, then complete approval on your phone/browser (including the Twitch mobile app browser flow) using the shown code/link.
 
 ## How Playback Works
