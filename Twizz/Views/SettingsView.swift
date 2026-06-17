@@ -13,6 +13,7 @@ struct SettingsView: View {
   @FocusState private var focusedCardSize: StreamCardSize?
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
+  @AppStorage(LowLatencyHLSProxy.settingsKey) private var lowLatencyProxyEnabled = false
 
   var body: some View {
     ZStack {
@@ -30,6 +31,7 @@ struct SettingsView: View {
 
           appearanceSection
           streamCardSection
+          experimentalSection
           accountSection
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -104,7 +106,35 @@ struct SettingsView: View {
     .focusSection()
   }
 
-  // MARK: - Account
+  // MARK: - Experimental
+
+  private var experimentalSection: some View {
+    VStack(alignment: .leading, spacing: 24) {
+      VStack(alignment: .leading, spacing: 6) {
+        Text("Experimental")
+          .font(.system(size: 32, weight: .bold))
+          .foregroundStyle(.secondary)
+
+        Text("Unstable features that may change or break. Turn off if playback misbehaves.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      }
+
+      Button {
+        lowLatencyProxyEnabled.toggle()
+      } label: {
+        ExperimentalToggleCard(
+          title: "Low-Latency Mode",
+          description:
+            "Fetches Twitch's prefetch segments to pull live streams closer to real time. May increase buffering on slower connections.",
+          isOn: lowLatencyProxyEnabled
+        )
+      }
+      .buttonStyle(.card)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .focusSection()
+  }
 
   private var accountSection: some View {
     VStack(alignment: .leading, spacing: 24) {
@@ -188,6 +218,42 @@ struct SettingsView: View {
         .focusSection()
       }
     }
+  }
+}
+
+// MARK: - Experimental toggle card
+
+private struct ExperimentalToggleCard: View {
+  let title: String
+  let description: String
+  let isOn: Bool
+
+  var body: some View {
+    HStack(spacing: 28) {
+      Image(systemName: "bolt.horizontal.circle")
+        .font(.system(size: 44))
+        .foregroundStyle(isOn ? Color.green : Color.secondary)
+
+      VStack(alignment: .leading, spacing: 6) {
+        Text(title)
+          .font(.title3.weight(.semibold))
+        Text(description)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      Spacer(minLength: 24)
+
+      Text(isOn ? "On" : "Off")
+        .font(.headline)
+        .foregroundStyle(isOn ? Color.green : Color.secondary)
+      Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+        .font(.title2)
+        .foregroundStyle(isOn ? Color.green : Color.secondary)
+    }
+    .padding(28)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
