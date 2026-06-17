@@ -196,7 +196,7 @@ struct HomeView: View {
     VStack(alignment: .leading, spacing: 2) {
       HStack {
         Text(follows.isUsingDemoData ? "Trending" : "Following")
-          .font(.caption.weight(.semibold))
+          .font(.system(size: 32, weight: .bold))
 
         if follows.isLoading {
           ProgressView()
@@ -275,7 +275,7 @@ struct HomeView: View {
       VStack(alignment: .leading, spacing: 2) {
         HStack {
           Text("Recommended channels")
-            .font(.caption.weight(.semibold))
+            .font(.system(size: 32, weight: .bold))
 
           if recommendations.isLoading {
             ProgressView()
@@ -332,7 +332,7 @@ struct HomeView: View {
 
       VStack(alignment: .leading, spacing: 2) {
         Text("Recommended categories")
-          .font(.caption.weight(.semibold))
+          .font(.system(size: 32, weight: .bold))
 
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: rail.spacing) {
