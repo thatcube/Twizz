@@ -60,10 +60,7 @@ struct SettingsView: View {
         .padding(.vertical, 20)
     }
     .padding(.horizontal, 28)
-    .background(
-      RoundedRectangle(cornerRadius: 24, style: .continuous)
-        .fill(Color.primary.opacity(0.05))
-    )
+    .glassPanel()
   }
 
   private var appearanceRow: some View {
@@ -75,12 +72,9 @@ struct SettingsView: View {
         Button {
           themeManager.theme = theme
         } label: {
-          SettingPill(
-            title: theme.displayName,
-            isSelected: themeManager.theme == theme
-          )
+          SettingPill(title: theme.displayName)
         }
-        .buttonStyle(.card)
+        .settingPillStyle(isSelected: themeManager.theme == theme)
         .focused($focusedTheme, equals: theme)
       }
     }
@@ -96,13 +90,9 @@ struct SettingsView: View {
         Button {
           streamCardSizeRaw = size.rawValue
         } label: {
-          SettingPill(
-            title: size.title,
-            subtitle: size.subtitle,
-            isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size
-          )
+          SettingPill(title: size.title, subtitle: size.subtitle)
         }
-        .buttonStyle(.card)
+        .settingPillStyle(isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size)
         .focused($focusedCardSize, equals: size)
       }
     }
@@ -168,15 +158,12 @@ struct SettingsView: View {
             showSignOutConfirm = true
           }
           .font(.headline)
-          .buttonStyle(.borderedProminent)
+          .prominentActionButtonStyle()
           .tint(.red)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-          RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(Color.primary.opacity(0.05))
-        )
+        .glassPanel()
         .focusSection()
         .confirmationDialog(
           "Sign out of Twitch?",
@@ -193,7 +180,7 @@ struct SettingsView: View {
         HStack(spacing: 24) {
           Image(systemName: "person.crop.circle.badge.plus")
             .font(.system(size: 40))
-            .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
+            .foregroundStyle(.secondary)
 
           VStack(alignment: .leading, spacing: 4) {
             Text("Sign in with Twitch")
@@ -209,15 +196,11 @@ struct SettingsView: View {
             onRequestSignIn()
           }
           .font(.headline)
-          .buttonStyle(.borderedProminent)
-          .tint(Color(red: 0.58, green: 0.41, blue: 0.96))
+          .prominentActionButtonStyle()
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-          RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(Color.primary.opacity(0.05))
-        )
+        .glassPanel()
         .focusSection()
       }
     }
@@ -226,33 +209,70 @@ struct SettingsView: View {
 
 // MARK: - Selectable option pill
 
-/// Compact, focusable choice used inside a setting row. Shows an icon, a
-/// title (with optional secondary line) and a trailing selection indicator
-/// that never shifts layout between selected/unselected states.
+/// Compact label used inside a setting row. Selection and focus are conveyed
+/// by the native Liquid Glass button style applied to the enclosing button
+/// (prominent = active), so the label itself stays purely textual.
 private struct SettingPill: View {
   let title: String
   var subtitle: String? = nil
-  let isSelected: Bool
-
-  private let accent = Color(red: 0.58, green: 0.41, blue: 0.96)
 
   var body: some View {
-    HStack(spacing: 18) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title)
-          .font(.headline)
-        if let subtitle {
-          Text(subtitle)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
+    VStack(alignment: .leading, spacing: 2) {
+      Text(title)
+        .font(.headline)
+      if let subtitle {
+        Text(subtitle)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
       }
-
-      Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-        .font(.body)
-        .foregroundStyle(isSelected ? accent : Color.secondary)
     }
-    .padding(.horizontal, 26)
-    .padding(.vertical, 16)
+    .padding(.horizontal, 14)
+    .padding(.vertical, 8)
   }
 }
+
+// MARK: - Native styling helpers
+
+extension View {
+  /// Frosted Liquid Glass panel (tvOS 26+) with a material fallback.
+  @ViewBuilder
+  fileprivate func glassPanel() -> some View {
+    let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+    if #available(tvOS 26.0, *) {
+      self.glassEffect(.regular, in: shape)
+    } else {
+      self.background(.ultraThinMaterial, in: shape)
+    }
+  }
+
+  /// Selectable option styling: native Liquid Glass with the active option
+  /// rendered prominent. Falls back to bordered styles before tvOS 26.
+  @ViewBuilder
+  fileprivate func settingPillStyle(isSelected: Bool) -> some View {
+    if #available(tvOS 26.0, *) {
+      if isSelected {
+        self.buttonStyle(.glassProminent)
+      } else {
+        self.buttonStyle(.glass)
+      }
+    } else {
+      if isSelected {
+        self.buttonStyle(.borderedProminent)
+      } else {
+        self.buttonStyle(.bordered)
+      }
+    }
+  }
+
+  /// Prominent action button: Liquid Glass prominent on tvOS 26+, bordered
+  /// prominent otherwise.
+  @ViewBuilder
+  fileprivate func prominentActionButtonStyle() -> some View {
+    if #available(tvOS 26.0, *) {
+      self.buttonStyle(.glassProminent)
+    } else {
+      self.buttonStyle(.borderedProminent)
+    }
+  }
+}
+
