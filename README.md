@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: tvOS](https://img.shields.io/badge/Platform-tvOS-black.svg?logo=apple)](https://www.apple.com/apple-tv-4k/)
-[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/thatcube)
+[![Donate](https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/thatcube)
 
 A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
 
@@ -110,15 +110,15 @@ This project is non-commercial and ad-respecting.
 
 See [Twizz-plan.md](Twizz-plan.md) for detailed phased planning.
 
-## Sponsor
+## Donate
 
-Twizz is free and open source, built and maintained in spare time. If it's useful to you, consider supporting development — it helps cover Apple Developer Program fees and keeps the project moving.
+Twizz is free and open source, and it always will be. There's no paywall, no ads, and no obligation to give anything.
 
-[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/thatcube)
+If the app has been useful to you and you'd like to chip in toward its upkeep — things like the Apple Developer Program fee and time spent maintaining it — donations are welcome and genuinely appreciated. Anything is plenty, and not donating is completely fine too.
 
-👉 **[Become a sponsor on GitHub Sponsors](https://github.com/sponsors/thatcube)**
+[![Donate](https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/thatcube)
 
-Every contribution, one-time or recurring, is appreciated. ❤️
+**[Donate via GitHub Sponsors](https://github.com/sponsors/thatcube)** — one-time or recurring, whatever suits you.
 
 ## License
 
