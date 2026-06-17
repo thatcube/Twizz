@@ -360,6 +360,7 @@ final class ChatService {
     var continuationToken: String?
     var apiKey: String?
     var clientVersion: String?
+    var isFirstPoll = true
 
     while !Task.isCancelled {
       do {
@@ -408,7 +409,13 @@ final class ChatService {
         let delay = pollResult.timeoutMs ?? youtubePollFallbackDelayMs
         let clampedDelay = max(youtubePollMinDelayMs, delay)
 
-        if freshMessages.count > 1 {
+        if isFirstPoll {
+          // On first load, show all messages immediately so they appear as
+          // pre-existing history rather than a sudden flood of activity.
+          if !freshMessages.isEmpty { enqueue(freshMessages) }
+          isFirstPoll = false
+          try? await Task.sleep(for: .milliseconds(Int(clampedDelay)))
+        } else if freshMessages.count > 1 {
           // Trickle messages evenly across the polling interval so they arrive
           // one-by-one rather than all at once.
           let perMs = clampedDelay / UInt64(freshMessages.count)
