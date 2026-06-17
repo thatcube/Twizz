@@ -33,9 +33,14 @@ struct SettingsView: View {
         .padding(.vertical, 60)
       }
       .scrollClipDisabled()
-      // Give tvOS a concrete focus entry point into the tab content; without a
-      // default target the focus engine can fail to enter and nothing highlights.
-      .defaultFocus($focusedTheme, themeManager.theme)
+      .onAppear {
+        // Mirrors the BrowseCategoriesView pattern: a short async delay lets
+        // tvOS finish laying out and registering focus nodes before we ask the
+        // focus engine to move to the selected theme card.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+          focusedTheme = themeManager.theme
+        }
+      }
     }
   }
 
@@ -49,11 +54,6 @@ struct SettingsView: View {
 
       HStack(spacing: 28) {
         ForEach(AppTheme.allCases) { theme in
-          // Use the DEFAULT tvOS button style (same as the working Sign In
-          // button). Custom ButtonStyles that return only `configuration.label`
-          // were not being registered as focusable here, so focus skipped past
-          // the cards entirely. The default style provides the focus lift; the
-          // card draws selection state.
           Button {
             themeManager.theme = theme
           } label: {
@@ -67,7 +67,6 @@ struct SettingsView: View {
           .focused($focusedTheme, equals: theme)
         }
       }
-      .focusSection()
     }
   }
 
