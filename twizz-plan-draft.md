@@ -1,4 +1,4 @@
-# Twitcher tvOS App — Draft Build Plan
+# Twizz tvOS App — Draft Build Plan
 
 A native tvOS app for Apple TV that streams Twitch with full chat support and third-party emotes (7TV, BTTV, FFZ). Built in Swift/SwiftUI using VS Code with GitHub Copilot.
 
@@ -27,9 +27,9 @@ GitHub Copilot works well for Swift in VS Code — you get autocomplete, inline 
 ## Project Structure
 
 ```
-Twitcher/
-├── Twitcher.xcodeproj
-└── Twitcher/
+Twizz/
+├── Twizz.xcodeproj
+└── Twizz/
     ├── App/
     │   └── TwitchTVApp.swift        # App entry point
     ├── Auth/

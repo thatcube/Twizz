@@ -27,7 +27,7 @@ Required sequence:
 
 Critical detail:
 - For Apple TV testing, always run a fresh device build immediately before install:
-	`xcodebuild -project Twitcher.xcodeproj -scheme Twitcher -destination "platform=tvOS,id=<DEVICE_ID>" build`
+	`xcodebuild -project Twizz.xcodeproj -scheme Twizz -destination "platform=tvOS,id=<DEVICE_ID>" build`
 - Do not rely on `CODESIGNING_FOLDER_PATH` install alone without that build step, or an older app binary can be installed.
 
 ## Apple TV target
@@ -38,7 +38,7 @@ Critical detail:
 
 ```bash
 DEVICE_ID='DE913871-CC2D-5F75-B4F2-0D6F44AA30DE' && \
-APP_PATH=$(xcodebuild -project Twitcher.xcodeproj -scheme Twitcher -destination "platform=tvOS,id=$DEVICE_ID" -showBuildSettings | awk -F' = ' '/CODESIGNING_FOLDER_PATH/ {print $2; exit}') && \
+APP_PATH=$(xcodebuild -project Twizz.xcodeproj -scheme Twizz -destination "platform=tvOS,id=$DEVICE_ID" -showBuildSettings | awk -F' = ' '/CODESIGNING_FOLDER_PATH/ {print $2; exit}') && \
 BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist") && \
 xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH" && \
 xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID"

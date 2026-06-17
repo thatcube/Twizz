@@ -1,4 +1,4 @@
-# Twitcher — Apple TV Twitch Client (Build Plan v2)
+# Twizz — Apple TV Twitch Client (Build Plan v2)
 
 A free, open-source tvOS app for Apple TV that watches Twitch streams and reads chat, with **native third-party emote support** (7TV, BTTV, FFZ) — the thing the official app does badly. Built in Swift/SwiftUI, developed in VS Code with GitHub Copilot + SweetPad.
 
@@ -52,7 +52,7 @@ brew install xcbeautify           # pretty build output
 ```
 
 One-time setup in Xcode:
-1. Create a new **tvOS App** project named `Twitcher` (SwiftUI, Swift).
+1. Create a new **tvOS App** project named `Twizz` (SwiftUI, Swift).
 2. In **Signing & Capabilities**, sign in with your Apple ID and pick "Personal Team" (free).
 3. **Pair your Apple TV:** on the Apple TV go to *Settings → Remote and Devices → Remote App and Devices*; in Xcode open *Window → Devices and Simulators* and pair. Both must be on the same network.
 4. Do a test "Hello World" deploy to the Apple TV to confirm signing + pairing work.
@@ -192,10 +192,10 @@ Loading states, error handling (especially "stream URL extraction failed" — it
 ## Project structure
 
 ```
-Twitcher/
-├── Twitcher.xcodeproj
-└── Twitcher/
-    ├── App/        TwitcherApp.swift
+Twizz/
+├── Twizz.xcodeproj
+└── Twizz/
+    ├── App/        TwizzApp.swift
     ├── Auth/       AuthManager.swift            # device flow + Keychain
     ├── Models/     Stream.swift, ChatMessage.swift, Emote.swift
     ├── Services/

@@ -1,6 +1,6 @@
-name: Twitcher
+name: Twizz
 options:
-  bundleIdPrefix: com.thatcube.twitcher
+  bundleIdPrefix: com.thatcube.Twizz
   deploymentTarget:
     tvOS: "18.0"
   createIntermediateGroups: true
@@ -10,7 +10,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "6.0"
     GENERATE_INFOPLIST_FILE: NO
-    INFOPLIST_FILE: Twitcher/App/Info.plist
+    INFOPLIST_FILE: Twizz/App/Info.plist
     TARGETED_DEVICE_FAMILY: "3" # Apple TV
 configFiles:
   Debug: Config/App.xcconfig
@@ -26,11 +26,11 @@ packages:
     url: https://github.com/SDWebImage/SDWebImageWebPCoder.git
     from: 0.14.6
 targets:
-  Twitcher:
+  Twizz:
     type: application
     platform: tvOS
     sources:
-      - path: Twitcher
+      - path: Twizz
     dependencies:
       - package: SDWebImage
         product: SDWebImage
@@ -40,7 +40,7 @@ targets:
         product: SDWebImageWebPCoder
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.twitcher
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Twizz
         DEVELOPMENT_TEAM: N8Z5T4AK3X
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

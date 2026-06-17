@@ -1,10 +1,10 @@
-# Twitcher
+# Twizz
 
 A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
 
 ## Current State
 
-Twitcher is now usable for the core experience:
+Twizz is now usable for the core experience:
 
 - Live playback on real Apple TV hardware.
 - Side-by-side layout: video on the left, chat pane on the right.
@@ -53,8 +53,8 @@ Build:
 
 ```bash
 xcodebuild \
-	-project Twitcher.xcodeproj \
-	-scheme Twitcher \
+	-project Twizz.xcodeproj \
+	-scheme Twizz \
 	-configuration Debug \
 	-destination 'generic/platform=tvOS Simulator' \
 	build | xcbeautify
@@ -85,13 +85,13 @@ On Apple TV, sign-in uses Twitch Device Code flow: start sign-in on TV, then com
 
 ## How Playback Works
 
-Apple TV has no official Twitch playback SDK. Twitcher resolves playback via Twitch GraphQL PlaybackAccessToken and Usher HLS playlists, similar in spirit to open-source clients like Streamlink and Frosty.
+Apple TV has no official Twitch playback SDK. Twizz resolves playback via Twitch GraphQL PlaybackAccessToken and Usher HLS playlists, similar in spirit to open-source clients like Streamlink and Frosty.
 
 This project is non-commercial and ad-respecting.
 
 ## Roadmap
 
-See [twitcher-plan.md](twitcher-plan.md) for detailed phased planning.
+See [Twizz-plan.md](Twizz-plan.md) for detailed phased planning.
 
 ## License
 
