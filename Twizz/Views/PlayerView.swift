@@ -108,8 +108,8 @@ struct PlayerView: View {
   private let startupPlaybackPollMilliseconds: UInt64 = 500
   private let stalledPlaybackThresholdSamples = 6
   private let playbackWatchdogIntervalSeconds: Double = 2
-  private let chatInputFocusedHeight: CGFloat = 54
-  private let chatInputUnfocusedHeight: CGFloat = 62
+  private let chatInputFocusedHeight: CGFloat = 62
+  private let chatInputUnfocusedHeight: CGFloat = 54
 
   @FocusState private var focus: Focusable?
   private enum Focusable: Hashable {
@@ -713,10 +713,9 @@ struct PlayerView: View {
             placeholder: "Send a message",
             isFocused: focus == .chatInput
           )
-          // tvOS renders a smaller unfocused text-field pill and expands it
-          // when focused. Use slightly different container heights so the
-          // visible pill reads the same size in both states.
+          // Match the send button feel: the input grows when focused.
           .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
+          .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
           .frame(maxWidth: .infinity)
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in
