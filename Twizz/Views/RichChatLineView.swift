@@ -72,8 +72,8 @@ struct RichChatLineView: View {
 
     private var rowSpacing: CGFloat {
         switch lineHeight {
-        case .tight: return 2
-        case .normal: return 4
+        case .tight: return 1
+        case .normal: return 2
         case .relaxed: return 6
         }
     }
