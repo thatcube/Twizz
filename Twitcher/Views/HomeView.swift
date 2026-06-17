@@ -295,12 +295,9 @@ private struct FollowedChannelCard: View {
           Circle()
             .fill(channel.isLive ? Color.red : Color.gray)
             .frame(width: 8, height: 8)
-          Text(channel.isLive ? "LIVE" : "OFFLINE")
-            .font(.caption.weight(.bold))
-            .foregroundStyle(channel.isLive ? Color.white : Color.white.opacity(0.72))
           if let viewerCount = channel.viewerCount {
             Text("\(viewerCount) watching")
-              .font(.caption)
+              .font(.caption2)
               .foregroundStyle(Color.white.opacity(0.78))
           }
         }
@@ -309,18 +306,18 @@ private struct FollowedChannelCard: View {
       .frame(width: mediaWidth, alignment: .leading)
 
       Text(channel.displayName)
-        .font(.headline)
+        .font(.subheadline.weight(.semibold))
         .foregroundStyle(isFocused ? Color.black.opacity(0.92) : Color.primary)
         .lineLimit(1)
 
       Text(channel.title.isEmpty ? "No title" : channel.title)
-        .font(.subheadline)
+        .font(.footnote)
         .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
         .lineLimit(2)
-        .frame(height: 46, alignment: .topLeading)
+        .frame(height: 38, alignment: .topLeading)
 
       Text(channel.gameName)
-        .font(.caption)
+        .font(.caption2)
         .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
         .lineLimit(1)
     }
