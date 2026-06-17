@@ -31,8 +31,7 @@ struct HomeView: View {
           homeTab
         }
       }
-      .padding(.horizontal, 64)
-      .padding(.vertical, 52)
+      .padding(52)
     }
     .task {
       auth.restore()
