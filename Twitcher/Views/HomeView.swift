@@ -3,7 +3,7 @@ import SwiftUI
 struct HomeView: View {
   private let pagePadding: CGFloat = 52
   private let channelRailVerticalPadding: CGFloat = 20
-  private let targetVisibleCards: CGFloat = 5
+  private let targetVisibleCards: CGFloat = 4
   private let peekCardFraction: CGFloat = 0.3
   private let focusHorizontalInset: CGFloat = 12
   private let focusVerticalInset: CGFloat = 10
