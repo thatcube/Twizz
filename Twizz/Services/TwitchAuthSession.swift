@@ -72,9 +72,7 @@ final class TwitchAuthSession {
             "chat:read",
             // Send chat messages (Helix Send Chat Message) and via IRC.
             "user:write:chat",
-            "chat:edit",
-            // Send and read whispers (direct messages).
-            "user:manage:whispers"
+            "chat:edit"
         ]
     }
 
