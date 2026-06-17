@@ -814,7 +814,7 @@ struct PlayerView: View {
       .padding(.horizontal, 20)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .frame(width: 560)
+    .frame(width: 620)
     .frame(maxHeight: 680)
     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     .overlay(
@@ -833,7 +833,7 @@ struct PlayerView: View {
   ) -> some View {
     let isFocused = focus == focusTag
 
-    return HStack(spacing: 8) {
+    return Button(action: action) {
       HStack(spacing: 8) {
         if isSelected {
           Image(systemName: "checkmark")
@@ -867,11 +867,9 @@ struct PlayerView: View {
           )
       )
     }
-      .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-      .onTapGesture(perform: action)
-      .focusable()
+    .buttonStyle(.plain)
+    .focusEffectDisabled()
     .focused($focus, equals: focusTag)
-      .accessibilityAddTraits(.isButton)
   }
 
   private func toggleChatSettings() {
@@ -911,7 +909,7 @@ struct PlayerView: View {
           .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
           // Reserve trailing text space only when the send button is visible.
-          .padding(.trailing, hasChatDraft ? 66 : 0)
+          .padding(.trailing, hasChatDraft ? (focus == .chatSend ? 92 : 82) : 0)
           .frame(maxWidth: .infinity)
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in
