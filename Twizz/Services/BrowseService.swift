@@ -145,7 +145,7 @@ final class BrowseService {
         struct GQLEnvelope: Decodable { let data: GQLData? }
 
         let query = """
-            query GameStreams($id: ID!, $first: Int!, $after: String) {
+            query GameStreams($id: ID!, $first: Int!, $after: Cursor) {
               game(id: $id) {
                 streams(first: $first, after: $after) {
                   edges {
