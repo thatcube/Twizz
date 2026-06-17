@@ -111,8 +111,8 @@ struct PlayerView: View {
     case chatSettingsButton
     case qualityOption(Int)
     case captionsOption(Int)
-    case chatDensityPicker
-    case chatWidthPicker
+    case chatDensityOption(Int)
+    case chatWidthOption(Int)
   }
 
   private var chatReadabilityMode: ChatReadabilityMode {
@@ -554,14 +554,18 @@ struct PlayerView: View {
           .font(.headline)
           .foregroundStyle(.white)
 
-        Picker("Message Density", selection: chatDensitySelection) {
-          ForEach(ChatReadabilityMode.allCases, id: \.self) { mode in
-            Text(mode.title).tag(mode)
+        HStack(spacing: 14) {
+          ForEach(Array(ChatReadabilityMode.allCases.enumerated()), id: \.offset) { index, mode in
+            settingsPill(
+              title: mode.title,
+              isSelected: mode == chatReadabilityMode,
+              focusTag: .chatDensityOption(index)
+            ) {
+              chatReadabilityModeRaw = mode.rawValue
+            }
           }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .focused($focus, equals: .chatDensityPicker)
+        .focusSection()
       }
 
       VStack(alignment: .leading, spacing: 12) {
@@ -569,40 +573,55 @@ struct PlayerView: View {
           .font(.headline)
           .foregroundStyle(.white)
 
-        Picker("Chat Width", selection: chatWidthSelection) {
-          ForEach(ChatWidthMode.allCases, id: \.self) { mode in
-            Text(mode.title).tag(mode)
+        HStack(spacing: 14) {
+          ForEach(Array(ChatWidthMode.allCases.enumerated()), id: \.offset) { index, mode in
+            settingsPill(
+              title: mode.title,
+              isSelected: mode == chatWidthMode,
+              focusTag: .chatWidthOption(index)
+            ) {
+              chatWidthModeRaw = mode.rawValue
+            }
           }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .focused($focus, equals: .chatWidthPicker)
+        .focusSection()
       }
     }
     .padding(28)
-    .frame(width: 620, alignment: .leading)
+    .frame(width: 640, alignment: .leading)
     .background(Color(white: 0.12).opacity(0.98), in: RoundedRectangle(cornerRadius: 24))
     .focusSection()
   }
 
-  private var chatDensitySelection: Binding<ChatReadabilityMode> {
-    Binding(
-      get: { chatReadabilityMode },
-      set: { chatReadabilityModeRaw = $0.rawValue }
-    )
-  }
-
-  private var chatWidthSelection: Binding<ChatWidthMode> {
-    Binding(
-      get: { chatWidthMode },
-      set: { chatWidthModeRaw = $0.rawValue }
-    )
+  private func settingsPill(
+    title: String,
+    isSelected: Bool,
+    focusTag: Focusable,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      HStack(spacing: 8) {
+        if isSelected {
+          Image(systemName: "checkmark")
+            .font(.callout.weight(.semibold))
+        }
+        Text(title)
+          .font(.callout)
+          .fixedSize()
+      }
+      .padding(.horizontal, 22)
+      .padding(.vertical, 12)
+    }
+    .buttonStyle(.bordered)
+    .tint(isSelected ? Color.accentColor : Color(white: 0.32))
+    .focused($focus, equals: focusTag)
   }
 
   private func toggleChatSettings() {
     showChatSettings.toggle()
     if showChatSettings {
-      focus = .chatDensityPicker
+      let selected = ChatReadabilityMode.allCases.firstIndex(of: chatReadabilityMode) ?? 0
+      focus = .chatDensityOption(selected)
     } else {
       focus = .chatSettingsButton
     }
