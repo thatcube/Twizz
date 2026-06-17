@@ -1,0 +1,185 @@
+import Foundation
+import Observation
+
+/// Powers the Home tab's "Recommended" rails. Twitch's personalized
+/// recommendations require a logged-in GQL session with integrity tokens, so
+/// this anonymously surfaces top live channels and top categories — the same
+/// public signals the web home page leans on for logged-out visitors.
+@MainActor
+@Observable
+final class RecommendationsService {
+    private(set) var channels: [FollowedChannel] = []
+    private(set) var categories: [TwitchCategory] = []
+    private(set) var isLoading = false
+    private(set) var errorMessage: String?
+    private(set) var lastUpdatedAt: Date?
+
+    func refresh() async {
+        isLoading = true
+        errorMessage = nil
+        defer {
+            isLoading = false
+            lastUpdatedAt = Date()
+        }
+
+        do {
+            async let channelsTask = fetchRecommendedChannels(limit: 24)
+            async let categoriesTask = fetchRecommendedCategories(limit: 20)
+            let (loadedChannels, loadedCategories) = try await (channelsTask, categoriesTask)
+            channels = loadedChannels
+            categories = loadedCategories
+        } catch {
+            errorMessage = "Could not load recommendations right now."
+        }
+    }
+
+    // MARK: - GQL: Recommended Channels (top live streams)
+
+    private func fetchRecommendedChannels(limit: Int) async throws -> [FollowedChannel] {
+        struct StreamNode: Decodable {
+            let id: String?
+            let title: String?
+            let viewersCount: Int?
+            let previewImageURL: String?
+            let broadcaster: Broadcaster?
+            let game: Game?
+
+            struct Broadcaster: Decodable {
+                let login: String?
+                let displayName: String?
+                let profileImageURL: String?
+            }
+
+            struct Game: Decodable {
+                let displayName: String?
+            }
+        }
+        struct StreamEdge: Decodable { let node: StreamNode? }
+        struct StreamsConn: Decodable { let edges: [StreamEdge]? }
+        struct GQLData: Decodable { let streams: StreamsConn? }
+        struct GQLEnvelope: Decodable { let data: GQLData? }
+
+        let query = """
+            query RecommendedStreams($first: Int!) {
+              streams(first: $first) {
+                edges {
+                  node {
+                    id
+                    title
+                    viewersCount
+                    previewImageURL(width: 640, height: 360)
+                    broadcaster {
+                      login
+                      displayName
+                      profileImageURL(width: 70)
+                    }
+                    game {
+                      displayName
+                    }
+                  }
+                }
+              }
+            }
+            """
+
+        let responseData = try await performGQL(query: query, variables: ["first": limit])
+        let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
+        let edges = decoded.data?.streams?.edges ?? []
+
+        return edges.compactMap { edge -> FollowedChannel? in
+            guard let node = edge.node,
+                  let broadcaster = node.broadcaster,
+                  let login = broadcaster.login?.trimmingCharacters(in: .whitespaces),
+                  !login.isEmpty
+            else { return nil }
+
+            let streamID = node.id ?? UUID().uuidString
+            let displayName = broadcaster.displayName?.trimmingCharacters(in: .whitespaces) ?? login
+            let title = node.title?.trimmingCharacters(in: .whitespaces) ?? "Live now"
+            let gameName = node.game?.displayName?.trimmingCharacters(in: .whitespaces) ?? "Live"
+            let previewURL = node.previewImageURL.flatMap { URL(string: $0) }
+            let profileURL = broadcaster.profileImageURL.flatMap { URL(string: $0) }
+
+            return FollowedChannel(
+                id: streamID,
+                login: login,
+                displayName: displayName,
+                title: title,
+                gameName: gameName,
+                viewerCount: node.viewersCount,
+                thumbnailURL: previewURL,
+                profileImageURL: profileURL,
+                isLive: true
+            )
+        }
+    }
+
+    // MARK: - GQL: Recommended Categories (top games)
+
+    private func fetchRecommendedCategories(limit: Int) async throws -> [TwitchCategory] {
+        struct GameNode: Decodable {
+            let id: String?
+            let name: String?
+            let boxArtURL: String?
+            let viewersCount: Int?
+        }
+        struct GameEdge: Decodable { let node: GameNode? }
+        struct TopGamesConn: Decodable { let edges: [GameEdge]? }
+        struct GQLData: Decodable { let games: TopGamesConn? }
+        struct GQLEnvelope: Decodable { let data: GQLData? }
+
+        let query = """
+            query RecommendedGames($first: Int!) {
+              games(first: $first) {
+                edges {
+                  node {
+                    id
+                    name
+                    boxArtURL(width: 285, height: 380)
+                    viewersCount
+                  }
+                }
+              }
+            }
+            """
+
+        let responseData = try await performGQL(query: query, variables: ["first": limit])
+        let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
+        let edges = decoded.data?.games?.edges ?? []
+
+        return edges.compactMap { edge -> TwitchCategory? in
+            guard let node = edge.node,
+                  let id = node.id,
+                  let name = node.name?.trimmingCharacters(in: .whitespaces),
+                  !name.isEmpty
+            else { return nil }
+
+            let boxArtURL = node.boxArtURL.flatMap { URL(string: $0) }
+            return TwitchCategory(
+                id: id,
+                name: name,
+                boxArtURL: boxArtURL,
+                viewerCount: node.viewersCount
+            )
+        }
+    }
+
+    // MARK: - GQL Transport
+
+    private func performGQL(query: String, variables: [String: Any]) async throws -> Data {
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("kimne78kx3ncx6brgo4mv6wki5h1ko", forHTTPHeaderField: "Client-Id")
+        req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+
+        let payload: [String: Any] = ["query": query, "variables": variables]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard (200...299).contains((response as? HTTPURLResponse)?.statusCode ?? -1) else {
+            throw URLError(.badServerResponse)
+        }
+        return data
+    }
+}

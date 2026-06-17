@@ -17,11 +17,13 @@ struct HomeView: View {
   @State private var selectedTopTab: TopTab = .home
   @State private var auth = TwitchAuthSession()
   @State private var follows = FollowedChannelsService()
+  @State private var recommendations = RecommendationsService()
   @State private var selectedChannel: FollowedChannel?
+  @State private var pendingBrowseCategory: TwitchCategory?
   @State private var firstFocusRequested = false
   @State private var showAccount = false
 
-  @FocusState private var focusedChannelID: String?
+  @FocusState private var focusedItemID: String?
 
   private enum TopTab: String, CaseIterable, Identifiable {
     case home = "Home"
@@ -53,7 +55,8 @@ struct HomeView: View {
         } else if selectedTopTab == .browse {
           BrowseView(
             auth: auth,
-            selectedChannel: $selectedChannel
+            selectedChannel: $selectedChannel,
+            pendingCategory: $pendingBrowseCategory
           )
         }
       }
@@ -62,6 +65,7 @@ struct HomeView: View {
     .task {
       auth.restore()
       await refreshFollowedChannelsIfNeeded(force: true)
+      await refreshRecommendationsIfNeeded(force: true)
       requestFocusIfPossible(force: true)
     }
     .onChange(of: follows.channels) { _, _ in
@@ -77,6 +81,7 @@ struct HomeView: View {
       guard tab == .home else { return }
       Task {
         await refreshFollowedChannelsIfNeeded(force: false)
+        await refreshRecommendationsIfNeeded(force: false)
       }
     }
     .fullScreenCover(item: $selectedChannel) { channel in
@@ -165,36 +170,114 @@ struct HomeView: View {
     GeometryReader { proxy in
       let rail = channelRailMetrics(for: proxy.size.width)
 
+      ScrollView(.vertical, showsIndicators: false) {
+        VStack(alignment: .leading, spacing: 40) {
+          followingSection(rail: rail)
+          recommendedChannelsSection(rail: rail)
+          recommendedCategoriesSection(rail: rail)
+          authBanner
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(.bottom, 20)
+      }
+      .scrollClipDisabled()
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+  }
+
+  private func followingSection(rail: ChannelRailMetrics) -> some View {
+    VStack(alignment: .leading, spacing: 24) {
+      HStack {
+        Text(follows.isUsingDemoData ? "Trending" : "Following")
+          .font(.title.weight(.bold))
+
+        if follows.isLoading {
+          ProgressView()
+            .scaleEffect(0.85)
+        }
+
+        Spacer()
+
+        Button("Refresh") {
+          Task {
+            await refreshFollowedChannelsIfNeeded(force: true)
+            await refreshRecommendationsIfNeeded(force: true)
+            requestFocusIfPossible(force: true)
+          }
+        }
+      }
+
+      if let errorMessage = follows.errorMessage {
+        Text(errorMessage)
+          .font(.footnote)
+          .foregroundStyle(.orange)
+      }
+
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: rail.spacing) {
+          ForEach(follows.channels) { channel in
+            let itemID = "following-\(channel.id)"
+            let isFocused = focusedItemID == itemID
+
+            FollowedChannelCard(
+              channel: channel,
+              isFocused: isFocused,
+              mediaWidth: rail.mediaWidth,
+              mediaHeight: rail.mediaHeight,
+              focusHorizontalInset: focusHorizontalInset,
+              focusVerticalInset: focusVerticalInset,
+              cardCornerRadius: cardCornerRadius,
+              mediaCornerRadius: mediaCornerRadius
+            )
+            .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
+            .focusable(true)
+            .focused($focusedItemID, equals: itemID)
+            .focusEffectDisabled()
+            .onTapGesture {
+              selectedChannel = channel
+            }
+            .accessibilityAddTraits(.isButton)
+            .scaleEffect(isFocused ? focusedCardScale : 1)
+            .animation(.easeOut(duration: 0.14), value: isFocused)
+            .zIndex(isFocused ? 2 : 0)
+          }
+        }
+        .padding(.vertical, channelRailVerticalPadding)
+      }
+      .scrollClipDisabled()
+
+      if follows.channels.isEmpty {
+        Text(follows.isUsingDemoData ? "No trending channels are available right now." : "No followed channels are available yet.")
+          .foregroundStyle(.secondary)
+      }
+    }
+    .focusSection()
+  }
+
+  @ViewBuilder
+  private func recommendedChannelsSection(rail: ChannelRailMetrics) -> some View {
+    let followedIDs = Set(follows.channels.map(\.id))
+    let recommended = recommendations.channels.filter { !followedIDs.contains($0.id) }
+
+    if !recommended.isEmpty {
       VStack(alignment: .leading, spacing: 24) {
         HStack {
-          Text(follows.isUsingDemoData ? "Trending" : "Following")
+          Text("Recommended channels")
             .font(.title.weight(.bold))
 
-          if follows.isLoading {
+          if recommendations.isLoading {
             ProgressView()
               .scaleEffect(0.85)
           }
 
           Spacer()
-
-          Button("Refresh") {
-            Task {
-              await refreshFollowedChannelsIfNeeded(force: true)
-              requestFocusIfPossible(force: true)
-            }
-          }
-        }
-
-        if let errorMessage = follows.errorMessage {
-          Text(errorMessage)
-            .font(.footnote)
-            .foregroundStyle(.orange)
         }
 
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: rail.spacing) {
-            ForEach(follows.channels) { channel in
-              let isFocused = focusedChannelID == channel.id
+            ForEach(recommended) { channel in
+              let itemID = "recommended-\(channel.id)"
+              let isFocused = focusedItemID == itemID
 
               FollowedChannelCard(
                 channel: channel,
@@ -208,7 +291,7 @@ struct HomeView: View {
               )
               .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
               .focusable(true)
-              .focused($focusedChannelID, equals: channel.id)
+              .focused($focusedItemID, equals: itemID)
               .focusEffectDisabled()
               .onTapGesture {
                 selectedChannel = channel
@@ -222,17 +305,50 @@ struct HomeView: View {
           .padding(.vertical, channelRailVerticalPadding)
         }
         .scrollClipDisabled()
-
-        if follows.channels.isEmpty {
-          Text(follows.isUsingDemoData ? "No trending channels are available right now." : "No followed channels are available yet.")
-            .foregroundStyle(.secondary)
-        }
-
-        Spacer(minLength: 0)
-
-        authBanner
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .focusSection()
+    }
+  }
+
+  @ViewBuilder
+  private func recommendedCategoriesSection(rail: ChannelRailMetrics) -> some View {
+    if !recommendations.categories.isEmpty {
+      let categoryWidth = max(180, min(240, rail.mediaWidth * 0.6))
+
+      VStack(alignment: .leading, spacing: 24) {
+        Text("Recommended categories")
+          .font(.title.weight(.bold))
+
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: rail.spacing) {
+            ForEach(recommendations.categories) { category in
+              let itemID = "category-\(category.id)"
+              let isFocused = focusedItemID == itemID
+
+              HomeCategoryCard(
+                category: category,
+                isFocused: isFocused,
+                width: categoryWidth
+              )
+              .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
+              .focusable(true)
+              .focused($focusedItemID, equals: itemID)
+              .focusEffectDisabled()
+              .onTapGesture {
+                pendingBrowseCategory = category
+                selectedTopTab = .browse
+              }
+              .accessibilityAddTraits(.isButton)
+              .scaleEffect(isFocused ? focusedCardScale : 1)
+              .animation(.easeOut(duration: 0.14), value: isFocused)
+              .zIndex(isFocused ? 2 : 0)
+            }
+          }
+          .padding(.vertical, channelRailVerticalPadding)
+        }
+        .scrollClipDisabled()
+      }
+      .focusSection()
     }
   }
 
@@ -300,7 +416,7 @@ struct HomeView: View {
     Task {
       try? await Task.sleep(for: .milliseconds(150))
       await MainActor.run {
-        focusedChannelID = first.id
+        focusedItemID = "following-\(first.id)"
       }
     }
   }
@@ -310,9 +426,20 @@ struct HomeView: View {
     await follows.refresh(using: auth)
   }
 
+  private func refreshRecommendationsIfNeeded(force: Bool) async {
+    guard force || shouldAutoRefreshRecommendations() else { return }
+    await recommendations.refresh()
+  }
+
   private func shouldAutoRefreshFollowedChannels() -> Bool {
     guard !follows.isLoading else { return false }
     guard let lastUpdatedAt = follows.lastUpdatedAt else { return true }
+    return Date().timeIntervalSince(lastUpdatedAt) >= autoRefreshStaleInterval
+  }
+
+  private func shouldAutoRefreshRecommendations() -> Bool {
+    guard !recommendations.isLoading else { return false }
+    guard let lastUpdatedAt = recommendations.lastUpdatedAt else { return true }
     return Date().timeIntervalSince(lastUpdatedAt) >= autoRefreshStaleInterval
   }
 }
@@ -387,6 +514,55 @@ private struct FollowedChannelCard: View {
     }
     .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
     .shadow(color: Color.black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+  }
+}
+
+private struct HomeCategoryCard: View {
+  let category: TwitchCategory
+  let isFocused: Bool
+  let width: CGFloat
+
+  private let cornerRadius: CGFloat = 16
+  private let artRatio: CGFloat = 285.0 / 380.0
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      AsyncImage(url: category.boxArtURL) { img in
+        img
+          .resizable()
+          .scaledToFill()
+      } placeholder: {
+        Color.white.opacity(0.08)
+      }
+      .frame(width: width, height: width / artRatio)
+      .clipShape(RoundedRectangle(cornerRadius: cornerRadius - 2))
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text(category.name)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(isFocused ? Color.black.opacity(0.92) : Color.primary)
+          .lineLimit(2, reservesSpace: true)
+
+        if let viewers = category.viewerCount {
+          Text("\(viewers) watching")
+            .font(.caption2)
+            .foregroundStyle(isFocused ? Color.black.opacity(0.6) : Color.secondary)
+        } else {
+          Text(" ")
+            .font(.caption2)
+            .hidden()
+        }
+      }
+      .padding(.horizontal, 10)
+      .padding(.bottom, 12)
+    }
+    .padding(10)
+    .frame(width: width + 20)
+    .background {
+      RoundedRectangle(cornerRadius: cornerRadius)
+        .fill(isFocused ? Color.white : Color.white.opacity(0.07))
+    }
+    .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
   }
 }
 

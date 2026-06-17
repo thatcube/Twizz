@@ -5,10 +5,17 @@ import SwiftUI
 struct BrowseView: View {
     let auth: TwitchAuthSession
     @Binding var selectedChannel: FollowedChannel?
+    @Binding var pendingCategory: TwitchCategory?
 
     @State private var service = BrowseService()
     @State private var selectedCategory: TwitchCategory?
     @State private var lastSelectedCategoryID: String?
+
+    private func open(_ category: TwitchCategory) {
+        lastSelectedCategoryID = category.id
+        selectedCategory = category
+        Task { await service.loadStreams(for: category) }
+    }
 
     var body: some View {
         ZStack {
@@ -17,9 +24,7 @@ struct BrowseView: View {
                 preferredFocusedID: lastSelectedCategoryID,
                 isActive: selectedCategory == nil,
                 onSelectCategory: { category in
-                    lastSelectedCategoryID = category.id
-                    selectedCategory = category
-                    Task { await service.loadStreams(for: category) }
+                    open(category)
                 }
             )
             .task {
@@ -42,6 +47,14 @@ struct BrowseView: View {
                 )
             }
         }
+        .onAppear { consumePendingCategoryIfNeeded() }
+        .onChange(of: pendingCategory) { _, _ in consumePendingCategoryIfNeeded() }
+    }
+
+    private func consumePendingCategoryIfNeeded() {
+        guard let category = pendingCategory else { return }
+        pendingCategory = nil
+        open(category)
     }
 }
 
