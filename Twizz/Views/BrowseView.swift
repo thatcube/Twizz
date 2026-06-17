@@ -354,7 +354,7 @@ private struct BrowseChannelCard: View {
                     Circle()
                         .fill(Color.white.opacity(0.14))
                 }
-                .frame(width: 34, height: 34)
+                .frame(width: 68, height: 68)
                 .clipShape(Circle())
 
                 VStack(alignment: .leading, spacing: 4) {
