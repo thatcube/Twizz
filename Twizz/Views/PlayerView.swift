@@ -110,8 +110,10 @@ struct PlayerView: View {
   @State private var raidBannerDismissTask: Task<Void, Never>?
 
   private let controlsAutoHideSeconds: Double = 10
-  private let targetLiveEdgeSeconds: Double = 3.5
-  private let softCatchUpThresholdSeconds: Double = 8
+  /// Live-edge target. Low-latency mode promotes Twitch prefetch segments, so we
+  /// can sit much closer to the edge; without it we keep a safer cushion.
+  private var targetLiveEdgeSeconds: Double { lowLatencyProxyEnabled ? 2.0 : 3.5 }
+  private var softCatchUpThresholdSeconds: Double { lowLatencyProxyEnabled ? 5 : 8 }
   private let hardCatchUpThresholdSeconds: Double = 14
   private let hardCatchUpCooldownSeconds: Double = 20
   private let maxCatchUpRate: Float = 1.04
@@ -1614,7 +1616,9 @@ struct PlayerView: View {
       asset.resourceLoader.setDelegate(lowLatencyProxy, queue: lowLatencyProxy.callbackQueue)
     }
     let item = AVPlayerItem(asset: asset)
-    item.preferredForwardBufferDuration = 1
+    // Smaller forward buffer in low-latency mode to stay nearer the edge; a
+    // slightly larger cushion otherwise for smoother default playback.
+    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 0.5 : 1
     applyCaptions(to: item, retries: 12)
     return item
   }
