@@ -49,6 +49,11 @@ struct SettingsView: View {
 
       HStack(spacing: 28) {
         ForEach(AppTheme.allCases) { theme in
+          // Use the DEFAULT tvOS button style (same as the working Sign In
+          // button). Custom ButtonStyles that return only `configuration.label`
+          // were not being registered as focusable here, so focus skipped past
+          // the cards entirely. The default style provides the focus lift; the
+          // card draws selection state.
           Button {
             themeManager.theme = theme
           } label: {
@@ -58,7 +63,7 @@ struct SettingsView: View {
               isFocused: focusedTheme == theme
             )
           }
-          .buttonStyle(PassthroughButtonStyle())
+          .buttonStyle(.card)
           .focused($focusedTheme, equals: theme)
         }
       }
@@ -155,16 +160,6 @@ struct SettingsView: View {
 
 // MARK: - Theme option card
 
-/// Passthrough button style: keeps the Button focusable on tvOS while
-/// suppressing the platform button visuals. (`.plain` breaks focus on this
-/// tvOS version; focus visuals are driven manually via @FocusState.)
-private struct PassthroughButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .opacity(configuration.isPressed ? 0.92 : 1.0)
-  }
-}
-
 private struct ThemeOptionCard: View {
   let theme: AppTheme
   let isSelected: Bool
@@ -184,7 +179,6 @@ private struct ThemeOptionCard: View {
         .foregroundStyle(isSelected ? Color.green : Color.secondary)
     }
     .frame(width: 200, height: 200)
-    .contentShape(RoundedRectangle(cornerRadius: 22))
     .background(
       RoundedRectangle(cornerRadius: 22)
         .fill(isFocused ? Color.primary.opacity(0.18) : Color.primary.opacity(0.07))
@@ -193,7 +187,5 @@ private struct ThemeOptionCard: View {
       RoundedRectangle(cornerRadius: 22)
         .stroke(isSelected ? Color.green : Color.clear, lineWidth: 3)
     )
-    .scaleEffect(isFocused ? 1.06 : 1)
-    .animation(.easeOut(duration: 0.14), value: isFocused)
   }
 }
