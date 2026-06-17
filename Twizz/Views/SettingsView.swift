@@ -38,6 +38,7 @@ struct SettingsView: View {
 
           preferencesGroup
           accountSection
+          AboutSection()
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.horizontal, AppLayout.horizontalPadding)
@@ -117,8 +118,14 @@ struct SettingsView: View {
       title: "Chat",
       subtitle: "Show chat automatically when you open a stream."
     ) {
-      Toggle("Show chat by default", isOn: $showChatByDefault)
-        .labelsHidden()
+      ForEach([true, false], id: \.self) { on in
+        Button {
+          showChatByDefault = on
+        } label: {
+          SettingPill(title: on ? "On" : "Off", isSelected: showChatByDefault == on)
+        }
+        .settingPillStyle(isSelected: showChatByDefault == on)
+      }
     }
   }
 
@@ -228,6 +235,62 @@ struct SettingsView: View {
         .focusSection()
       }
     }
+  }
+}
+
+// MARK: - About
+
+/// Footer panel showing app identity and version. Made focusable so the
+/// tvOS focus engine can scroll it into view at the bottom of the list.
+private struct AboutSection: View {
+  @FocusState private var isFocused: Bool
+
+  private var version: String {
+    Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+  }
+
+  private var build: String {
+    Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—"
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("About")
+        .font(.system(size: 32, weight: .bold))
+
+      VStack(alignment: .leading, spacing: 10) {
+        infoRow("Name", "Twizz")
+        infoRow("Version", version)
+        infoRow("Build", build)
+      }
+
+      Text("Twizz is an unofficial Twitch client for Apple TV. Not affiliated with or endorsed by Twitch.")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(28)
+    .glassPanel()
+    .overlay(
+      RoundedRectangle(cornerRadius: 24, style: .continuous)
+        .stroke(Color.primary.opacity(isFocused ? 0.45 : 0), lineWidth: 2)
+    )
+    .scaleEffect(isFocused ? 1.01 : 1)
+    .focusable()
+    .focused($isFocused)
+    .animation(.easeOut(duration: 0.15), value: isFocused)
+  }
+
+  private func infoRow(_ label: String, _ value: String) -> some View {
+    HStack(spacing: 16) {
+      Text(label)
+        .foregroundStyle(.secondary)
+        .frame(width: 160, alignment: .leading)
+      Text(value)
+      Spacer(minLength: 0)
+    }
+    .font(.headline)
   }
 }
 
