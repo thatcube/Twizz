@@ -54,6 +54,7 @@ struct PlayerView: View {
   @State private var showChat = true
   @State private var showQualityPicker = false
   @State private var showCaptionsPicker = false
+  @State private var showSignInSheet = false
   @State private var showChatSettings = false
   @State private var showControls = false
   @State private var captionsOn = UIAccessibility.isClosedCaptioningEnabled
@@ -260,6 +261,9 @@ struct PlayerView: View {
     }
     .onChange(of: chatReadabilityModeRaw) { _, _ in
       applyChatReadabilitySettings()
+    }
+    .fullScreenCover(isPresented: $showSignInSheet) {
+      SignInView(auth: auth)
     }
   }
 
@@ -766,9 +770,35 @@ struct PlayerView: View {
         .frame(height: chatComposerRowHeight)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
-        Text("Sign in to send messages")
-          .font(.callout)
-          .foregroundStyle(.secondary)
+        Button {
+          showSignInSheet = true
+          scheduleHide()
+        } label: {
+          ChatInputField(
+            text: .constant(""),
+            placeholder: "Sign in to send messages",
+            isFocused: focus == .chatInput
+          )
+          .allowsHitTesting(false)
+          // Keep the signed-out prompt visually aligned with the active input.
+          .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
+          .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+          .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .focused($focus, equals: .chatInput)
+        .onMoveCommand { direction in
+          switch direction {
+          case .left:
+            revealControls(preferredFocus: .chatToggle)
+          case .up:
+            focus = .chatSettingsButton
+          default:
+            break
+          }
+        }
+        .frame(height: chatComposerRowHeight)
+        .accessibilityLabel("Sign in to send messages")
           .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
