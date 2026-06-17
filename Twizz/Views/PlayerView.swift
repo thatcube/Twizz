@@ -712,10 +712,12 @@ struct PlayerView: View {
       }
 
       if auth.isAuthenticated {
-        HStack(spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
           TextField("Send a message", text: $chatDraft)
             .textFieldStyle(.plain)
             .font(.callout)
+            .lineLimit(1)
+            .frame(maxHeight: .infinity)
             .focused($focus, equals: .chatInput)
             .onMoveCommand { direction in
               switch direction {
@@ -759,6 +761,7 @@ struct PlayerView: View {
             .transition(.opacity.combined(with: .scale))
           }
         }
+        .frame(minHeight: 56)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
         Text("Sign in to send messages")
