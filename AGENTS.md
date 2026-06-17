@@ -53,3 +53,13 @@ Required completion rule:
 4. If the user explicitly says not to push, skip push and state that clearly.
 
 When user asks to push, include all requested modified files in one commit, push to the current branch, then deploy to Apple TV and report commit hash.
+
+## Completion checklist (do not skip)
+
+Before ending any task that edits files in this repo, the agent must do all of the following in the same turn:
+
+1. Run a fresh Apple TV device build.
+2. Install the newly built app on Apple TV.
+3. Launch the app on Apple TV.
+4. Report all three outcomes explicitly in the response.
+5. If any step fails, state the failure and stop claiming deployment is complete.

@@ -53,3 +53,13 @@ Required completion rule:
 2. Push that commit to the currently checked out branch before ending the task.
 3. Report the pushed commit hash in the response.
 4. If the user explicitly says not to push, skip push and state that clearly.
+
+## Completion checklist (do not skip)
+
+Before ending any task that edits files in this repo, the agent must do all of the following in the same turn:
+
+1. Run a fresh Apple TV device build.
+2. Install the newly built app on Apple TV.
+3. Launch the app on Apple TV.
+4. Report all three outcomes explicitly in the response.
+5. If any step fails, state the failure and stop claiming deployment is complete.
