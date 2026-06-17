@@ -1754,17 +1754,11 @@ private struct ChatInputField: UIViewRepresentable {
     field.delegate = context.coordinator
     field.borderStyle = .none
     field.backgroundColor = .clear
-    field.clipsToBounds = true
     field.textColor = .white
     field.tintColor = .white
     field.font = .preferredFont(forTextStyle: .callout)
     field.contentVerticalAlignment = .center
     field.adjustsFontForContentSizeCategory = true
-    field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
-    field.leftViewMode = .always
-    field.rightView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
-    field.rightViewMode = .always
     field.attributedPlaceholder = NSAttributedString(
       string: placeholder,
       attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.45)]
