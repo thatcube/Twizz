@@ -137,8 +137,12 @@ extension ChatMessage {
 
     private static func mergeBadgeKeys(explicit: [String], inferred: [String]) -> [String] {
         var merged = explicit
-        for key in inferred where !merged.contains(key) {
-            merged.append(key)
+        let explicitCategories = Set(explicit.map { $0.split(separator: "/").first.map(String.init) ?? $0 })
+        for key in inferred {
+            let category = key.split(separator: "/").first.map(String.init) ?? key
+            if !explicitCategories.contains(category) {
+                merged.append(key)
+            }
         }
         return merged
     }
