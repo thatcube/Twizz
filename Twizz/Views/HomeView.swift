@@ -4,13 +4,13 @@ struct HomeView: View {
   let deepLinkRouter: DeepLinkRouter
 
   private let channelRailVerticalPadding: CGFloat = 20
-  private let peekCardFraction: CGFloat = 0.15
+  private let peekCardFraction: CGFloat = 0.1
   private let focusHorizontalInset: CGFloat = 18
   private let focusVerticalInset: CGFloat = 18
   private let cardCornerRadius: CGFloat = 22
   private let mediaCornerRadius: CGFloat = 18
   private let minMediaWidth: CGFloat = 220
-  private let maxMediaWidth: CGFloat = 560
+  private let maxMediaWidth: CGFloat = 900
   private let focusedCardScale: CGFloat = 1.07
   private let autoRefreshStaleInterval: TimeInterval = 5 * 60
 
@@ -384,9 +384,17 @@ struct HomeView: View {
   }
 
   private func channelRailMetrics(for availableWidth: CGFloat) -> ChannelRailMetrics {
-    let width = max(availableWidth, 1)
-    let spacing = max(18, min(32, width * 0.012))
-    let rawOuterCardWidth = (width - ((targetVisibleCards - 1) * spacing)) / (targetVisibleCards + peekCardFraction)
+    // Cards begin at the left page gutter and, because the horizontal rails
+    // disable scroll clipping, paint rightward all the way to the screen edge.
+    // So the visible region is the full width minus a single (left) gutter.
+    let visibleWidth = max(availableWidth - AppLayout.horizontalPadding, 1)
+    let n = targetVisibleCards
+    let peek = peekCardFraction
+    let spacing = max(18, min(32, visibleWidth * 0.012))
+    // Fit `n` full cards plus a `peek` sliver of the next one, with a full
+    // spacing gap before each of those following cards (n gaps total). Solving
+    // visibleWidth = (n + peek) * outer + n * spacing for `outer`.
+    let rawOuterCardWidth = (visibleWidth - (n * spacing)) / (n + peek)
     let minOuterCardWidth = minMediaWidth + (focusHorizontalInset * 2)
     let maxOuterCardWidth = maxMediaWidth + (focusHorizontalInset * 2)
     let outerCardWidth = min(max(rawOuterCardWidth, minOuterCardWidth), maxOuterCardWidth)
