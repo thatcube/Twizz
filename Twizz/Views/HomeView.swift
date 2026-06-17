@@ -3,7 +3,6 @@ import SwiftUI
 struct HomeView: View {
   let deepLinkRouter: DeepLinkRouter
 
-  private let pagePadding: CGFloat = 28
   private let channelRailVerticalPadding: CGFloat = 20
   private let targetVisibleCards: CGFloat = 4
   private let peekCardFraction: CGFloat = 0.15
@@ -136,8 +135,6 @@ struct HomeView: View {
 
       content()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.horizontal, pagePadding)
-        .padding(.top, 12)
     }
   }
 
@@ -153,6 +150,7 @@ struct HomeView: View {
           authBanner
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(.horizontal, AppLayout.horizontalPadding)
         .padding(.bottom, 20)
       }
       .scrollClipDisabled()

@@ -29,7 +29,7 @@ struct SettingsView: View {
           accountSection
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.horizontal, 80)
+        .padding(.horizontal, AppLayout.horizontalPadding)
         .padding(.vertical, 60)
       }
       .scrollClipDisabled()

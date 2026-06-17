@@ -63,15 +63,6 @@ private struct BrowseCategoriesView: View {
         GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 24)
     ]
 
-    private func initialFocusID(from categories: [TwitchCategory]) -> String? {
-        if let focusedID,
-           categories.contains(where: { $0.id == focusedID })
-        {
-            return focusedID
-        }
-        return categories.first?.id
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             HStack {
@@ -122,26 +113,8 @@ private struct BrowseCategoriesView: View {
 
             Spacer(minLength: 0)
         }
+        .padding(.horizontal, AppLayout.horizontalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear {
-            guard focusedID == nil,
-                  let targetID = initialFocusID(from: service.categories)
-            else { return }
-            Task {
-                try? await Task.sleep(for: .milliseconds(150))
-                await MainActor.run { focusedID = targetID }
-            }
-        }
-        .onChange(of: service.categories) { _, categories in
-            if focusedID == nil,
-               let targetID = initialFocusID(from: categories)
-            {
-                Task {
-                    try? await Task.sleep(for: .milliseconds(150))
-                    await MainActor.run { focusedID = targetID }
-                }
-            }
-        }
     }
 }
 
@@ -157,7 +130,6 @@ private struct BrowseStreamsView: View {
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
     private let gridSpacing: CGFloat = 20
-    private let gridHorizontalInset: CGFloat = 8
     private let gridBottomInset: CGFloat = 12
 
     var body: some View {
@@ -243,7 +215,7 @@ private struct BrowseStreamsView: View {
                         .focusSection()
                     }
                 }
-                .padding(.horizontal, gridHorizontalInset)
+                .padding(.horizontal, AppLayout.horizontalPadding)
                 .padding(.top, 8)
                 .padding(.bottom, gridBottomInset)
             }

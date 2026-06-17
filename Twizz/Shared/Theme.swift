@@ -1,5 +1,14 @@
 import SwiftUI
 
+// MARK: - AppLayout
+
+/// Shared layout metrics so every screen lines up to the same gutters.
+/// There should be no per-page horizontal padding overrides — use these.
+enum AppLayout {
+  /// The single horizontal page gutter shared by every top-level view.
+  static let horizontalPadding: CGFloat = 48
+}
+
 // MARK: - AppTheme
 
 /// User-selectable appearance options exposed in Settings.
