@@ -141,6 +141,7 @@ final class ChatService {
   private let youtubePollMinDelayMs: UInt64 = 900
   private let youtubeUserAgent =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+  private let maxBufferedMessages = 1800
 
   func configureExperimentalYouTubeMerge(enabled: Bool, channelOrURL: String) {
     youtubeMergeEnabled = enabled
@@ -903,6 +904,9 @@ final class ChatService {
       return lhs.timestamp < rhs.timestamp
     }
     messages.append(contentsOf: sorted)
+    if messages.count > maxBufferedMessages {
+      messages.removeFirst(messages.count - maxBufferedMessages)
+    }
   }
 }
 

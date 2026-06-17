@@ -55,6 +55,7 @@ struct PlayerView: View {
   @State private var errorMessage: String?
   @State private var isLoading = true
   @State private var showChat = true
+  @State private var chatReplayCutoff: Date?
   @State private var showQualityPicker = false
   @State private var showCaptionsPicker = false
   @State private var showSignInSheet = false
@@ -113,6 +114,7 @@ struct PlayerView: View {
   private let startupPlaybackPollMilliseconds: UInt64 = 500
   private let stalledPlaybackThresholdSamples = 6
   private let playbackWatchdogIntervalSeconds: Double = 2
+  private let chatReplayWindowSeconds: TimeInterval = 5
   private let chatComposerRowHeight: CGFloat = 62
   private let chatInputFocusedHeight: CGFloat = 62
   private let chatInputUnfocusedHeight: CGFloat = 54
@@ -155,6 +157,11 @@ struct PlayerView: View {
 
   private var chatWidth: CGFloat {
     chatWidthMode.width
+  }
+
+  private var visibleChatMessages: [ChatMessage] {
+    guard let cutoff = chatReplayCutoff else { return chat.messages }
+    return chat.messages.filter { $0.timestamp >= cutoff }
   }
 
   /// Trailing inset for the bottom control bar so its right-aligned buttons
@@ -454,7 +461,7 @@ struct PlayerView: View {
         }
 
         Button {
-          showChat.toggle()
+          toggleChatVisibility()
           if !showChat, focus == .chatInput {
             focus = .chatToggle
           }
@@ -561,6 +568,16 @@ struct PlayerView: View {
     }
   }
 
+  private func toggleChatVisibility() {
+    showChat.toggle()
+    if showChat {
+      chatReplayCutoff = Date().addingTimeInterval(-chatReplayWindowSeconds)
+    } else {
+      chatReplayCutoff = nil
+      showChatSettings = false
+    }
+  }
+
   private func isControlFocus(_ focus: Focusable) -> Bool {
     switch focus {
     case .streamInfo, .quality, .captions, .chatToggle, .chatInput:
@@ -592,7 +609,7 @@ struct PlayerView: View {
     return VStack(spacing: 0) {
       ChatView(
         channel: channel,
-        messages: chat.messages,
+        messages: visibleChatMessages,
         textSize: chatTextSize,
         messageSpacing: chatLineSpacing,
         lineHeight: chatLineHeight,
