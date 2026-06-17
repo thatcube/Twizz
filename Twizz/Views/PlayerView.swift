@@ -1818,23 +1818,19 @@ private struct ChatInputShellStyle: ViewModifier {
       content
         .padding(.horizontal, 16)
         .clipShape(shape)
-        .background(.white.opacity(isFocused ? 0.10 : 0.06), in: shape)
         .glassEffect(.regular, in: shape)
-        .overlay(
-          shape
-            .strokeBorder(.white.opacity(isFocused ? 0.34 : 0.20), lineWidth: 1)
-        )
-        .scaleEffect(isFocused ? 1.01 : 1.0)
-        .shadow(color: .white.opacity(isFocused ? 0.12 : 0.05), radius: 8, x: 0, y: 0)
-        .shadow(color: .black.opacity(0.30), radius: 8, x: 0, y: 3)
+        .scaleEffect(isFocused ? 1.03 : 1.0)
+        .shadow(color: .white.opacity(isFocused ? 0.20 : 0.06), radius: isFocused ? 14 : 6, x: 0, y: 0)
+        .shadow(color: .black.opacity(0.22), radius: 7, x: 0, y: 3)
     } else {
       content
         .padding(.horizontal, 16)
         .background(.ultraThinMaterial, in: shape)
         .overlay(
           shape
-            .strokeBorder(.white.opacity(isFocused ? 0.18 : 0.10), lineWidth: 1)
+            .strokeBorder(.white.opacity(isFocused ? 0.18 : 0.08), lineWidth: isFocused ? 1.25 : 0.75)
         )
+        .scaleEffect(isFocused ? 1.02 : 1.0)
     }
   }
 }
@@ -1872,7 +1868,7 @@ private struct ChatInputField: UIViewRepresentable {
       action: #selector(Coordinator.editingChanged(_:)),
       for: .editingChanged
     )
-    field.alpha = 0.01
+    field.alpha = 1
     return field
   }
 
@@ -1884,7 +1880,7 @@ private struct ChatInputField: UIViewRepresentable {
     context.coordinator.allowsEditing = allowsEditing
     context.coordinator.onActivate = onActivate
 
-    uiView.alpha = 0.01
+    uiView.alpha = 1
     uiView.backgroundColor = .clear
     uiView.textColor = .clear
     uiView.tintColor = .clear
