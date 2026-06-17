@@ -66,54 +66,56 @@ private struct BrowseCategoriesView: View {
     ]
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack {
-                    Text("Browse")
-                        .font(.title.weight(.bold))
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 24) {
+                    HStack {
+                        Text("Browse")
+                            .font(.title.weight(.bold))
 
-                    if service.isLoadingCategories {
-                        ProgressView().scaleEffect(0.85)
-                    }
-
-                    Spacer()
-
-                    Button("Refresh") {
-                        Task { await service.loadCategories() }
-                    }
-                }
-
-                if let err = service.categoryErrorMessage {
-                    Text(err)
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                }
-
-                LazyVGrid(columns: columns, spacing: 24) {
-                    ForEach(service.categories) { category in
-                        let isFocused = focusedID == category.id
-                        CategoryCard(
-                            category: category,
-                            isFocused: isFocused
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 14))
-                        .focusable(true)
-                        .focused($focusedID, equals: category.id)
-                        .focusEffectDisabled()
-                        .onTapGesture {
-                            onSelectCategory(category)
+                        if service.isLoadingCategories {
+                            ProgressView().scaleEffect(0.85)
                         }
-                        .scaleEffect(isFocused ? 1.07 : 1)
-                        .animation(.easeOut(duration: 0.14), value: isFocused)
-                        .zIndex(isFocused ? 2 : 0)
+
+                        Spacer()
+
+                        Button("Refresh") {
+                            Task { await service.loadCategories() }
+                        }
                     }
+
+                    if let err = service.categoryErrorMessage {
+                        Text(err)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+
+                    LazyVGrid(columns: columns, spacing: 24) {
+                        ForEach(service.categories) { category in
+                            let isFocused = focusedID == category.id
+                            CategoryCard(
+                                category: category,
+                                isFocused: isFocused
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 14))
+                            .focusable(true)
+                            .focused($focusedID, equals: category.id)
+                            .focusEffectDisabled()
+                            .onTapGesture {
+                                onSelectCategory(category)
+                            }
+                            .scaleEffect(isFocused ? 1.07 : 1)
+                            .animation(.easeOut(duration: 0.14), value: isFocused)
+                            .zIndex(isFocused ? 2 : 0)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .focusSection()
                 }
-                .padding(.vertical, 8)
-                .focusSection()
+                .padding(.bottom, 12)
             }
-            .padding(.bottom, 12)
+            .scrollClipDisabled()
         }
-        .scrollClipDisabled()
         .padding(.horizontal, AppLayout.horizontalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

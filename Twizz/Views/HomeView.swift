@@ -152,18 +152,20 @@ struct HomeView: View {
     GeometryReader { proxy in
       let rail = channelRailMetrics(for: proxy.size.width)
 
-      ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 40) {
-          followingSection(rail: rail)
-          recommendedChannelsSection(rail: rail)
-          recommendedCategoriesSection(rail: rail)
-          authBanner
+      VStack(spacing: 0) {
+        ScrollView(.vertical, showsIndicators: false) {
+          VStack(alignment: .leading, spacing: 40) {
+            followingSection(rail: rail)
+            recommendedChannelsSection(rail: rail)
+            recommendedCategoriesSection(rail: rail)
+            authBanner
+          }
+          .frame(maxWidth: .infinity, alignment: .topLeading)
+          .padding(.horizontal, AppLayout.horizontalPadding)
+          .padding(.bottom, 20)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.horizontal, AppLayout.horizontalPadding)
-        .padding(.bottom, 20)
+        .scrollClipDisabled()
       }
-      .scrollClipDisabled()
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
   }
