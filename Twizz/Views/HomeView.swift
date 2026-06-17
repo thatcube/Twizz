@@ -78,7 +78,6 @@ struct HomeView: View {
       .tabItem { Text("Settings") }
       .tag(TopTab.settings)
     }
-    .preferredNativeTabBarPlacementIfAvailable()
     .background(
       LinearGradient(
         colors: resolvedPalette.backgroundColors,
@@ -152,20 +151,18 @@ struct HomeView: View {
     GeometryReader { proxy in
       let rail = channelRailMetrics(for: proxy.size.width)
 
-      VStack(spacing: 0) {
-        ScrollView(.vertical, showsIndicators: false) {
-          VStack(alignment: .leading, spacing: 40) {
-            followingSection(rail: rail)
-            recommendedChannelsSection(rail: rail)
-            recommendedCategoriesSection(rail: rail)
-            authBanner
-          }
-          .frame(maxWidth: .infinity, alignment: .topLeading)
-          .padding(.horizontal, AppLayout.horizontalPadding)
-          .padding(.bottom, 20)
+      ScrollView(.vertical, showsIndicators: false) {
+        VStack(alignment: .leading, spacing: 40) {
+          followingSection(rail: rail)
+          recommendedChannelsSection(rail: rail)
+          recommendedCategoriesSection(rail: rail)
+          authBanner
         }
-        .scrollClipDisabled()
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(.horizontal, AppLayout.horizontalPadding)
+        .padding(.bottom, 20)
       }
+      .scrollClipDisabled()
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
   }
@@ -607,15 +604,4 @@ private struct HomeCategoryCard: View {
 
 #Preview {
   HomeView(deepLinkRouter: DeepLinkRouter())
-}
-
-private extension View {
-  @ViewBuilder
-  func preferredNativeTabBarPlacementIfAvailable() -> some View {
-    if #available(tvOS 27.0, *) {
-      self.defaultTabBarPlacement(.tabBar)
-    } else {
-      self
-    }
-  }
 }
