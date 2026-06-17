@@ -163,89 +163,114 @@ private struct BrowseStreamsView: View {
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
     private let gridSpacing: CGFloat = 20
+    private let gridHorizontalInset: CGFloat = 14
+    private let gridBottomInset: CGFloat = 44
+    private let topScrollBlurHeight: CGFloat = 68
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 24) {
-                // Header
-                HStack(spacing: 20) {
-                    Button(action: onBack) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "chevron.left")
-                            Text("Categories")
-                        }
-                        .font(.callout.weight(.medium))
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color.white.opacity(0.1))
-                        )
+        VStack(alignment: .leading, spacing: 20) {
+            // Header
+            HStack(spacing: 20) {
+                Button(action: onBack) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                        Text("Categories")
                     }
-                    .buttonStyle(.plain)
-
-                    if let url = category.boxArtURL {
-                        AsyncImage(url: url) { img in
-                            img.resizable().scaledToFill()
-                        } placeholder: {
-                            Color.white.opacity(0.08)
-                        }
-                        .frame(width: 40, height: 53)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(category.name)
-                            .font(.title.weight(.bold))
-                        if let viewers = category.viewerCount {
-                            Text("\(viewers) watching")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if service.isLoadingStreams && service.categoryStreams.isEmpty {
-                        ProgressView().scaleEffect(0.85)
-                    }
-
-                    Spacer()
+                    .font(.callout.weight(.medium))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.white.opacity(0.1))
+                    )
                 }
-                .focusSection()
+                .buttonStyle(.plain)
 
-                if let err = service.streamsErrorMessage {
-                    Text(err)
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
+                if let url = category.boxArtURL {
+                    AsyncImage(url: url) { img in
+                        img.resizable().scaledToFill()
+                    } placeholder: {
+                        Color.white.opacity(0.08)
+                    }
+                    .frame(width: 40, height: 53)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
 
-                if !service.isLoadingStreams && service.categoryStreams.isEmpty && service.streamsErrorMessage == nil {
-                    Text("No live streams found for \(category.name) right now.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    LazyVGrid(columns: columns, spacing: gridSpacing) {
-                        ForEach(service.categoryStreams) { channel in
-                            let isFocused = focusedStreamID == channel.id
-                            BrowseChannelCard(
-                                channel: channel,
-                                isFocused: isFocused
-                            )
-                            .contentShape(RoundedRectangle(cornerRadius: 16))
-                            .focusable(true)
-                            .focused($focusedStreamID, equals: channel.id)
-                            .focusEffectDisabled()
-                            .onTapGesture {
-                                selectedChannel = channel
-                            }
-                            .scaleEffect(isFocused ? 1.06 : 1)
-                            .animation(.easeOut(duration: 0.14), value: isFocused)
-                            .zIndex(isFocused ? 2 : 0)
-                        }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(category.name)
+                        .font(.title.weight(.bold))
+                    if let viewers = category.viewerCount {
+                        Text("\(viewers) watching")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
-                    .focusSection()
                 }
+
+                if service.isLoadingStreams && service.categoryStreams.isEmpty {
+                    ProgressView().scaleEffect(0.85)
+                }
+
+                Spacer()
             }
-            .padding(.vertical, 8)
+            .focusSection()
+
+            if let err = service.streamsErrorMessage {
+                Text(err)
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
+
+            ZStack(alignment: .top) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    if !service.isLoadingStreams && service.categoryStreams.isEmpty && service.streamsErrorMessage == nil {
+                        Text("No live streams found for \(category.name) right now.")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 8)
+                    } else {
+                        LazyVGrid(columns: columns, spacing: gridSpacing) {
+                            ForEach(service.categoryStreams) { channel in
+                                let isFocused = focusedStreamID == channel.id
+                                BrowseChannelCard(
+                                    channel: channel,
+                                    isFocused: isFocused
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: 16))
+                                .focusable(true)
+                                .focused($focusedStreamID, equals: channel.id)
+                                .focusEffectDisabled()
+                                .onTapGesture {
+                                    selectedChannel = channel
+                                }
+                                .scaleEffect(isFocused ? 1.06 : 1)
+                                .animation(.easeOut(duration: 0.14), value: isFocused)
+                                .zIndex(isFocused ? 2 : 0)
+                            }
+                        }
+                        .focusSection()
+                    }
+                }
+                .padding(.horizontal, gridHorizontalInset)
+                .padding(.top, 8)
+                .padding(.bottom, gridBottomInset)
+
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.55),
+                        Color.black.opacity(0.25),
+                        Color.clear
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: topScrollBlurHeight)
+                .background(.ultraThinMaterial.opacity(0.45))
+                .allowsHitTesting(false)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
         }
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onExitCommand { onBack() }
         .onChange(of: service.categoryStreams) { _, streams in
