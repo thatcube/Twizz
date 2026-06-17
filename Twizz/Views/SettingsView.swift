@@ -72,7 +72,7 @@ struct SettingsView: View {
         Button {
           themeManager.theme = theme
         } label: {
-          SettingPill(title: theme.displayName)
+          SettingPill(title: theme.displayName, isSelected: themeManager.theme == theme)
         }
         .settingPillStyle(isSelected: themeManager.theme == theme)
         .focused($focusedTheme, equals: theme)
@@ -90,7 +90,11 @@ struct SettingsView: View {
         Button {
           streamCardSizeRaw = size.rawValue
         } label: {
-          SettingPill(title: size.title, subtitle: size.subtitle)
+          SettingPill(
+            title: size.title,
+            subtitle: size.subtitle,
+            isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size
+          )
         }
         .settingPillStyle(isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size)
         .focused($focusedCardSize, equals: size)
@@ -209,22 +213,30 @@ struct SettingsView: View {
 
 // MARK: - Selectable option pill
 
-/// Compact label used inside a setting row. Selection and focus are conveyed
-/// by the native Liquid Glass button style applied to the enclosing button
-/// (prominent = active), so the label itself stays purely textual.
+/// Compact label used inside a setting row. Focus is handled by the native
+/// Liquid Glass button style; the active option is marked with a trailing
+/// checkmark (reserved width so pills stay aligned), matching the tvOS
+/// Settings selection idiom.
 private struct SettingPill: View {
   let title: String
   var subtitle: String? = nil
+  let isSelected: Bool
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(title)
-        .font(.headline)
-      if let subtitle {
-        Text(subtitle)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
+    HStack(spacing: 12) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+          .font(.headline)
+        if let subtitle {
+          Text(subtitle)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
       }
+
+      Image(systemName: "checkmark")
+        .font(.subheadline.weight(.bold))
+        .opacity(isSelected ? 1 : 0)
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 8)
