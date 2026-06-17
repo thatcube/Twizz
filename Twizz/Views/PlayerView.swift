@@ -53,9 +53,13 @@ struct PlayerView: View {
   @AppStorage("chatSyncToStream") private var chatSyncToStream = false
   @AppStorage("experimentalYouTubeMergeEnabled") private var experimentalYouTubeMergeEnabled = false
   @AppStorage("experimentalYouTubeMergeChannelOrURL") private var experimentalYouTubeMergeChannelOrURL = ""
+  @AppStorage(LowLatencyHLSProxy.settingsKey) private var lowLatencyProxyEnabled = false
 
   @State private var chat = ChatService()
   @State private var player = AVPlayer()
+  /// Retained for the player's lifetime: `AVURLAsset` only holds its resource
+  /// loader delegate weakly, so the proxy must be owned here to stay alive.
+  @State private var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
   @State private var playback: StreamPlayback?
   @State private var errorMessage: String?
   @State private var isLoading = true
@@ -337,6 +341,10 @@ struct PlayerView: View {
     }
     .onChange(of: experimentalYouTubeMergeChannelOrURL) { _, _ in
       applyExperimentalYouTubeSettings()
+    }
+    .onChange(of: lowLatencyProxyEnabled) { _, _ in
+      // Rebuild the asset pipeline so the proxy is attached/detached cleanly.
+      Task { await load(reason: "lowLatencyToggle", resetMetadata: false) }
     }
     .fullScreenCover(isPresented: $showSignInSheet) {
       SignInView(auth: auth)
@@ -1590,10 +1598,21 @@ struct PlayerView: View {
   }
 
   private func makeItem(url: URL) -> AVPlayerItem {
+    let assetURL: URL
+    if lowLatencyProxyEnabled {
+      assetURL = lowLatencyProxy.proxyURL(for: url)
+    } else {
+      assetURL = url
+    }
     let asset = AVURLAsset(
-      url: url,
+      url: assetURL,
       options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
     )
+    if lowLatencyProxyEnabled {
+      // Promotes Twitch's #EXT-X-TWITCH-PREFETCH segments (which AVPlayer would
+      // otherwise ignore) into real segments, pulling playback closer to live.
+      asset.resourceLoader.setDelegate(lowLatencyProxy, queue: lowLatencyProxy.callbackQueue)
+    }
     let item = AVPlayerItem(asset: asset)
     item.preferredForwardBufferDuration = 1
     applyCaptions(to: item, retries: 12)
