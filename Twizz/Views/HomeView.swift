@@ -14,7 +14,6 @@ struct HomeView: View {
   private let maxMediaWidth: CGFloat = 560
   private let focusedCardScale: CGFloat = 1.07
   private let autoRefreshStaleInterval: TimeInterval = 5 * 60
-  private let topTabBarContentInset: CGFloat = 100
 
   @State private var selectedTopTab: TopTab = .home
   @State private var auth = TwitchAuthSession()
@@ -25,8 +24,6 @@ struct HomeView: View {
   @State private var pendingBrowseCategory: TwitchCategory?
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
-  @State private var isTopTabBarVisible = true
-  @FocusState private var focusedTopTab: TopTab?
 
   @Environment(\.colorScheme) private var systemColorScheme
   @FocusState private var focusedItemID: String?
@@ -52,36 +49,34 @@ struct HomeView: View {
   }
 
   var body: some View {
-    tabContainer {
-      Group {
-        switch selectedTopTab {
-        case .home:
-          homeTab
-        case .browse:
-          BrowseView(
-            auth: auth,
-            selectedChannel: $selectedChannel,
-            pendingCategory: $pendingBrowseCategory,
-            onTopTabBarVisibilityChanged: { isVisible in
-              setTopTabBarVisible(isVisible)
-            }
-          )
-        case .settings:
-          SettingsView(
-            themeManager: themeManager,
-            auth: auth,
-            onRequestSignIn: { showSignIn = true },
-            onAccountChanged: {
-              Task {
-                await refreshFollowedChannelsIfNeeded(force: true)
-                requestFocusIfPossible(force: true)
-              }
-            }
-          )
-        }
+    TabView(selection: $selectedTopTab) {
+      tabContainer { homeTab }
+        .tabItem { Text("Home") }
+        .tag(TopTab.home)
+
+      tabContainer {
+        BrowseView(
+          auth: auth,
+          selectedChannel: $selectedChannel,
+          pendingCategory: $pendingBrowseCategory
+        )
       }
-      .transition(.opacity)
-      .id(selectedTopTab)
+      .tabItem { Text("Browse") }
+      .tag(TopTab.browse)
+
+      SettingsView(
+        themeManager: themeManager,
+        auth: auth,
+        onRequestSignIn: { showSignIn = true },
+        onAccountChanged: {
+          Task {
+            await refreshFollowedChannelsIfNeeded(force: true)
+            requestFocusIfPossible(force: true)
+          }
+        }
+      )
+      .tabItem { Text("Settings") }
+      .tag(TopTab.settings)
     }
     .background(
       LinearGradient(
@@ -111,8 +106,6 @@ struct HomeView: View {
       }
     }
     .onChange(of: selectedTopTab) { _, tab in
-      setTopTabBarVisible(true)
-
       guard tab == .home else { return }
       Task {
         await refreshFollowedChannelsIfNeeded(force: false)
@@ -136,14 +129,7 @@ struct HomeView: View {
       .environment(\.themePalette, resolvedPalette)
       .preferredColorScheme(themeManager.theme.preferredColorScheme)
     }
-    .overlay(alignment: .top) {
-      if isTopTabBarVisible {
-        topTabBar
-          .transition(.move(edge: .top).combined(with: .opacity))
-          .zIndex(20)
-      }
-    }
-    .animation(.easeInOut(duration: 0.28), value: isTopTabBarVisible)
+    .toolbar(.visible, for: .tabBar)
   }
 
   @ViewBuilder
@@ -158,54 +144,6 @@ struct HomeView: View {
 
       content()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.top, isTopTabBarVisible ? topTabBarContentInset : 0)
-    }
-  }
-
-  private var topTabBar: some View {
-    VStack(spacing: 0) {
-      Rectangle()
-        .fill(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-          HStack(spacing: 18) {
-            ForEach(TopTab.allCases) { tab in
-              Button {
-                selectedTopTab = tab
-                setTopTabBarVisible(true)
-              } label: {
-                Text(tab.rawValue)
-                  .font(.headline.weight(.semibold))
-                  .foregroundStyle(tab == selectedTopTab ? Color.white : Color.primary.opacity(0.9))
-                  .padding(.horizontal, 20)
-                  .padding(.vertical, 10)
-                  .background {
-                    Capsule()
-                      .fill(tab == selectedTopTab ? Color.primary.opacity(0.78) : Color.primary.opacity(0.16))
-                  }
-                  .overlay {
-                    Capsule()
-                      .stroke(focusedTopTab == tab ? Color.white.opacity(0.95) : Color.clear, lineWidth: 2)
-                  }
-              }
-              .buttonStyle(.plain)
-              .focused($focusedTopTab, equals: tab)
-            }
-          }
-          .padding(.bottom, 12)
-          .padding(.horizontal, AppLayout.horizontalPadding)
-        }
-        .frame(height: topTabBarContentInset)
-        .overlay(alignment: .bottom) {
-          Divider().opacity(0.22)
-        }
-    }
-    .ignoresSafeArea(edges: .top)
-  }
-
-  private func setTopTabBarVisible(_ isVisible: Bool) {
-    guard isTopTabBarVisible != isVisible else { return }
-    withAnimation(.easeInOut(duration: 0.28)) {
-      isTopTabBarVisible = isVisible
     }
   }
 
