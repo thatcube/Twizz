@@ -260,14 +260,14 @@ private struct SignInWaitingView: View {
   }
 
   private static let lines: [Line] = [
-    Line(text: "Waiting on you", emote: "PauseChamp"),
+    Line(text: "Waiting on you", emote: "peepoHappy"),
     Line(text: "Any second now", emote: "monkaS"),
-    Line(text: "Go on, scan it", emote: "catJAM"),
-    Line(text: "No rush, chat", emote: "peepoHappy"),
-    Line(text: "We're so back", emote: "POGGERS"),
-    Line(text: "Take your time", emote: "Sadge"),
-    Line(text: "Hop in already", emote: "widepeepoHappy"),
+    Line(text: "We're so back", emote: "FeelsAmazingMan"),
+    Line(text: "No rush, chat", emote: "FeelsGoodMan"),
     Line(text: "Easy clap", emote: "EZ"),
+    Line(text: "Nice one", emote: "Clap"),
+    Line(text: "Vibing till you're in", emote: "ffzJam"),
+    Line(text: "Let's gooo", emote: "PepePls"),
   ]
 
   @State private var index = 0
