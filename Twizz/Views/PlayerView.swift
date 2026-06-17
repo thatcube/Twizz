@@ -708,7 +708,7 @@ struct PlayerView: View {
       }
 
       if auth.isAuthenticated {
-        HStack(alignment: .center, spacing: 12) {
+        ZStack(alignment: .trailing) {
           ChatInputField(
             text: $chatDraft,
             placeholder: "Send a message",
@@ -717,6 +717,8 @@ struct PlayerView: View {
           // Match the send button feel: the input grows when focused.
           .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+          // Reserve trailing text space only when the send button is visible.
+          .padding(.trailing, hasChatDraft ? 66 : 0)
           .frame(maxWidth: .infinity)
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in
@@ -732,30 +734,32 @@ struct PlayerView: View {
             }
           }
 
-          Button {
-            submitChatMessage()
-          } label: {
-            if isSendingChat {
-              ProgressView()
-                .frame(width: 24, height: 24)
-            } else {
-              Image(systemName: "paperplane.fill")
-                .font(.system(size: 20, weight: .semibold))
-                .frame(width: 24, height: 24)
+          if hasChatDraft {
+            Button {
+              submitChatMessage()
+            } label: {
+              if isSendingChat {
+                ProgressView()
+                  .frame(width: 24, height: 24)
+              } else {
+                Image(systemName: "paperplane.fill")
+                  .font(.system(size: 20, weight: .semibold))
+                  .frame(width: 24, height: 24)
+              }
             }
-          }
-          .TwizzControlButtonStyle()
-          .disabled(isSendingChat || !hasChatDraft)
-          .opacity(hasChatDraft ? 1 : 0)
-          .focused($focus, equals: .chatSend)
-          .onMoveCommand { direction in
-            switch direction {
-            case .left:
-              focus = .chatInput
-            case .up:
-              focus = .chatSettingsButton
-            default:
-              break
+            .TwizzControlButtonStyle()
+            .disabled(isSendingChat)
+            .focused($focus, equals: .chatSend)
+            .transition(.opacity)
+            .onMoveCommand { direction in
+              switch direction {
+              case .left:
+                focus = .chatInput
+              case .up:
+                focus = .chatSettingsButton
+              default:
+                break
+              }
             }
           }
         }
