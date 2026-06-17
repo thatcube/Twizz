@@ -277,7 +277,13 @@ private struct EmoteView: View {
             } else {
                 AnimatedImage(url: url)
                     .onFailure { _ in
-                        loadFailed = true
+                        // Defer the state mutation: SDWebImage fires this callback
+                        // synchronously while cancelling in-flight loads during view
+                        // teardown. Writing @State inline re-enters SwiftUI's storage
+                        // mid-update and trips a Swift exclusivity conflict (SIGABRT).
+                        DispatchQueue.main.async {
+                            loadFailed = true
+                        }
                     }
                     .resizable()
                     .aspectRatio(contentMode: .fit)
