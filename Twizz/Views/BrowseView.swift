@@ -114,6 +114,7 @@ private struct BrowseCategoriesView: View {
             .padding(.bottom, 12)
         }
         .scrollClipDisabled()
+        .padding(.top, 140)
         .padding(.horizontal, AppLayout.horizontalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

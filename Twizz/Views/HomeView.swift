@@ -160,9 +160,11 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.horizontal, AppLayout.horizontalPadding)
+        .padding(.top, 20)
         .padding(.bottom, 20)
       }
       .scrollClipDisabled()
+      .padding(.top, 140)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
   }
