@@ -103,11 +103,22 @@ enum ChatLayoutMode: String, CaseIterable {
     case side
     /// Chat floats translucently on top of a full-width video.
     case overlay
+    /// Chat floats on top of a full-width video as a rounded Liquid Glass panel.
+    case glass
 
     var title: String {
         switch self {
         case .side: return "Side"
         case .overlay: return "Overlay"
+        case .glass: return "Glass"
+        }
+    }
+
+    /// Whether the chat floats on top of a full-width video (vs. docking beside it).
+    var isOverlay: Bool {
+        switch self {
+        case .side: return false
+        case .overlay, .glass: return true
         }
     }
 }

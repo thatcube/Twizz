@@ -10,6 +10,9 @@ struct ChatView: View {
     var emoteURLs: [String: URL] = [:]
     var badgeURLs: [String: URL] = [:]
     var condensedMessagesCount: Int = 0
+    /// When true, the message list draws a light scrim instead of a solid
+    /// background so an underlying Liquid Glass panel can show through.
+    var useGlassBackground: Bool = false
     @State private var pendingScrollWork: DispatchWorkItem?
 
     private var lineSpacing: CGFloat {
@@ -38,7 +41,9 @@ struct ChatView: View {
 
     var body: some View {
         messageList
-        .background(Color(white: 0.07).opacity(0.96))
+        .background(useGlassBackground
+            ? AnyShapeStyle(Color.black.opacity(0.22))
+            : AnyShapeStyle(Color(white: 0.07).opacity(0.96)))
     }
 
     private var messageList: some View {

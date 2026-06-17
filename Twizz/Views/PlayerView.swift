@@ -141,7 +141,7 @@ struct PlayerView: View {
     ZStack {
       Color.black.ignoresSafeArea()
 
-      if chatLayoutMode == .overlay {
+      if chatLayoutMode.isOverlay {
         videoColumn
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .ignoresSafeArea()
@@ -519,7 +519,8 @@ struct PlayerView: View {
   }
 
   private var chatPane: some View {
-    VStack(spacing: 0) {
+    let isGlass = chatLayoutMode == .glass
+    return VStack(spacing: 0) {
       ChatView(
         channel: channel,
         messages: chat.messages,
@@ -527,7 +528,8 @@ struct PlayerView: View {
         isConnected: chat.isConnected,
         emoteURLs: chat.emoteURLs,
         badgeURLs: chat.badgeURLs,
-        condensedMessagesCount: chat.condensedMessagesCount
+        condensedMessagesCount: chat.condensedMessagesCount,
+        useGlassBackground: isGlass
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .overlay(alignment: .topTrailing) {
@@ -539,7 +541,7 @@ struct PlayerView: View {
       chatComposerBar
     }
     .frame(width: chatWidth)
-    .frame(maxHeight: .infinity)
+    .modifier(GlassChatPaneStyle(enabled: isGlass))
   }
 
   // MARK: - Floating chat settings
@@ -733,7 +735,9 @@ struct PlayerView: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 12)
-    .background(Color(white: 0.07).opacity(0.98))
+    .background(chatLayoutMode == .glass
+      ? AnyShapeStyle(Color.black.opacity(0.22))
+      : AnyShapeStyle(Color(white: 0.07).opacity(0.98)))
   }
 
   private func submitChatMessage() {
@@ -1470,6 +1474,44 @@ extension View {
       self.buttonStyle(.glass)
     } else {
       self.buttonStyle(.automatic)
+    }
+  }
+}
+
+/// Styles the chat pane as a floating, rounded Liquid Glass panel when enabled,
+/// otherwise leaves it as a full-height docked panel.
+private struct GlassChatPaneStyle: ViewModifier {
+  let enabled: Bool
+
+  private var shape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: 32, style: .continuous)
+  }
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if enabled {
+      glassBody(content)
+        .padding(.vertical, 36)
+        .padding(.trailing, 36)
+    } else {
+      content.frame(maxHeight: .infinity)
+    }
+  }
+
+  @ViewBuilder
+  private func glassBody(_ content: Content) -> some View {
+    if #available(tvOS 26.0, *) {
+      content
+        .frame(maxHeight: .infinity)
+        .clipShape(shape)
+        .glassEffect(.regular, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    } else {
+      content
+        .frame(maxHeight: .infinity)
+        .background(.ultraThinMaterial, in: shape)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
     }
   }
 }
