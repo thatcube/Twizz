@@ -3,8 +3,8 @@ import SwiftUI
 struct HomeView: View {
   private let pagePadding: CGFloat = 44
   private let channelRailVerticalPadding: CGFloat = 16
-  private let channelRailSpacing: CGFloat = 42
-  private let focusedCardScale: CGFloat = 1.015
+  private let channelRailSpacing: CGFloat = 52
+  private let focusedCardScale: CGFloat = 1.02
 
   @State private var selectedTopTab: TopTab = .home
   @State private var auth = TwitchAuthSession()
@@ -258,20 +258,28 @@ private struct FollowedChannelCard: View {
 
       Text(channel.displayName)
         .font(.headline)
+        .foregroundStyle(isFocused ? Color.black.opacity(0.92) : Color.primary)
         .lineLimit(1)
 
       Text(channel.title.isEmpty ? "No title" : channel.title)
         .font(.subheadline)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
         .lineLimit(2)
+        .frame(height: 46, alignment: .topLeading)
 
       Text(channel.gameName)
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
         .lineLimit(1)
     }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 10)
     .frame(width: 560, alignment: .leading)
-    .shadow(color: Color.white.opacity(isFocused ? 0.16 : 0), radius: 14, y: 8)
+    .background {
+      RoundedRectangle(cornerRadius: 22)
+        .fill(isFocused ? Color.white.opacity(0.94) : Color.clear)
+    }
+    .shadow(color: Color.black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
   }
 }
 
