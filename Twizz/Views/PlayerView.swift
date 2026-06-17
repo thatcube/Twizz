@@ -647,6 +647,12 @@ struct PlayerView: View {
               focusTag: .chatLayoutOption(index)
             ) {
               chatLayoutModeRaw = mode.rawValue
+              // Switching layout restructures the view tree (chat moves
+              // between docked and overlay), which drops focus. Re-assert it
+              // on the just-selected pill once the new tree is laid out.
+              Task { @MainActor in
+                focus = .chatLayoutOption(index)
+              }
             }
           }
         }
