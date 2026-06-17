@@ -18,6 +18,7 @@ struct SettingsView: View {
   @FocusState private var focusedCardSize: StreamCardSize?
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
+  @AppStorage("showChatByDefault") private var showChatByDefault = true
 
   private let labelColumnWidth: CGFloat = 360
 
@@ -46,21 +47,30 @@ struct SettingsView: View {
     }
   }
 
-  // MARK: - Preferences group (Appearance + Stream Cards)
+  // MARK: - Preferences group (Appearance + Stream Cards + Chat)
 
   private var preferencesGroup: some View {
     VStack(spacing: 0) {
       appearanceRow
         .padding(.vertical, 20)
 
-      Divider()
-        .overlay(Color.primary.opacity(0.12))
+      groupDivider
 
       streamCardRow
+        .padding(.vertical, 20)
+
+      groupDivider
+
+      chatRow
         .padding(.vertical, 20)
     }
     .padding(.horizontal, 28)
     .glassPanel()
+  }
+
+  private var groupDivider: some View {
+    Divider()
+      .overlay(Color.primary.opacity(0.12))
   }
 
   private var appearanceRow: some View {
@@ -99,6 +109,16 @@ struct SettingsView: View {
         .settingPillStyle(isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size)
         .focused($focusedCardSize, equals: size)
       }
+    }
+  }
+
+  private var chatRow: some View {
+    settingRow(
+      title: "Chat",
+      subtitle: "Show chat automatically when you open a stream."
+    ) {
+      Toggle("Show chat by default", isOn: $showChatByDefault)
+        .labelsHidden()
     }
   }
 

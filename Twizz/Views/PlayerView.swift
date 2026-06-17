@@ -59,7 +59,7 @@ struct PlayerView: View {
   @State private var playback: StreamPlayback?
   @State private var errorMessage: String?
   @State private var isLoading = true
-  @State private var showChat = true
+  @State private var showChat: Bool = UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
   @State private var chatReplayStartMessageID: ChatMessage.ID?
   @State private var showQualityPicker = false
   @State private var showCaptionsPicker = false
