@@ -93,6 +93,11 @@ struct PlayerView: View {
   @State private var wallClockLatencySeconds: Double?
   @State private var liveEdgeLatencySeconds: Double?
   @State private var smoothedLatencySeconds: Double?
+  // The real (pre-proxy) source URL of the currently loaded item, so we can tell
+  // whether a quality switch actually needs to replace the item. AVURLAsset.url
+  // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
+  // for this comparison directly.
+  @State private var currentSourceURL: URL?
   @State private var isPlaybackActive = false
   @State private var didRequestPlayback = false
   @State private var lastHardCatchUpJumpAt = Date.distantPast
@@ -1251,6 +1256,7 @@ struct PlayerView: View {
     stopLatencyMonitor()
     player.pause()
     player.replaceCurrentItem(with: nil)
+    currentSourceURL = nil
     chat.disconnect()
     isLoading = true
     errorMessage = nil
@@ -1508,6 +1514,7 @@ struct PlayerView: View {
         lastError = error
         player.pause()
         player.replaceCurrentItem(with: nil)
+        currentSourceURL = nil
         if attempt < maxAttempts {
           try? await Task.sleep(for: .seconds(Double(attempt)))
         }
@@ -1568,48 +1575,44 @@ struct PlayerView: View {
     return false
   }
 
-  /// Keeps the player on the master playlist for video qualities so caption
-  /// tracks remain discoverable. We bias ABR with preferredPeakBitRate.
+  /// "Auto" plays the adaptive master playlist (ABR picks the rendition). Any
+  /// explicit pick hard-pins that single rendition's media playlist instead, so
+  /// ABR can't silently downshift to a blurrier variant. Note: on the master,
+  /// `preferredPeakBitRate` is only a *ceiling* — ABR is still free to serve
+  /// lower, which is exactly why selecting "1080p60" used to still look soft.
+  /// In-band CEA-608 captions ride inside each rendition, so they survive the
+  /// pin. The trade-off: a pinned rendition has no ABR fallback, so a stream
+  /// whose bitrate exceeds the connection will rebuffer rather than drop down —
+  /// "Auto" remains the safe choice for that case.
   private func applyQualityPreference(_ option: String) {
     guard let playback else { return }
 
     if option == "Auto" {
-      switchToMasterItemIfNeeded(playback.master)
+      switchToSourceIfNeeded(playback.master)
       player.currentItem?.preferredPeakBitRate = 0
       return
     }
 
     guard let match = playback.qualities.first(where: { $0.name == option }) else {
-      switchToMasterItemIfNeeded(playback.master)
+      switchToSourceIfNeeded(playback.master)
       player.currentItem?.preferredPeakBitRate = 0
       return
     }
 
-    if match.isAudioOnly {
-      player.replaceCurrentItem(with: makeItem(url: match.url))
-      player.currentItem?.preferredPeakBitRate = 0
-      startPlayback()
-      return
-    }
-
-    switchToMasterItemIfNeeded(playback.master)
-    let targetBitrate = match.bitrate > 0 ? Double(match.bitrate) * 1.08 : 0
-    player.currentItem?.preferredPeakBitRate = targetBitrate
+    switchToSourceIfNeeded(match.url)
+    player.currentItem?.preferredPeakBitRate = 0
   }
 
-  private func switchToMasterItemIfNeeded(_ masterURL: URL) {
-    guard let asset = player.currentItem?.asset as? AVURLAsset else {
-      player.replaceCurrentItem(with: makeItem(url: masterURL))
-      startPlayback()
-      return
-    }
-
-    guard asset.url != masterURL else { return }
-    player.replaceCurrentItem(with: makeItem(url: masterURL))
+  /// Replaces the current item only when the underlying source actually changes,
+  /// comparing against the real (pre-proxy) source URL.
+  private func switchToSourceIfNeeded(_ url: URL) {
+    guard currentSourceURL != url else { return }
+    player.replaceCurrentItem(with: makeItem(url: url))
     startPlayback()
   }
 
   private func makeItem(url: URL) -> AVPlayerItem {
+    currentSourceURL = url
     let assetURL: URL
     if lowLatencyProxyEnabled {
       assetURL = lowLatencyProxy.proxyURL(for: url)
@@ -1626,10 +1629,13 @@ struct PlayerView: View {
       asset.resourceLoader.setDelegate(lowLatencyProxy, queue: lowLatencyProxy.callbackQueue)
     }
     let item = AVPlayerItem(asset: asset)
-    // A slightly larger forward buffer in low-latency mode gives ABR room to
-    // climb to the selected quality (fixes soft 1080p) and resists stalls. The
-    // proxy keeps us near live regardless, so the latency cost is small.
-    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 2 : 1
+    // A deeper forward buffer in low-latency mode does double duty: it gives
+    // ABR enough headroom to actually climb to the selected quality (fixes soft
+    // 1080p) and it keeps AVPlayer from skipping forward to live when the buffer
+    // runs thin (fixes the "jumps ahead"). The proxy keeps the *content* near
+    // live regardless, so the only cost is a few seconds of latency — which the
+    // user has ranked below freeze-free, smooth, sharp playback.
+    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 5 : 1
     applyCaptions(to: item, retries: 12)
     return item
   }
