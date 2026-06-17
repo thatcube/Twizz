@@ -1,6 +1,11 @@
 import SwiftUI
 
 /// Settings tab: appearance (theme) controls plus account sign-in / sign-out.
+///
+/// Laid out as a tvOS-native grouped "form": each preference is a single
+/// horizontal row — a left-aligned label/description with its choices rendered
+/// as compact, focusable pills on the right. This keeps the whole screen
+/// dense enough that every section (including Account) is visible at once.
 struct SettingsView: View {
   @Bindable var themeManager: ThemeManager
   let auth: TwitchAuthSession
@@ -14,6 +19,8 @@ struct SettingsView: View {
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
 
+  private let labelColumnWidth: CGFloat = 360
+
   var body: some View {
     ZStack {
       LinearGradient(
@@ -24,81 +31,109 @@ struct SettingsView: View {
       .ignoresSafeArea()
 
       ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 36) {
+        VStack(alignment: .leading, spacing: 28) {
           Text("Settings")
-            .font(.system(size: 40, weight: .bold))
+            .font(.system(size: 38, weight: .bold))
 
-          appearanceSection
-          streamCardSection
+          preferencesGroup
           accountSection
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.horizontal, AppLayout.horizontalPadding)
-        .padding(.vertical, 36)
+        .padding(.vertical, 32)
       }
       .scrollClipDisabled()
     }
   }
 
-  // MARK: - Appearance
+  // MARK: - Preferences group (Appearance + Stream Cards)
 
-  private var appearanceSection: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Text("Appearance")
-        .font(.title3.weight(.semibold))
-        .foregroundStyle(.secondary)
+  private var preferencesGroup: some View {
+    VStack(spacing: 0) {
+      appearanceRow
+        .padding(.vertical, 20)
 
-      HStack(spacing: 24) {
-        ForEach(AppTheme.allCases) { theme in
-          Button {
-            themeManager.theme = theme
-          } label: {
-            ThemeOptionCard(
-              theme: theme,
-              isSelected: themeManager.theme == theme
-            )
-          }
-          .buttonStyle(.card)
-          .focused($focusedTheme, equals: theme)
+      Divider()
+        .overlay(Color.primary.opacity(0.12))
+
+      streamCardRow
+        .padding(.vertical, 20)
+    }
+    .padding(.horizontal, 28)
+    .background(
+      RoundedRectangle(cornerRadius: 24, style: .continuous)
+        .fill(Color.primary.opacity(0.05))
+    )
+  }
+
+  private var appearanceRow: some View {
+    settingRow(
+      title: "Appearance",
+      subtitle: "Theme used throughout the app."
+    ) {
+      ForEach(AppTheme.allCases) { theme in
+        Button {
+          themeManager.theme = theme
+        } label: {
+          SettingPill(
+            systemImage: theme.symbolName,
+            title: theme.displayName,
+            isSelected: themeManager.theme == theme
+          )
         }
+        .buttonStyle(.card)
+        .focused($focusedTheme, equals: theme)
       }
     }
-    // Spatial navigation fix: span the section across the entire screen width.
-    // This ensures a downward swipe from the right-aligned Tab Bar item hits
-    // this container's bounding box instead of falling through to Sign In.
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .focusSection()
     .defaultFocus($focusedTheme, AppTheme.system)
   }
 
-  // MARK: - Stream cards
-
-  private var streamCardSection: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Stream Cards")
-          .font(.title3.weight(.semibold))
-          .foregroundStyle(.secondary)
-
-        Text("Choose how large stream cards appear across Home and Browse.")
-          .font(.callout)
-          .foregroundStyle(.secondary)
+  private var streamCardRow: some View {
+    settingRow(
+      title: "Stream Cards",
+      subtitle: "How large stream cards appear on Home and Browse."
+    ) {
+      ForEach(StreamCardSize.allCases) { size in
+        Button {
+          streamCardSizeRaw = size.rawValue
+        } label: {
+          SettingPill(
+            systemImage: size.symbolName,
+            title: size.title,
+            subtitle: size.subtitle,
+            isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size
+          )
+        }
+        .buttonStyle(.card)
+        .focused($focusedCardSize, equals: size)
       }
+    }
+  }
 
-      HStack(spacing: 24) {
-        ForEach(StreamCardSize.allCases) { size in
-          Button {
-            streamCardSizeRaw = size.rawValue
-          } label: {
-            StreamCardSizeOptionCard(
-              size: size,
-              isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size
-            )
-          }
-          .buttonStyle(.card)
-          .focused($focusedCardSize, equals: size)
+  /// A single preference row: fixed-width label column on the left, a
+  /// horizontal run of selectable pills on the right.
+  private func settingRow<Content: View>(
+    title: String,
+    subtitle: String?,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    HStack(alignment: .center, spacing: 32) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(title)
+          .font(.title3.weight(.semibold))
+        if let subtitle {
+          Text(subtitle)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
       }
+      .frame(width: labelColumnWidth, alignment: .leading)
+
+      HStack(spacing: 16) {
+        content()
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .focusSection()
@@ -107,11 +142,7 @@ struct SettingsView: View {
   // MARK: - Account
 
   private var accountSection: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Text("Account")
-        .font(.title3.weight(.semibold))
-        .foregroundStyle(.secondary)
-
+    Group {
       if auth.isAuthenticated {
         HStack(spacing: 20) {
           AsyncImage(url: auth.profileImageURL) { image in
@@ -125,7 +156,7 @@ struct SettingsView: View {
           .frame(width: 64, height: 64)
           .clipShape(Circle())
 
-          VStack(alignment: .leading, spacing: 6) {
+          VStack(alignment: .leading, spacing: 4) {
             Text(auth.userDisplayName ?? auth.userLogin ?? "Twitch user")
               .font(.title3.weight(.semibold))
             Text("Signed in")
@@ -143,8 +174,8 @@ struct SettingsView: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-          RoundedRectangle(cornerRadius: 20)
-            .fill(Color.primary.opacity(0.07))
+          RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .fill(Color.primary.opacity(0.05))
         )
         .focusSection()
         .confirmationDialog(
@@ -164,7 +195,7 @@ struct SettingsView: View {
             .font(.system(size: 40))
             .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
 
-          VStack(alignment: .leading, spacing: 6) {
+          VStack(alignment: .leading, spacing: 4) {
             Text("Sign in with Twitch")
               .font(.title3.weight(.bold))
             Text("Connect your account to see the channels you follow and join the chat.")
@@ -182,8 +213,8 @@ struct SettingsView: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-          RoundedRectangle(cornerRadius: 20)
-            .fill(Color.primary.opacity(0.07))
+          RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .fill(Color.primary.opacity(0.05))
         )
         .focusSection()
       }
@@ -191,62 +222,41 @@ struct SettingsView: View {
   }
 }
 
-// MARK: - Theme option card
+// MARK: - Selectable option pill
 
-private struct ThemeOptionCard: View {
-  let theme: AppTheme
+/// Compact, focusable choice used inside a setting row. Shows an icon, a
+/// title (with optional secondary line) and a trailing selection indicator
+/// that never shifts layout between selected/unselected states.
+private struct SettingPill: View {
+  let systemImage: String
+  let title: String
+  var subtitle: String? = nil
   let isSelected: Bool
 
   var body: some View {
-    VStack(spacing: 12) {
-      Image(systemName: theme.symbolName)
-        .font(.system(size: 34))
-        .frame(height: 40)
-
-      Text(theme.displayName)
-        .font(.headline)
-
-      Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+    HStack(spacing: 12) {
+      Image(systemName: systemImage)
         .font(.title3)
-        .foregroundStyle(isSelected ? Color.green : Color.secondary)
-    }
-    .frame(width: 190)
-    .padding(.vertical, 22)
-    .overlay(
-      RoundedRectangle(cornerRadius: 22)
-        .stroke(isSelected ? Color.green : Color.clear, lineWidth: 3)
-    )
-  }
-}
+        .frame(width: 30)
 
-// MARK: - Stream card size option card
-
-private struct StreamCardSizeOptionCard: View {
-  let size: StreamCardSize
-  let isSelected: Bool
-
-  var body: some View {
-    VStack(spacing: 12) {
-      Image(systemName: size.symbolName)
-        .font(.system(size: 34))
-        .frame(height: 40)
-
-      VStack(spacing: 2) {
-        Text(size.title)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
           .font(.headline)
-        Text(size.subtitle)
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        if let subtitle {
+          Text(subtitle)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
       }
 
       Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-        .font(.title3)
+        .font(.body)
         .foregroundStyle(isSelected ? Color.green : Color.secondary)
     }
-    .frame(width: 190)
-    .padding(.vertical, 22)
+    .padding(.horizontal, 22)
+    .padding(.vertical, 16)
     .overlay(
-      RoundedRectangle(cornerRadius: 22)
+      RoundedRectangle(cornerRadius: 18, style: .continuous)
         .stroke(isSelected ? Color.green : Color.clear, lineWidth: 3)
     )
   }
