@@ -540,6 +540,211 @@ final class TwitchAuthSession {
             throw ChatSendError.dropped(reason: result.dropReason?.message ?? result.dropReason?.code)
         }
     }
+
+    // MARK: - Follow / unfollow
+
+    /// Whether the signed-in user currently follows `channelLogin`.
+    ///
+    /// Reading follow state still works through the official Helix
+    /// `channels/followed` endpoint (with the `user:read:follows` scope), so the
+    /// initial button state is reliable even though mutating the follow is not.
+    func isFollowing(channelLogin: String) async throws -> Bool {
+        guard isAuthenticated, let clientID, let userID else {
+            throw FollowActionError.notSignedIn
+        }
+        let accessToken = try await validAccessToken()
+        let broadcasterID = try await resolveBroadcasterID(
+            forLogin: channelLogin,
+            clientID: clientID,
+            accessToken: accessToken
+        )
+        return try await fetchFollowState(
+            broadcasterID: broadcasterID,
+            userID: userID,
+            clientID: clientID,
+            accessToken: accessToken
+        )
+    }
+
+    /// Follows `channelLogin` on behalf of the signed-in user.
+    func followChannel(login: String) async throws {
+        try await setFollow(true, login: login)
+    }
+
+    /// Unfollows `channelLogin` on behalf of the signed-in user.
+    func unfollowChannel(login: String) async throws {
+        try await setFollow(false, login: login)
+    }
+
+    private func setFollow(_ shouldFollow: Bool, login: String) async throws {
+        guard isAuthenticated, let clientID else {
+            throw FollowActionError.notSignedIn
+        }
+        let accessToken = try await validAccessToken()
+        let broadcasterID = try await resolveBroadcasterID(
+            forLogin: login,
+            clientID: clientID,
+            accessToken: accessToken
+        )
+        try await performFollowMutation(
+            targetID: broadcasterID,
+            follow: shouldFollow,
+            clientID: clientID,
+            accessToken: accessToken
+        )
+    }
+
+    private func validAccessToken() async throws -> String {
+        if let accessToken {
+            return accessToken
+        }
+        return try await refreshAccessTokenIfNeeded(force: true)
+    }
+
+    private func fetchFollowState(
+        broadcasterID: String,
+        userID: String,
+        clientID: String,
+        accessToken: String
+    ) async throws -> Bool {
+        var components = URLComponents(string: "https://api.twitch.tv/helix/channels/followed")!
+        components.queryItems = [
+            URLQueryItem(name: "user_id", value: userID),
+            URLQueryItem(name: "broadcaster_id", value: broadcasterID),
+        ]
+
+        var req = URLRequest(url: components.url!)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else {
+            throw makeHTTPError(context: "checking follow status", status: status, data: data)
+        }
+
+        let payload = try JSONDecoder().decode(FollowedStateEnvelope.self, from: data)
+        return (payload.total ?? payload.data.count) > 0
+    }
+
+    /// Mutates the follow via Twitch's private GraphQL API.
+    ///
+    /// Twitch removed follow/unfollow from the public Helix API in 2021, so this
+    /// is the only route left and is unofficial/best-effort — it can fail or stop
+    /// working if Twitch changes the endpoint.
+    private func performFollowMutation(
+        targetID: String,
+        follow: Bool,
+        clientID: String,
+        accessToken: String
+    ) async throws {
+        let query: String
+        var variables: [String: Any] = ["targetID": targetID]
+        if follow {
+            query = """
+                mutation FollowUser($targetID: ID!, $disableNotifications: Boolean!) {
+                  followUser(input: {targetID: $targetID, disableNotifications: $disableNotifications}) {
+                    follow { disableNotifications }
+                    error { code }
+                  }
+                }
+                """
+            variables["disableNotifications"] = false
+        } else {
+            query = """
+                mutation UnfollowUser($targetID: ID!) {
+                  unfollowUser(input: {targetID: $targetID}) {
+                    follow { disableNotifications }
+                    error { code }
+                  }
+                }
+                """
+        }
+
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
+        req.httpMethod = "POST"
+        req.setValue("OAuth \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(
+            withJSONObject: ["query": query, "variables": variables])
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else {
+            throw makeHTTPError(
+                context: follow ? "following channel" : "unfollowing channel",
+                status: status,
+                data: data
+            )
+        }
+
+        // GraphQL returns HTTP 200 even for logical failures, so inspect the body.
+        let decoded = try JSONDecoder().decode(GQLFollowResponse.self, from: data)
+        if let message = decoded.errors?.compactMap({ $0.message }).first(where: { !$0.isEmpty }) {
+            throw FollowActionError.mutationFailed(reason: message)
+        }
+        let opError =
+            follow
+            ? decoded.data?.followUser?.error?.code
+            : decoded.data?.unfollowUser?.error?.code
+        if let opError, !opError.isEmpty {
+            throw FollowActionError.mutationFailed(reason: opError)
+        }
+    }
+}
+
+enum FollowActionError: LocalizedError {
+    case notSignedIn
+    case mutationFailed(reason: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .notSignedIn:
+            return "Sign in to follow channels."
+        case .mutationFailed(let reason):
+            if let reason, !reason.isEmpty {
+                return "Couldn't update follow: \(reason)."
+            }
+            return "Couldn't update follow right now."
+        }
+    }
+}
+
+private struct FollowedStateEnvelope: Decodable {
+    let total: Int?
+    let data: [FollowedStateEntry]
+}
+
+private struct FollowedStateEntry: Decodable {
+    let broadcasterID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case broadcasterID = "broadcaster_id"
+    }
+}
+
+private struct GQLFollowResponse: Decodable {
+    let data: GQLFollowData?
+    let errors: [GQLFollowError]?
+}
+
+private struct GQLFollowData: Decodable {
+    let followUser: GQLFollowResult?
+    let unfollowUser: GQLFollowResult?
+}
+
+private struct GQLFollowResult: Decodable {
+    let error: GQLFollowOpError?
+}
+
+private struct GQLFollowOpError: Decodable {
+    let code: String?
+}
+
+private struct GQLFollowError: Decodable {
+    let message: String?
 }
 
 enum ChatSendError: LocalizedError {
