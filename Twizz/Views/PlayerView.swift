@@ -686,7 +686,6 @@ struct PlayerView: View {
           TextField("Send a message", text: $chatDraft)
             .textFieldStyle(.plain)
             .focused($focus, equals: .chatInput)
-            .onSubmit { submitChatMessage() }
             .onMoveCommand { direction in
               switch direction {
               case .left:
