@@ -847,6 +847,8 @@ struct PlayerView: View {
       RoundedRectangle(cornerRadius: 22, style: .continuous)
         .stroke(.white.opacity(0.20), lineWidth: 1)
     )
+    // Intentionally avoid clipShape here: tvOS focus effects can scale beyond
+    // bounds, and clipping reintroduces visibly cut-off hover/focus states.
     .shadow(color: .black.opacity(0.30), radius: 22, x: 0, y: 10)
     .focusSection()
   }
@@ -894,6 +896,8 @@ struct PlayerView: View {
           )
       )
     }
+    // Keep this custom button style (instead of .plain) so tvOS focus visuals
+    // remain consistent with the rest of the player controls.
     .buttonStyle(ChatSettingsPillButtonStyle())
     .focusEffectDisabled()
     .focused($focus, equals: focusTag)
@@ -937,6 +941,8 @@ struct PlayerView: View {
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
           // Reserve trailing text space only when the send button is visible.
           .padding(.trailing, hasChatDraft ? 108 : 0)
+          // Do not clip this field in SwiftUI: clipping trims the focused tvOS
+          // input platter and causes a broken-looking focus state.
           .frame(maxWidth: .infinity)
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in
@@ -999,6 +1005,7 @@ struct PlayerView: View {
         // Keep the signed-out prompt visually aligned with the active input.
         .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
         .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+        // Same focus guardrail as the authenticated field above.
         .frame(maxWidth: .infinity)
         .focused($focus, equals: .chatInput)
         .onMoveCommand { direction in
@@ -1793,6 +1800,7 @@ private struct ChatInputField: UIViewRepresentable {
     field.font = .preferredFont(forTextStyle: .callout)
     field.contentVerticalAlignment = .center
     field.adjustsFontForContentSizeCategory = true
+    // Keep UIKit field unclipped for native tvOS focus visuals.
     field.attributedPlaceholder = NSAttributedString(
       string: placeholder,
       attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.45)]
