@@ -57,6 +57,11 @@ struct SettingsView: View {
         }
       }
     }
+    // Spatial navigation fix: span the section across the entire screen width.
+    // This ensures a downward swipe from the right-aligned Tab Bar item hits
+    // this container's bounding box instead of falling through to Sign In.
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .focusSection()
   }
 
   // MARK: - Account
