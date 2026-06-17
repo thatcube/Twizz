@@ -60,6 +60,14 @@ struct PlaybackService {
         "User-Agent": userAgent,
     ]
 
+    private static let networkSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 12
+        config.timeoutIntervalForResource = 20
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
+
     private struct Token {
         let value: String
         let signature: String
@@ -106,7 +114,7 @@ struct PlaybackService {
         ]
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        guard let (data, response) = try? await URLSession.shared.data(for: req) else { return nil }
+        guard let (data, response) = try? await networkSession.data(for: req) else { return nil }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else { return nil }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
@@ -147,7 +155,7 @@ struct PlaybackService {
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await networkSession.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else { throw PlaybackError.http(status) }
 
@@ -188,7 +196,7 @@ struct PlaybackService {
     private static func validatePlaylist(_ url: URL) async throws {
         var req = URLRequest(url: url)
         for (k, v) in streamHeaders { req.setValue(v, forHTTPHeaderField: k) }
-        let (_, response) = try await URLSession.shared.data(for: req)
+        let (_, response) = try await networkSession.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         if status == 404 { throw PlaybackError.offline }
         guard (200...299).contains(status) else { throw PlaybackError.http(status) }
@@ -199,7 +207,7 @@ struct PlaybackService {
     private static func fetchQualities(_ master: URL) async throws -> [StreamQuality] {
         var req = URLRequest(url: master)
         for (k, v) in streamHeaders { req.setValue(v, forHTTPHeaderField: k) }
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await networkSession.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         if status == 404 { throw PlaybackError.offline }
         guard (200...299).contains(status) else { throw PlaybackError.http(status) }

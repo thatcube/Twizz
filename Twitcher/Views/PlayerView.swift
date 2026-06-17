@@ -40,6 +40,9 @@ struct PlayerView: View {
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage("preferredQuality") private var preferredQuality = "Auto"
+    @AppStorage("chatReadabilityMode") private var chatReadabilityModeRaw = ChatReadabilityMode.balanced.rawValue
+    @AppStorage("chatSmartFilteringEnabled") private var chatSmartFilteringEnabled = true
+    @AppStorage("chatCollapseRepeatsEnabled") private var chatCollapseRepeatsEnabled = true
 
     @State private var chat = ChatService()
     @State private var player = AVPlayer()
@@ -49,6 +52,7 @@ struct PlayerView: View {
     @State private var showChat = true
     @State private var showQualityPicker = false
     @State private var showCaptionsPicker = false
+    @State private var showChatSettingsPicker = false
     @State private var showControls = false
     @State private var captionsOn = UIAccessibility.isClosedCaptioningEnabled
     @State private var captionGroup: AVMediaSelectionGroup?
@@ -61,6 +65,7 @@ struct PlayerView: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var focusRecoveryTask: Task<Void, Never>?
     @State private var latencyTask: Task<Void, Never>?
+    @State private var playbackWatchdogTask: Task<Void, Never>?
     @State private var wallClockLatencySeconds: Double?
     @State private var liveEdgeLatencySeconds: Double?
     @State private var isPlaybackActive = false
@@ -72,6 +77,10 @@ struct PlayerView: View {
     @State private var wallClockLowConfidenceStreak = 0
     @State private var lastPlaybackDateSample: Date?
     @State private var lastPlaybackTimeSampleSeconds: Double?
+    @State private var lastObservedPlaybackTimeSeconds: Double?
+    @State private var stalledPlaybackSamples = 0
+    @State private var isRecoveringPlayback = false
+    @State private var consecutiveLoadFailures = 0
     @State private var lastControlFocus: Focusable = .quality
 
     private let controlsAutoHideSeconds: Double = 10
@@ -90,15 +99,25 @@ struct PlayerView: View {
     private let wallClockUnavailableSamples = 4
     private let wallClockStaleDateDeltaEpsilonSeconds: Double = 0.08
     private let wallClockStalePlaybackAdvanceThresholdSeconds: Double = 0.6
+    private let resolveTimeoutSeconds: Double = 18
+    private let stalledPlaybackThresholdSamples = 6
+    private let playbackWatchdogIntervalSeconds: Double = 2
 
     @FocusState private var focus: Focusable?
     private enum Focusable: Hashable {
-        case video, streamInfo, quality, captions, chatToggle, chatInput, errorBack
+        case video, streamInfo, quality, captions, chatToggle, chatSettings, chatInput, errorBack
         case qualityOption(Int)
         case captionsOption(Int)
+        case chatSettingsModeOption(Int)
+        case chatSettingsSmartFilter
+        case chatSettingsCollapseRepeats
     }
 
     private let chatWidth: CGFloat = 460
+
+    private var chatReadabilityMode: ChatReadabilityMode {
+        ChatReadabilityMode(rawValue: chatReadabilityModeRaw) ?? .balanced
+    }
 
     var body: some View {
         ZStack {
@@ -122,9 +141,14 @@ struct PlayerView: View {
             if showCaptionsPicker {
                 captionsPicker
             }
+
+            if showChatSettingsPicker {
+                chatSettingsPicker
+            }
         }
         .task {
             configurePlayerForLive()
+            applyChatReadabilitySettings()
             chat.connect(to: channel)
             async let metadataTask: Void = refreshChannelMetadata()
             await load()
@@ -137,6 +161,7 @@ struct PlayerView: View {
         .onDisappear {
             hideTask?.cancel()
             focusRecoveryTask?.cancel()
+            stopPlaybackWatchdog()
             stopLatencyMonitor()
             player.pause()
             chat.disconnect()
@@ -151,6 +176,10 @@ struct PlayerView: View {
                 showCaptionsPicker = false
                 focus = .captions
                 scheduleHide()
+            } else if showChatSettingsPicker {
+                showChatSettingsPicker = false
+                focus = .chatSettings
+                scheduleHide()
             } else if showControls {
                 hideControls()
             } else {
@@ -158,7 +187,7 @@ struct PlayerView: View {
             }
         }
         .onMoveCommand { direction in
-            guard !showQualityPicker, !showCaptionsPicker else { return }
+            guard !showQualityPicker, !showCaptionsPicker, !showChatSettingsPicker else { return }
 
             if !showControls {
                 // Directional movement should immediately surface controls and
@@ -171,13 +200,22 @@ struct PlayerView: View {
         .onChange(of: focus) { _, newFocus in
             // Keep control navigation deterministic: if tvOS drops focus to nil
             // while controls are visible, immediately restore last valid control.
-            guard showControls, !showQualityPicker, !showCaptionsPicker else { return }
+            guard showControls, !showQualityPicker, !showCaptionsPicker, !showChatSettingsPicker else { return }
 
             if let newFocus, isControlFocus(newFocus) {
                 focusRecoveryTask?.cancel()
                 lastControlFocus = newFocus
                 scheduleHide()
             }
+        }
+        .onChange(of: chatReadabilityModeRaw) { _, _ in
+            applyChatReadabilitySettings()
+        }
+        .onChange(of: chatSmartFilteringEnabled) { _, _ in
+            applyChatReadabilitySettings()
+        }
+        .onChange(of: chatCollapseRepeatsEnabled) { _, _ in
+            applyChatReadabilitySettings()
         }
     }
 
@@ -188,7 +226,7 @@ struct PlayerView: View {
             VideoSurface(player: player)
                 .ignoresSafeArea()
 
-            if showControls, !showQualityPicker, !showCaptionsPicker, !isLoading, errorMessage == nil {
+            if showControls, !showQualityPicker, !showCaptionsPicker, !showChatSettingsPicker, !isLoading, errorMessage == nil {
                 VStack {
                     HStack {
                         latencyBadge
@@ -203,7 +241,7 @@ struct PlayerView: View {
             // Only expose the video focus target while controls are hidden.
             // Otherwise, left-edge movement from the control cluster can escape
             // into this invisible target and appear as lost focus.
-            if !showControls && !showQualityPicker {
+            if !showControls && !showQualityPicker && !showChatSettingsPicker {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
@@ -228,7 +266,7 @@ struct PlayerView: View {
                 }
                 .padding(40)
                 .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 24))
-            } else if showControls && !showQualityPicker {
+            } else if showControls && !showQualityPicker && !showChatSettingsPicker {
                 bottomOverlay
             }
         }
@@ -292,6 +330,7 @@ struct PlayerView: View {
                 Button {
                     showQualityPicker = true
                     showCaptionsPicker = false
+                    showChatSettingsPicker = false
                     hideTask?.cancel()
                 } label: {
                     Label("Quality", systemImage: "gauge.with.dots.needle.67percent")
@@ -311,6 +350,7 @@ struct PlayerView: View {
 
                 Button {
                     showQualityPicker = false
+                    showChatSettingsPicker = false
                     prepareCaptionsPicker()
                 } label: {
                     Label(captionsOn ? "Captions On" : "Captions Off",
@@ -345,6 +385,27 @@ struct PlayerView: View {
                     switch direction {
                     case .left:
                         focus = .captions
+                    case .right:
+                        focus = .chatSettings
+                    default:
+                        break
+                    }
+                }
+
+                Button {
+                    showQualityPicker = false
+                    showCaptionsPicker = false
+                    showChatSettingsPicker = true
+                    hideTask?.cancel()
+                } label: {
+                    Label("Chat Settings", systemImage: "line.3.horizontal.decrease.circle")
+                        .labelStyle(.iconOnly)
+                }
+                .focused($focus, equals: .chatSettings)
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .left:
+                        focus = .chatToggle
                     case .right:
                         if showChat {
                             focus = .chatInput
@@ -436,6 +497,7 @@ struct PlayerView: View {
             await MainActor.run {
                 guard !showQualityPicker else { return }
                 guard !showCaptionsPicker else { return }
+                guard !showChatSettingsPicker else { return }
                 hideControls()
             }
         }
@@ -443,7 +505,7 @@ struct PlayerView: View {
 
     private func isControlFocus(_ focus: Focusable) -> Bool {
         switch focus {
-        case .streamInfo, .quality, .captions, .chatToggle, .chatInput:
+        case .streamInfo, .quality, .captions, .chatToggle, .chatSettings, .chatInput:
             return true
         default:
             return false
@@ -457,7 +519,8 @@ struct PlayerView: View {
                 messages: chat.messages,
                 isConnected: chat.isConnected,
                 emoteURLs: chat.emoteURLs,
-                badgeURLs: chat.badgeURLs
+                badgeURLs: chat.badgeURLs,
+                condensedMessagesCount: chat.condensedMessagesCount
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -592,8 +655,78 @@ struct PlayerView: View {
         }
     }
 
+    private var chatSettingsPicker: some View {
+        ZStack {
+            Color.black.opacity(0.5).ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Chat Readability")
+                    .font(.title2).bold()
+                    .padding(.bottom, 8)
+
+                ForEach(Array(ChatReadabilityMode.allCases.enumerated()), id: \.offset) { index, mode in
+                    Button {
+                        selectChatReadabilityMode(at: index)
+                    } label: {
+                        HStack {
+                            Text(mode.title)
+                            Spacer()
+                            if mode == chatReadabilityMode {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                        .frame(width: 460)
+                    }
+                    .buttonStyle(.bordered)
+                    .focused($focus, equals: .chatSettingsModeOption(index))
+                }
+
+                Button {
+                    chatSmartFilteringEnabled.toggle()
+                    scheduleHide()
+                } label: {
+                    HStack {
+                        Text("Smart Filtering")
+                        Spacer()
+                        Image(systemName: chatSmartFilteringEnabled ? "checkmark.circle.fill" : "circle")
+                    }
+                    .frame(width: 460)
+                }
+                .buttonStyle(.bordered)
+                .focused($focus, equals: .chatSettingsSmartFilter)
+
+                Button {
+                    chatCollapseRepeatsEnabled.toggle()
+                    scheduleHide()
+                } label: {
+                    HStack {
+                        Text("Collapse Repeats")
+                        Spacer()
+                        Image(systemName: chatCollapseRepeatsEnabled ? "checkmark.circle.fill" : "circle")
+                    }
+                    .frame(width: 460)
+                }
+                .buttonStyle(.bordered)
+                .focused($focus, equals: .chatSettingsCollapseRepeats)
+            }
+            .padding(40)
+            .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 28))
+            .focusSection()
+        }
+        .onAppear {
+            let selectedIndex = ChatReadabilityMode.allCases.firstIndex(of: chatReadabilityMode) ?? 0
+            focus = .chatSettingsModeOption(selectedIndex)
+        }
+    }
+
     private var qualityOptions: [String] {
         ["Auto"] + (playback?.qualities.map(\.name) ?? [])
+    }
+
+    private func selectChatReadabilityMode(at index: Int) {
+        guard ChatReadabilityMode.allCases.indices.contains(index) else { return }
+        chatReadabilityModeRaw = ChatReadabilityMode.allCases[index].rawValue
+        scheduleHide()
     }
 
     private func selectQuality(at index: Int) {
@@ -638,25 +771,79 @@ struct PlayerView: View {
         scheduleHide()
     }
 
+    private func applyChatReadabilitySettings() {
+        chat.applyReadabilitySettings(
+            mode: chatReadabilityMode,
+            smartFilteringEnabled: chatSmartFilteringEnabled,
+            collapseRepeatsEnabled: chatCollapseRepeatsEnabled
+        )
+    }
+
     // MARK: - Loading
 
-    private func load() async {
+    private enum LoadTimeoutError: LocalizedError {
+        case timedOut
+
+        var errorDescription: String? {
+            switch self {
+            case .timedOut:
+                return "Timed out while loading this stream."
+            }
+        }
+    }
+
+    private func load(maxAttempts: Int = 3, reason: String = "initial", resetMetadata: Bool = true) async {
         isLoading = true
         errorMessage = nil
-        streamTitle = ""
+        if resetMetadata {
+            streamTitle = ""
+        }
         player.appliesMediaSelectionCriteriaAutomatically = true
-        do {
-            let resolved = try await PlaybackService.resolve(for: channel)
-            playback = resolved
-            player.replaceCurrentItem(with: makeItem(url: resolved.master))
-            applyQualityPreference(preferredQuality)
-            startPlayback()
-            startLatencyMonitor()
-            isLoading = false
-        } catch {
-            stopLatencyMonitor()
-            errorMessage = error.localizedDescription
-            isLoading = false
+
+        var lastError: Error?
+        for attempt in 1...maxAttempts {
+            do {
+                let resolved = try await resolvePlaybackWithTimeout()
+                playback = resolved
+                player.replaceCurrentItem(with: makeItem(url: resolved.master))
+                applyQualityPreference(preferredQuality)
+                startPlayback()
+                startLatencyMonitor()
+                startPlaybackWatchdog()
+                consecutiveLoadFailures = 0
+                isLoading = false
+                return
+            } catch {
+                lastError = error
+                if attempt < maxAttempts {
+                    try? await Task.sleep(for: .seconds(Double(attempt)))
+                }
+            }
+        }
+
+        consecutiveLoadFailures += 1
+        stopPlaybackWatchdog()
+        stopLatencyMonitor()
+        let fallback = "Failed to load stream (\(reason))."
+        errorMessage = lastError?.localizedDescription ?? fallback
+        isLoading = false
+    }
+
+    private func resolvePlaybackWithTimeout() async throws -> StreamPlayback {
+        try await withThrowingTaskGroup(of: StreamPlayback.self) { group in
+            group.addTask {
+                try await PlaybackService.resolve(for: channel)
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(resolveTimeoutSeconds))
+                throw LoadTimeoutError.timedOut
+            }
+
+            guard let first = try await group.next() else {
+                throw LoadTimeoutError.timedOut
+            }
+            group.cancelAll()
+            return first
         }
     }
 
@@ -779,6 +966,80 @@ struct PlayerView: View {
         wallClockLowConfidenceStreak = 0
         lastPlaybackDateSample = nil
         lastPlaybackTimeSampleSeconds = nil
+    }
+
+    private func startPlaybackWatchdog() {
+        stopPlaybackWatchdog()
+        playbackWatchdogTask = Task {
+            while !Task.isCancelled {
+                await MainActor.run {
+                    samplePlaybackHealth()
+                }
+                try? await Task.sleep(for: .seconds(playbackWatchdogIntervalSeconds))
+            }
+        }
+    }
+
+    private func stopPlaybackWatchdog() {
+        playbackWatchdogTask?.cancel()
+        playbackWatchdogTask = nil
+        lastObservedPlaybackTimeSeconds = nil
+        stalledPlaybackSamples = 0
+        isRecoveringPlayback = false
+    }
+
+    private func samplePlaybackHealth() {
+        guard !isLoading, errorMessage == nil, !showQualityPicker, !showCaptionsPicker, !showChatSettingsPicker else {
+            stalledPlaybackSamples = 0
+            lastObservedPlaybackTimeSeconds = nil
+            return
+        }
+        guard let item = player.currentItem else {
+            stalledPlaybackSamples = 0
+            lastObservedPlaybackTimeSeconds = nil
+            return
+        }
+
+        if item.status == .failed {
+            if !isRecoveringPlayback {
+                Task { await recoverFromPlaybackStall(reason: "item failed") }
+            }
+            return
+        }
+
+        guard didRequestPlayback else {
+            stalledPlaybackSamples = 0
+            return
+        }
+
+        let currentSeconds = CMTimeGetSeconds(item.currentTime())
+        guard currentSeconds.isFinite else { return }
+
+        if let last = lastObservedPlaybackTimeSeconds {
+            let advanced = currentSeconds - last
+            let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            let stalled = advanced < 0.05 && (waiting || isPlaybackActive)
+
+            if stalled {
+                stalledPlaybackSamples += 1
+            } else {
+                stalledPlaybackSamples = 0
+            }
+        }
+
+        lastObservedPlaybackTimeSeconds = currentSeconds
+
+        if stalledPlaybackSamples >= stalledPlaybackThresholdSamples, !isRecoveringPlayback {
+            stalledPlaybackSamples = 0
+            Task { await recoverFromPlaybackStall(reason: "watchdog stall") }
+        }
+    }
+
+    private func recoverFromPlaybackStall(reason: String) async {
+        guard !isRecoveringPlayback else { return }
+        isRecoveringPlayback = true
+        await load(maxAttempts: 2, reason: reason, resetMetadata: false)
+        isRecoveringPlayback = false
     }
 
     private func updateLatencyMetrics() {
