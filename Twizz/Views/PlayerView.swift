@@ -1590,7 +1590,7 @@ private struct ChatInputField: UIViewRepresentable {
     // Match text and placeholder colors so content remains readable.
     let foreground: UIColor = isFocused ? .black : .white
     let placeholderColor = isFocused
-      ? UIColor.black.withAlphaComponent(0.45)
+      ? UIColor.black
       : UIColor.white.withAlphaComponent(0.45)
 
     uiView.textColor = foreground
