@@ -1,6 +1,11 @@
 import SwiftUI
 
 struct HomeView: View {
+  private let pagePadding: CGFloat = 44
+  private let channelRailPadding: CGFloat = 16
+  private let channelRailSpacing: CGFloat = 34
+  private let focusedCardScale: CGFloat = 1.03
+
   @State private var selectedTopTab: TopTab = .home
   @State private var auth = TwitchAuthSession()
   @State private var follows = FollowedChannelsService()
@@ -31,7 +36,7 @@ struct HomeView: View {
           homeTab
         }
       }
-      .padding(52)
+      .padding(pagePadding)
     }
     .task {
       auth.restore()
@@ -104,20 +109,24 @@ struct HomeView: View {
       }
 
       ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 24) {
+        HStack(spacing: channelRailSpacing) {
           ForEach(follows.channels) { channel in
+            let isFocused = focusedChannelID == channel.id
+
             Button {
               selectedChannel = channel
             } label: {
-              FollowedChannelCard(channel: channel)
+              FollowedChannelCard(channel: channel, isFocused: isFocused)
             }
             .buttonStyle(.plain)
             .focused($focusedChannelID, equals: channel.id)
-            .zIndex(focusedChannelID == channel.id ? 1 : 0)
+            .focusEffectDisabled()
+            .scaleEffect(isFocused ? focusedCardScale : 1)
+            .animation(.easeOut(duration: 0.14), value: isFocused)
+            .zIndex(isFocused ? 2 : 0)
           }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(channelRailPadding)
       }
       .scrollClipDisabled()
 
@@ -208,6 +217,7 @@ struct HomeView: View {
 
 private struct FollowedChannelCard: View {
   let channel: FollowedChannel
+  let isFocused: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -260,6 +270,11 @@ private struct FollowedChannelCard: View {
         .lineLimit(1)
     }
     .frame(width: 560, alignment: .leading)
+    .overlay {
+      RoundedRectangle(cornerRadius: 18)
+        .stroke(Color.white.opacity(isFocused ? 0.95 : 0), lineWidth: 3)
+    }
+    .shadow(color: Color.white.opacity(isFocused ? 0.24 : 0), radius: 20, y: 10)
   }
 }
 
