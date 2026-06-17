@@ -5,13 +5,13 @@ struct HomeView: View {
   private let channelRailVerticalPadding: CGFloat = 20
   private let targetVisibleCards: CGFloat = 4
   private let peekCardFraction: CGFloat = 0.3
-  private let focusHorizontalInset: CGFloat = 12
-  private let focusVerticalInset: CGFloat = 10
+  private let focusHorizontalInset: CGFloat = 18
+  private let focusVerticalInset: CGFloat = 18
   private let cardCornerRadius: CGFloat = 22
   private let mediaCornerRadius: CGFloat = 18
   private let minMediaWidth: CGFloat = 220
   private let maxMediaWidth: CGFloat = 560
-  private let focusedCardScale: CGFloat = 1.02
+  private let focusedCardScale: CGFloat = 1.07
 
   @State private var selectedTopTab: TopTab = .home
   @State private var auth = TwitchAuthSession()
