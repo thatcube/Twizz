@@ -57,60 +57,44 @@ struct HomeView: View {
   }
 
   var body: some View {
-    NavigationSplitView(columnVisibility: .constant(.all)) {
-      List(SidebarTab.allCases, selection: $selectedSidebarTab) { tab in
-        Label(tab.rawValue, systemImage: tab.systemImage)
-          .tag(tab)
-          .padding(.vertical, 4)
-      }
-      .listStyle(.plain)
-      .navigationTitle("Twizz")
-      .background(
-        LinearGradient(
-          colors: resolvedPalette.backgroundColors,
-          startPoint: .top,
-          endPoint: .bottom
-        )
-        .ignoresSafeArea()
-      )
-    } detail: {
-      Group {
-        switch selectedSidebarTab {
-        case .home:
-          tabContainer { homeTab }
-        case .browse:
-          tabContainer {
-            BrowseView(
-              auth: auth,
-              selectedChannel: $selectedChannel,
-              pendingCategory: $pendingBrowseCategory
-            )
-          }
-        case .settings:
-          tabContainer {
-            SettingsView(
-              themeManager: themeManager,
-              auth: auth,
-              onRequestSignIn: { showSignIn = true },
-              onAccountChanged: {
-                Task {
-                  await refreshFollowedChannelsIfNeeded(force: true)
-                  requestFocusIfPossible(force: true)
-                }
-              }
-            )
-          }
+    TabView(selection: $selectedSidebarTab) {
+      tabContainer { homeTab }
+        .tag(SidebarTab.home)
+        .tabItem {
+          Label(SidebarTab.home.rawValue, systemImage: SidebarTab.home.systemImage)
         }
-      }
-      .background(
-        LinearGradient(
-          colors: resolvedPalette.backgroundColors,
-          startPoint: .top,
-          endPoint: .bottom
+
+      tabContainer {
+        BrowseView(
+          auth: auth,
+          selectedChannel: $selectedChannel,
+          pendingCategory: $pendingBrowseCategory
         )
-        .ignoresSafeArea()
-      )
+      }
+      .tag(SidebarTab.browse)
+      .tabItem {
+        Label(SidebarTab.browse.rawValue, systemImage: SidebarTab.browse.systemImage)
+      }
+
+      tabContainer {
+        SettingsView(
+          themeManager: themeManager,
+          auth: auth,
+          onRequestSignIn: { showSignIn = true },
+          onAccountChanged: {
+            Task {
+              await refreshFollowedChannelsIfNeeded(force: true)
+              requestFocusIfPossible(force: true)
+            }
+          }
+        )
+      }
+      .tag(SidebarTab.settings)
+      .tabItem {
+        Label(SidebarTab.settings.rawValue, systemImage: SidebarTab.settings.systemImage)
+      }
     }
+    .tabViewStyle(.sidebarAdaptable)
     .background(
       LinearGradient(
         colors: resolvedPalette.backgroundColors,
@@ -637,4 +621,3 @@ private struct HomeCategoryCard: View {
 #Preview {
   HomeView(deepLinkRouter: DeepLinkRouter())
 }
-
