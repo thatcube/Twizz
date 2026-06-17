@@ -937,6 +937,17 @@ struct PlayerView: View {
             isFocused: focus == .chatInput
           )
           .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
+          .opacity(0.02)
+          .overlay(alignment: .leading) {
+            Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
+              .font(.callout)
+              .foregroundStyle(.white.opacity(chatDraft.isEmpty ? 0.45 : 1.0))
+              .lineLimit(1)
+              .padding(.leading, 18)
+              .padding(.trailing, hasChatDraft ? 118 : 24)
+              .allowsHitTesting(false)
+              .accessibilityHidden(true)
+          }
           // Match the send button feel: the input grows when focused.
           .frame(height: hasChatDraft ? chatInputFocusedHeight : (focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight))
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
@@ -1005,6 +1016,17 @@ struct PlayerView: View {
           }
         )
         .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
+        .opacity(0.02)
+        .overlay(alignment: .leading) {
+          Text("Sign in to send messages")
+            .font(.callout)
+            .foregroundStyle(.white.opacity(0.45))
+            .lineLimit(1)
+            .padding(.leading, 18)
+            .padding(.trailing, 24)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
         // Keep the signed-out prompt visually aligned with the active input.
         .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
         .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
@@ -1857,12 +1879,13 @@ private struct ChatInputField: UIViewRepresentable {
     context.coordinator.allowsEditing = allowsEditing
     context.coordinator.onActivate = onActivate
 
+    uiView.alpha = 0.02
     uiView.backgroundColor = .clear
-    uiView.textColor = .white
-    uiView.tintColor = .white
+    uiView.textColor = .clear
+    uiView.tintColor = .clear
     uiView.attributedPlaceholder = NSAttributedString(
       string: placeholder,
-      attributes: [.foregroundColor: UIColor.white.withAlphaComponent(isFocused ? 0.55 : 0.45)]
+      attributes: [.foregroundColor: UIColor.clear]
     )
   }
 
