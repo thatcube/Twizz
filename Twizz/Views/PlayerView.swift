@@ -706,45 +706,41 @@ struct PlayerView: View {
 
       if auth.isAuthenticated {
         HStack(alignment: .center, spacing: 12) {
-          TextField("Send a message", text: $chatDraft)
-            .textFieldStyle(.plain)
-            .font(.callout)
-            .lineLimit(1)
-            // The native tvOS field has a tall intrinsic height with its text
-            // pinned near the top. Pin the field to a fixed compact height and
-            // clip the dead space below so the text reads as vertically
-            // centered inside our own rounded box.
-            .frame(height: 44)
-            .clipped()
-            .padding(.horizontal, 18)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity)
-            .background(
-              RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.10))
-            )
-            .overlay(
-              RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                  focus == .chatInput
-                    ? Color.white.opacity(0.55)
-                    : Color.white.opacity(0.18),
-                  lineWidth: focus == .chatInput ? 2 : 1
-                )
-            )
-            .focused($focus, equals: .chatInput)
-            .onMoveCommand { direction in
-              switch direction {
-              case .left:
-                revealControls(preferredFocus: .chatToggle)
-              case .up:
-                focus = .chatSettingsButton
-              case .right:
-                if hasChatDraft { focus = .chatSend }
-              default:
-                break
-              }
+          ChatInputField(
+            text: $chatDraft,
+            placeholder: "Send a message",
+            isFocused: focus == .chatInput
+          )
+          .frame(height: 30)
+          .padding(.horizontal, 18)
+          .padding(.vertical, 10)
+          .frame(maxWidth: .infinity)
+          .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+              .fill(Color.white.opacity(0.10))
+          )
+          .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+              .strokeBorder(
+                focus == .chatInput
+                  ? Color.white.opacity(0.55)
+                  : Color.white.opacity(0.18),
+                lineWidth: focus == .chatInput ? 2 : 1
+              )
+          )
+          .focused($focus, equals: .chatInput)
+          .onMoveCommand { direction in
+            switch direction {
+            case .left:
+              revealControls(preferredFocus: .chatToggle)
+            case .up:
+              focus = .chatSettingsButton
+            case .right:
+              if hasChatDraft { focus = .chatSend }
+            default:
+              break
             }
+          }
 
           if hasChatDraft {
             Button {
@@ -1522,6 +1518,61 @@ extension View {
       self.buttonStyle(.glass)
     } else {
       self.buttonStyle(.automatic)
+    }
+  }
+}
+
+/// A fully custom chat input backed by a `UITextField` so we control the
+/// background (clear — no native focus platter) and vertically center the text.
+/// SwiftUI's `TextField` on tvOS draws its own opaque focus platter that can't
+/// be removed and pins text near the top, which is why we drop down to UIKit.
+private struct ChatInputField: UIViewRepresentable {
+  @Binding var text: String
+  let placeholder: String
+  let isFocused: Bool
+
+  func makeUIView(context: Context) -> UITextField {
+    let field = UITextField()
+    field.delegate = context.coordinator
+    field.borderStyle = .none
+    field.backgroundColor = .clear
+    field.textColor = .white
+    field.tintColor = .white
+    field.font = .preferredFont(forTextStyle: .callout)
+    field.contentVerticalAlignment = .center
+    field.adjustsFontForContentSizeCategory = true
+    field.attributedPlaceholder = NSAttributedString(
+      string: placeholder,
+      attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.45)]
+    )
+    field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    field.addTarget(
+      context.coordinator,
+      action: #selector(Coordinator.editingChanged(_:)),
+      for: .editingChanged
+    )
+    return field
+  }
+
+  func updateUIView(_ uiView: UITextField, context: Context) {
+    if uiView.text != text {
+      uiView.text = text
+    }
+  }
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(text: $text)
+  }
+
+  final class Coordinator: NSObject, UITextFieldDelegate {
+    private let text: Binding<String>
+
+    init(text: Binding<String>) {
+      self.text = text
+    }
+
+    @objc func editingChanged(_ field: UITextField) {
+      text.wrappedValue = field.text ?? ""
     }
   }
 }
