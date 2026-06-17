@@ -14,6 +14,7 @@ struct SettingsView: View {
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage(LowLatencyHLSProxy.settingsKey) private var lowLatencyProxyEnabled = false
+  @AppStorage("showLatencyDiagnostics") private var showLatencyDiagnostics = false
 
   var body: some View {
     ZStack {
@@ -128,6 +129,18 @@ struct SettingsView: View {
           description:
             "Fetches Twitch's prefetch segments to pull live streams closer to real time. May increase buffering on slower connections.",
           isOn: lowLatencyProxyEnabled
+        )
+      }
+      .buttonStyle(.card)
+
+      Button {
+        showLatencyDiagnostics.toggle()
+      } label: {
+        ExperimentalToggleCard(
+          title: "Latency Diagnostics Overlay",
+          description:
+            "Shows live playback diagnostics (rendition, bitrate, buffer, edge gap) and counts stalls, jumps, and reloads on the player. Use it to troubleshoot freezes and jumps.",
+          isOn: showLatencyDiagnostics
         )
       }
       .buttonStyle(.card)
