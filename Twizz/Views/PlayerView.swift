@@ -629,6 +629,9 @@ struct PlayerView: View {
     }
     .frame(width: chatWidth)
     .modifier(GlassChatPaneStyle(enabled: isGlass))
+    // Prevent the glass container from showing a focus glow when interactive
+    // elements inside (e.g. the chat input) receive focus.
+    .focusEffectDisabled()
     // Float the settings above the glass clip so the expanding panel is never
     // cut off by the rounded glass shape.
     .overlay(alignment: .topTrailing) {
@@ -960,7 +963,7 @@ struct PlayerView: View {
             .padding(.trailing, hasChatDraft ? 108 : 0)
             .frame(maxWidth: .infinity)
           }
-          .buttonStyle(.plain)
+          .buttonStyle(ChatInputButtonStyle())
           .focusEffectDisabled()
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in
@@ -1037,7 +1040,7 @@ struct PlayerView: View {
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
           .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ChatInputButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .chatInput)
         .onMoveCommand { direction in
@@ -1070,6 +1073,8 @@ struct PlayerView: View {
   private func submitChatMessage() {
     let text = chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty, !isSendingChat else { return }
+    // Dismiss the tvOS keyboard overlay before sending.
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     isSendingChat = true
     chatSendError = nil
     Task {
@@ -1811,6 +1816,15 @@ private struct ChatSettingsPillButtonStyle: ButtonStyle {
   }
 }
 
+/// A completely passthrough button style for the chat input surface.
+/// Suppresses all platform button visuals (hover, scale, ring) so only
+/// the SwiftUI glass shell controls the appearance.
+private struct ChatInputButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+  }
+}
+
 /// Gives the chat composer field a glassy shell while preserving the UIKit
 /// text field behavior and focus handling.
 private struct ChatInputShellStyle: ViewModifier {
@@ -1878,6 +1892,9 @@ private struct ChatInputField: UIViewRepresentable {
       for: .editingChanged
     )
     field.alpha = 0.001
+    // Prevent tvOS UIKit focus engine from visiting this hidden field
+    // and applying white/gray system focus styling to it.
+    field.isUserInteractionEnabled = false
     return field
   }
 
@@ -1899,7 +1916,9 @@ private struct ChatInputField: UIViewRepresentable {
     }
 
     if !isFocused, uiView.isFirstResponder {
-      uiView.resignFirstResponder()
+      // Do not resign here: tvOS moves SwiftUI focus to nil when its system
+      // keyboard overlay opens, which would immediately close the keyboard.
+      // Keyboard dismissal is handled explicitly on send and shouldReturn.
     }
 
     uiView.alpha = 0.001
