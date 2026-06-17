@@ -224,6 +224,7 @@ private struct BrowseStreamsView: View {
         .padding(.top, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationBarHidden(true)
+        .toolbar(.hidden, for: .tabBar)
         .onChange(of: service.categoryStreams) { _, streams in
             if focusedStreamID == nil, let first = streams.first {
                 Task {
