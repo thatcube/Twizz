@@ -167,9 +167,26 @@ final class RecommendationsService {
         }
     }
 
+    // MARK: - Language
+
+    /// Maps the device's primary language to a Twitch broadcaster-language enum
+    /// token, defaulting to English. Restricted to a whitelist so the value can
+    /// be safely inlined into the GQL query.
+    private static func preferredTwitchLanguage() -> String {
+        let supported: Set<String> = [
+            "EN", "ES", "FR", "DE", "IT", "PT", "RU", "JA", "KO", "ZH",
+            "NL", "PL", "TR", "AR", "CS", "DA", "FI", "EL", "HU", "NO",
+            "RO", "SK", "SV", "TH", "VI", "BG", "ID", "UK", "CA", "HI", "MS",
+        ]
+        let primary = Locale.preferredLanguages.first ?? "en"
+        let code = String(primary.prefix(2)).uppercased()
+        return supported.contains(code) ? code : "EN"
+    }
+
     // MARK: - GQL Transport
 
     private func performGQL(query: String, variables: [String: Any]) async throws -> Data {
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("kimne78kx3ncx6brgo4mv6wki5h1ko", forHTTPHeaderField: "Client-Id")
