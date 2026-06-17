@@ -6,7 +6,7 @@ import SwiftUI
 /// There should be no per-page horizontal padding overrides — use these.
 enum AppLayout {
   /// The single horizontal page gutter shared by every top-level view.
-  static let horizontalPadding: CGFloat = 48
+  static let horizontalPadding: CGFloat = 24
 }
 
 // MARK: - AppTheme
