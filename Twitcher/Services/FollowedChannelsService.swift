@@ -4,6 +4,12 @@ import Observation
 @MainActor
 @Observable
 final class FollowedChannelsService {
+    private static let disallowedClientIDs: Set<String> = [
+        // Twitch web public client. Device flow consent appears as "Twilight"
+        // and followed-channel APIs can fail unexpectedly.
+        "kimne78kx3ncx6brgo4mv6wki5h1ko"
+    ]
+
     private(set) var channels: [FollowedChannel] = []
     private(set) var isLoading = false
     private(set) var isUsingDemoData = false
@@ -19,9 +25,27 @@ final class FollowedChannelsService {
             lastUpdatedAt = Date()
         }
 
-        guard auth.isAuthenticated,
-              let clientID = resolveClientID(),
-              let accessToken = auth.accessToken,
+        guard auth.isAuthenticated else {
+            channels = await fetchDemoChannels()
+            isUsingDemoData = true
+            return
+        }
+
+        guard let clientID = resolveClientID() else {
+            channels = await fetchDemoChannels()
+            isUsingDemoData = true
+            errorMessage = "Cannot load followed channels until TWITCH_CLIENT_ID is set in Config/TwitchSecrets.xcconfig.local."
+            return
+        }
+
+        if Self.disallowedClientIDs.contains(clientID.lowercased()) {
+            channels = await fetchDemoChannels()
+            isUsingDemoData = true
+            errorMessage = "TWITCH_CLIENT_ID is using a public Twitch web client (shows \"Twilight\"). Create your own Twitch app and use its Client ID to load followed channels."
+            return
+        }
+
+        guard let accessToken = auth.accessToken,
               let userID = auth.userID else {
             channels = await fetchDemoChannels()
             isUsingDemoData = true
@@ -78,24 +102,64 @@ final class FollowedChannelsService {
                 throw error
             }
 
-            let follows = try await fetchFollowedBroadcasters(clientID: clientID, accessToken: accessToken, userID: userID)
-            if follows.isEmpty {
-                return []
-            }
-
-            let liveByBroadcasterID = try await fetchLiveStreamsByBroadcasterID(
-                clientID: clientID,
-                accessToken: accessToken,
-                broadcasterIDs: follows.map(\.broadcasterID)
-            )
-
-            return follows.compactMap { followed in
-                guard let stream = liveByBroadcasterID[followed.broadcasterID] else {
-                    return nil
+            do {
+                let follows = try await fetchFollowedBroadcasters(clientID: clientID, accessToken: accessToken, userID: userID)
+                if follows.isEmpty {
+                    return []
                 }
-                return mapStream(stream)
+
+                let liveByBroadcasterID = try await fetchLiveStreamsByBroadcasterID(
+                    clientID: clientID,
+                    accessToken: accessToken,
+                    broadcasterIDs: follows.map(\.broadcasterID)
+                )
+
+                return follows.compactMap { followed in
+                    guard let stream = liveByBroadcasterID[followed.broadcasterID] else {
+                        return nil
+                    }
+                    return mapStream(stream)
+                }
+            } catch let fallbackError as TwitchHelixRequestError {
+                // Some clients/tokens occasionally fail for /channels/followed but
+                // still allow resolving the current user via /users.
+                guard fallbackError.status == 404 else {
+                    throw fallbackError
+                }
+
+                let resolvedUserID = try await fetchCurrentUserID(clientID: clientID, accessToken: accessToken)
+                guard resolvedUserID != userID else {
+                    throw fallbackError
+                }
+
+                let followed = try await fetchFollowedStreamsDirect(
+                    clientID: clientID,
+                    accessToken: accessToken,
+                    userID: resolvedUserID
+                )
+                return followed.map(mapStream)
             }
         }
+    }
+
+    private func fetchCurrentUserID(clientID: String, accessToken: String) async throws -> String {
+        var req = URLRequest(url: URL(string: "https://api.twitch.tv/helix/users")!)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("Twitcher/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+
+        let (data, status) = try await performHelixRequest(req)
+        guard (200...299).contains(status) else {
+            throw makeHelixError(context: "resolving current Twitch user", status: status, data: data)
+        }
+
+        let payload = try JSONDecoder().decode(HelixUsersEnvelope.self, from: data)
+        guard let first = payload.data.first else {
+            throw URLError(.cannotParseResponse)
+        }
+        return first.id
     }
 
     private func fetchFollowedStreamsDirect(clientID: String, accessToken: String, userID: String) async throws -> [HelixStream] {
@@ -109,6 +173,8 @@ final class FollowedChannelsService {
         req.httpMethod = "GET"
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("Twitcher/0.1 tvOS", forHTTPHeaderField: "User-Agent")
 
         let (data, status) = try await performHelixRequest(req)
         guard (200...299).contains(status) else {
@@ -129,6 +195,8 @@ final class FollowedChannelsService {
         req.httpMethod = "GET"
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("Twitcher/0.1 tvOS", forHTTPHeaderField: "User-Agent")
 
         let (data, status) = try await performHelixRequest(req)
         guard (200...299).contains(status) else {
@@ -150,6 +218,8 @@ final class FollowedChannelsService {
         req.httpMethod = "GET"
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("Twitcher/0.1 tvOS", forHTTPHeaderField: "User-Agent")
 
         let (data, status) = try await performHelixRequest(req)
         guard (200...299).contains(status) else {
@@ -380,6 +450,14 @@ private struct HelixStream: Decodable {
 
 private struct FollowedChannelsEnvelope: Decodable {
     let data: [FollowedBroadcaster]
+}
+
+private struct HelixUsersEnvelope: Decodable {
+    let data: [HelixUser]
+}
+
+private struct HelixUser: Decodable {
+    let id: String
 }
 
 private struct FollowedBroadcaster: Decodable {

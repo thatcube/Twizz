@@ -4,6 +4,12 @@ import Observation
 @MainActor
 @Observable
 final class TwitchAuthSession {
+    private static let disallowedClientIDs: Set<String> = [
+        // Twitch web public client. Using this shows "Twilight" on consent
+        // and may not reliably authorize Helix followed-channel endpoints.
+        "kimne78kx3ncx6brgo4mv6wki5h1ko"
+    ]
+
     private(set) var isAuthenticated = false
     private(set) var userID: String?
     private(set) var userLogin: String?
@@ -32,6 +38,35 @@ final class TwitchAuthSession {
         return trimmed
     }
 
+    private var clientIDValidationIssue: String? {
+        guard let clientID else {
+            return "Missing Twitch client ID. Set TWITCH_CLIENT_ID in Config/TwitchSecrets.xcconfig.local."
+        }
+
+        if Self.disallowedClientIDs.contains(clientID.lowercased()) {
+            return "TWITCH_CLIENT_ID is set to a public Twitch web client ID (shows as \"Twilight\"). Create your own app in the Twitch Developer Console and use that Client ID."
+        }
+
+        return nil
+    }
+
+    private var requestedScopes: [String] {
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "TWITCH_OAUTH_SCOPES") as? String {
+            let pieces = raw
+                .split { $0 == "," || $0 == " " || $0 == "\n" || $0 == "\t" }
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !pieces.isEmpty {
+                return Array(NSOrderedSet(array: pieces)) as? [String] ?? pieces
+            }
+        }
+
+        return [
+            // Keep defaults minimal for TV sign-in reliability.
+            "user:read:follows"
+        ]
+    }
+
     private enum StorageKey {
         static let accessToken = "twitch.auth.accessToken"
         static let userID = "twitch.auth.userID"
@@ -40,6 +75,13 @@ final class TwitchAuthSession {
     }
 
     func restore() {
+        if let issue = clientIDValidationIssue {
+            clearStoredAuthState()
+            statusMessage = nil
+            errorMessage = issue
+            return
+        }
+
         accessToken = userDefaults.string(forKey: StorageKey.accessToken)
         userID = userDefaults.string(forKey: StorageKey.userID)
         userLogin = userDefaults.string(forKey: StorageKey.userLogin)
@@ -71,14 +113,29 @@ final class TwitchAuthSession {
         userDefaults.removeObject(forKey: StorageKey.userDisplayName)
     }
 
+    private func clearStoredAuthState() {
+        accessToken = nil
+        userID = nil
+        userLogin = nil
+        userDisplayName = nil
+        isAuthenticated = false
+        isAuthenticating = false
+
+        userDefaults.removeObject(forKey: StorageKey.accessToken)
+        userDefaults.removeObject(forKey: StorageKey.userID)
+        userDefaults.removeObject(forKey: StorageKey.userLogin)
+        userDefaults.removeObject(forKey: StorageKey.userDisplayName)
+    }
+
     func beginDeviceCodeSignIn() async {
         errorMessage = nil
 
         guard !isAuthenticating else { return }
-        guard let clientID else {
-            errorMessage = "Missing Twitch client ID. Set TWITCH_CLIENT_ID in Config/TwitchSecrets.xcconfig.local."
+        if let issue = clientIDValidationIssue {
+            errorMessage = issue
             return
         }
+        guard let clientID else { return }
 
         isAuthenticating = true
         statusMessage = "Requesting Twitch sign-in code..."
@@ -101,7 +158,7 @@ final class TwitchAuthSession {
             }
         } catch {
             isAuthenticating = false
-            errorMessage = "Could not start Twitch sign-in: \(error.localizedDescription)"
+            errorMessage = "Could not start Twitch sign-in: \(describe(error))"
             statusMessage = nil
         }
     }
@@ -139,7 +196,7 @@ final class TwitchAuthSession {
                     return
                 }
             } catch {
-                errorMessage = "Sign-in failed: \(error.localizedDescription)"
+                errorMessage = "Sign-in failed: \(describe(error))"
                 isAuthenticating = false
                 return
             }
@@ -159,21 +216,25 @@ final class TwitchAuthSession {
     }
 
     private func finishSignIn(accessToken: String, clientID: String) async throws {
-        let profile = try await requestUserProfile(accessToken: accessToken, clientID: clientID)
+        let identity = try await requestValidatedIdentity(accessToken: accessToken)
+        let profile = try? await requestUserProfile(accessToken: accessToken, clientID: clientID, userID: identity.userID)
+
+        let resolvedLogin = profile?.login ?? identity.login
+        let resolvedDisplayName = profile?.displayName ?? identity.login
 
         self.accessToken = accessToken
-        self.userID = profile.id
-        self.userLogin = profile.login
-        self.userDisplayName = profile.displayName
+        self.userID = identity.userID
+        self.userLogin = resolvedLogin
+        self.userDisplayName = resolvedDisplayName
         self.isAuthenticated = true
         self.isAuthenticating = false
-        self.statusMessage = "Signed in as \(profile.displayName)."
+        self.statusMessage = "Signed in as \(resolvedDisplayName)."
         self.errorMessage = nil
 
         userDefaults.set(accessToken, forKey: StorageKey.accessToken)
-        userDefaults.set(profile.id, forKey: StorageKey.userID)
-        userDefaults.set(profile.login, forKey: StorageKey.userLogin)
-        userDefaults.set(profile.displayName, forKey: StorageKey.userDisplayName)
+        userDefaults.set(identity.userID, forKey: StorageKey.userID)
+        userDefaults.set(resolvedLogin, forKey: StorageKey.userLogin)
+        userDefaults.set(resolvedDisplayName, forKey: StorageKey.userDisplayName)
     }
 
     private func requestDeviceCode(clientID: String) async throws -> DeviceCodeResponse {
@@ -181,14 +242,14 @@ final class TwitchAuthSession {
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
-        let scope = "user:read:follows"
+        let scope = requestedScopes.joined(separator: " ")
         let body = "client_id=\(percentEncode(clientID))&scopes=\(percentEncode(scope))"
         req.httpBody = body.data(using: .utf8)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else {
-            throw URLError(.badServerResponse)
+            throw makeHTTPError(context: "requesting Twitch device code", status: status, data: data)
         }
 
         return try JSONDecoder().decode(DeviceCodeResponse.self, from: data)
@@ -208,24 +269,42 @@ final class TwitchAuthSession {
 
         if status == 400 {
             let payload = (try? JSONDecoder().decode(OAuthErrorPayload.self, from: data))
-            switch payload?.message.lowercased() {
+            switch normalizedOAuthMessage(payload?.message) {
             case "authorization_pending": throw OAuthPollingError.authorizationPending
             case "slow_down": throw OAuthPollingError.slowDown
             case "access_denied": throw OAuthPollingError.accessDenied
             case "expired_token": throw OAuthPollingError.expiredToken
+            case "invalid_device_code": throw OAuthPollingError.expiredToken
             default: break
             }
         }
 
         guard (200...299).contains(status) else {
-            throw URLError(.badServerResponse)
+            throw makeHTTPError(context: "exchanging Twitch device code", status: status, data: data)
         }
 
         return try JSONDecoder().decode(DeviceTokenResponse.self, from: data)
     }
 
-    private func requestUserProfile(accessToken: String, clientID: String) async throws -> UserProfile {
-        var req = URLRequest(url: URL(string: "https://api.twitch.tv/helix/users")!)
+    private func requestValidatedIdentity(accessToken: String) async throws -> OAuthValidateResponse {
+        var req = URLRequest(url: URL(string: "https://id.twitch.tv/oauth2/validate")!)
+        req.httpMethod = "GET"
+        req.setValue("OAuth \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else {
+            throw makeHTTPError(context: "validating Twitch token", status: status, data: data)
+        }
+
+        return try JSONDecoder().decode(OAuthValidateResponse.self, from: data)
+    }
+
+    private func requestUserProfile(accessToken: String, clientID: String, userID: String) async throws -> UserProfile {
+        var components = URLComponents(string: "https://api.twitch.tv/helix/users")!
+        components.queryItems = [URLQueryItem(name: "id", value: userID)]
+
+        var req = URLRequest(url: components.url!)
         req.httpMethod = "GET"
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue(clientID, forHTTPHeaderField: "Client-Id")
@@ -233,7 +312,7 @@ final class TwitchAuthSession {
         let (data, response) = try await URLSession.shared.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else {
-            throw URLError(.badServerResponse)
+            throw makeHTTPError(context: "loading Twitch profile", status: status, data: data)
         }
 
         let payload = try JSONDecoder().decode(UserProfileEnvelope.self, from: data)
@@ -245,6 +324,28 @@ final class TwitchAuthSession {
 
     private func percentEncode(_ text: String) -> String {
         text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
+    }
+
+    private func normalizedOAuthMessage(_ message: String?) -> String? {
+        guard let message else { return nil }
+        return message
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+    }
+
+    private func makeHTTPError(context: String, status: Int, data: Data) -> TwitchAuthHTTPError {
+        let payload = try? JSONDecoder().decode(TwitchAuthAPIErrorPayload.self, from: data)
+        let message = payload?.message ?? payload?.error ?? String(data: data, encoding: .utf8)
+        return TwitchAuthHTTPError(context: context, status: status, message: message)
+    }
+
+    private func describe(_ error: Error) -> String {
+        if let authError = error as? TwitchAuthHTTPError {
+            return authError.localizedDescription
+        }
+        return error.localizedDescription
     }
 }
 
@@ -277,6 +378,42 @@ private struct DeviceTokenResponse: Decodable {
 private struct OAuthErrorPayload: Decodable {
     let status: Int?
     let message: String
+}
+
+private struct OAuthValidateResponse: Decodable {
+    let clientID: String
+    let login: String
+    let userID: String
+    let scopes: [String]
+    let expiresIn: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case login
+        case userID = "user_id"
+        case scopes
+        case expiresIn = "expires_in"
+    }
+}
+
+private struct TwitchAuthAPIErrorPayload: Decodable {
+    let status: Int?
+    let message: String?
+    let error: String?
+}
+
+private struct TwitchAuthHTTPError: LocalizedError {
+    let context: String
+    let status: Int
+    let message: String?
+
+    var errorDescription: String? {
+        let trimmed = message?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            return "\(context): \(trimmed) (HTTP \(status))"
+        }
+        return "\(context) failed (HTTP \(status))"
+    }
 }
 
 private enum OAuthPollingError: Error {

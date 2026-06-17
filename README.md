@@ -73,6 +73,12 @@ Twitch device auth still needs a Twitch app `client_id`, but you do not need to 
 TWITCH_CLIENT_ID = your_real_client_id
 ```
 
+Important:
+
+- Do not use Twitch's public web client ID (for example `kimne78kx3ncx6brgo4mv6wki5h1ko`).
+- If you do, the consent page will show "Twilight" and followed-channel APIs may fail.
+- Create your own Twitch app in the Twitch Developer Console and use that Client ID.
+
 `Config/TwitchSecrets.xcconfig.local` is gitignored (`*.xcconfig.local`), so your ID stays local.
 
 On Apple TV, sign-in uses Twitch Device Code flow: start sign-in on TV, then complete approval on your phone/browser (including the Twitch mobile app browser flow) using the shown code/link.
