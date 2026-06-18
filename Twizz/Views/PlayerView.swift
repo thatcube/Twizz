@@ -229,6 +229,7 @@ struct PlayerView: View {
     case chatSend
     case raidFollowCancel
     case simulateRaidButton
+    case simulateOfflineButton
     case chatSettingsButton
     case chatTextSizeOption(Int)
     case chatLineHeightOption(Int)
@@ -1161,6 +1162,7 @@ struct PlayerView: View {
       .chatLowLatencyToggle,
       .chatDiagnosticsToggle,
       .simulateRaidButton,
+      .simulateOfflineButton,
       .youtubeMergeToggle,
       .youtubeMergeURL:
       return true
@@ -1407,6 +1409,20 @@ struct PlayerView: View {
             focusTag: .simulateRaidButton
           ) {
             simulateOutgoingRaid()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          // Debug-only: there's no way to force a watched channel offline, so
+          // this drops straight into the offline empty state to exercise its
+          // layout, copy, and View Channel / Try Again actions. Visible only
+          // while the Diagnostics overlay is enabled.
+          settingsPill(
+            title: "Simulate Stream Offline",
+            isSelected: false,
+            focusTag: .simulateOfflineButton
+          ) {
+            showChatSettings = false
+            presentOfflineState()
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }
