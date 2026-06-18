@@ -91,7 +91,7 @@ struct ChannelPageView: View {
           // bottom edge by 50%. The banner starts at the true screen top, so we
           // subtract the safe-area inset the ScrollView already applies.
           .padding(.top, hasBanner ? max(bannerHeight - safeTop - heroHeight / 2, 0) : 40)
-          .padding(.bottom, 60)
+          .padding(.bottom, 140)
         }
         .scrollClipDisabled()
       }
@@ -140,14 +140,20 @@ struct ChannelPageView: View {
         .scaleEffect(x: 1, y: -1, anchor: .center)
         .blur(radius: 70)
         .clipped()
-        .overlay(
+        // Fade the reflection out toward the bottom with a mask (rather than a
+        // dark overlay) so it can blend additively.
+        .mask(
           LinearGradient(
-            colors: [.clear, palette.backgroundColors.last ?? .black],
+            colors: [.white, .white.opacity(0.6), .clear],
             startPoint: .top,
             endPoint: .bottom
           )
         )
-        .opacity(0.5)
+        .opacity(0.6)
+        // Add the reflection's light to the dark background instead of averaging
+        // toward it, so a bright/white banner glows in its own color rather than
+        // washing out to gray.
+        .blendMode(.plusLighter)
       }
       .frame(maxWidth: .infinity, alignment: .top)
       .ignoresSafeArea()
