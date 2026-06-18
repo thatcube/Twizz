@@ -96,7 +96,7 @@ struct SettingsView: View {
   private var appearanceRow: some View {
     settingRow(
       title: "Appearance",
-      subtitle: "Theme used throughout the app."
+      subtitle: nil
     ) {
       ForEach(AppTheme.allCases) { theme in
         Button {
@@ -108,7 +108,6 @@ struct SettingsView: View {
         .focused($focusedTheme, equals: theme)
       }
     }
-    .defaultFocus($focusedTheme, AppTheme.system)
   }
 
   private var streamCardRow: some View {
@@ -134,8 +133,8 @@ struct SettingsView: View {
 
   private var chatRow: some View {
     settingRow(
-      title: "Chat",
-      subtitle: "Show chat when a stream opens."
+      title: "Open chat by default",
+      subtitle: nil
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {
