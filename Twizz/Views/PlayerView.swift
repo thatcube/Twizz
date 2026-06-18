@@ -106,6 +106,10 @@ struct PlayerView: View {
   @State private var wallClockLatencySeconds: Double?
   @State private var liveEdgeLatencySeconds: Double?
   @State private var smoothedLatencySeconds: Double?
+  /// Number of consecutive settled latency samples since playback became
+  /// active. Used to suppress the misleading near-zero reading the live-edge
+  /// gap reports in the first second or two before the playhead settles.
+  @State private var latencyReadingCount = 0
   // The real (pre-proxy) source URL of the currently loaded item, so we can tell
   // whether a quality switch actually needs to replace the item. AVURLAsset.url
   // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
@@ -176,6 +180,10 @@ struct PlayerView: View {
   private let startupPlaybackTimeoutSeconds: Double = 14
   private let startupPlaybackPollMilliseconds: UInt64 = 500
   private let stalledPlaybackThresholdSamples = 6
+  /// Settled latency samples required before the HUD shows a number. Until
+  /// then it reads "Measuring latency…" so the early near-zero edge gap never
+  /// flashes as "~0s behind live".
+  private let latencyWarmUpSamples = 3
   private let playbackWatchdogIntervalSeconds: Double = 2
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
@@ -1878,21 +1886,31 @@ struct PlayerView: View {
     smoothedLatencySeconds ?? rawLatencySeconds
   }
 
+  /// True while playback is active but we don't yet have enough settled samples
+  /// to trust the number (the live-edge gap reads ~0 right after playback
+  /// starts, then climbs to the real value).
+  private var isLatencyWarmingUp: Bool {
+    isPlaybackActive && latencyReadingCount < latencyWarmUpSamples
+  }
+
   private var latencyColor: Color {
-    guard let seconds = measuredLatencySeconds else { return .gray }
+    guard let seconds = measuredLatencySeconds, !isLatencyWarmingUp else { return .gray }
     if seconds <= 8 { return .green }
     if seconds <= 15 { return .yellow }
     return .orange
   }
 
   private var latencyLabel: String {
-    if !isPlaybackActive {
+    guard isPlaybackActive else {
       return "Waiting for playback"
     }
-    if let seconds = measuredLatencySeconds {
-      return "~\(formatLatencySeconds(seconds)) behind live"
+    guard let seconds = measuredLatencySeconds else {
+      return "Latency unavailable"
     }
-    return "Latency unavailable"
+    if isLatencyWarmingUp {
+      return "Measuring latency…"
+    }
+    return "~\(formatLatencySeconds(seconds)) behind live"
   }
 
   private func formatLatencySeconds(_ seconds: Double) -> String {
@@ -1937,6 +1955,7 @@ struct PlayerView: View {
     wallClockLatencySeconds = nil
     liveEdgeLatencySeconds = nil
     smoothedLatencySeconds = nil
+    latencyReadingCount = 0
     isPlaybackActive = false
     didRequestPlayback = false
     edgeLatencyLowConfidenceStreak = 0
@@ -2039,10 +2058,12 @@ struct PlayerView: View {
   private func updateSmoothedLatency() {
     guard isPlaybackActive, let raw = rawLatencySeconds else {
       smoothedLatencySeconds = nil
+      latencyReadingCount = 0
       return
     }
     guard let prev = smoothedLatencySeconds else {
       smoothedLatencySeconds = raw
+      latencyReadingCount = 1
       return
     }
     if abs(raw - prev) >= 3 {
@@ -2050,6 +2071,7 @@ struct PlayerView: View {
     } else {
       smoothedLatencySeconds = prev * 0.6 + raw * 0.4
     }
+    latencyReadingCount += 1
   }
 
   private func updateLatencyMetrics() {
