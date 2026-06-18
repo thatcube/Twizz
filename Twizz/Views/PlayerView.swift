@@ -13,6 +13,11 @@ private final class PassivePlayerViewController: AVPlayerViewController {
 /// better than a raw `AVPlayerLayer`.
 struct VideoSurface: UIViewControllerRepresentable {
   let player: AVPlayer
+  /// When non-zero, the video layer is clipped natively with this corner radius.
+  /// SwiftUI's `.clipShape` masks an ancestor layer, but the video composites in
+  /// its own pass and bleeds a sub-pixel past rounded corners. Clipping the
+  /// hosted view's own layer (`cornerRadius` + `masksToBounds`) removes that.
+  var cornerRadius: CGFloat = 0
 
   func makeUIViewController(context: Context) -> AVPlayerViewController {
     let controller = PassivePlayerViewController()
@@ -27,6 +32,7 @@ struct VideoSurface: UIViewControllerRepresentable {
     // Remote input (seek/scrub/skip). Twizz UI remains fully interactive.
     controller.view.isUserInteractionEnabled = false
     controller.view.backgroundColor = .black
+    applyCornerRadius(to: controller)
     return controller
   }
 
@@ -40,6 +46,18 @@ struct VideoSurface: UIViewControllerRepresentable {
     controller.videoGravity = .resizeAspect
     controller.appliesPreferredDisplayCriteriaAutomatically = false
     controller.view.isUserInteractionEnabled = false
+    applyCornerRadius(to: controller)
+  }
+
+  /// Rounds the hosted view's backing layer so Core Animation clips the video
+  /// itself, matching SwiftUI's circular `RoundedRectangle` outer clip without
+  /// the corner bleed.
+  private func applyCornerRadius(to controller: AVPlayerViewController) {
+    let layer = controller.view.layer
+    layer.cornerRadius = cornerRadius
+    layer.cornerCurve = .circular
+    layer.masksToBounds = cornerRadius > 0
+    layer.allowsEdgeAntialiasing = cornerRadius > 0
   }
 }
 
