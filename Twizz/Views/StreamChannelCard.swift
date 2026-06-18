@@ -262,7 +262,7 @@ struct StreamChannelCard: View {
     if let cachedURL {
       return cachedURL
     }
-    return try await PlaybackService.hlsURL(for: login)
+    return try await PlaybackService.previewHLSURL(for: login)
   }
 
   @MainActor
@@ -275,6 +275,8 @@ struct StreamChannelCard: View {
         options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
       )
       let item = AVPlayerItem(asset: asset)
+      item.preferredForwardBufferDuration = 0.8
+      item.preferredPeakBitRate = 2_200_000
       previewPlayer.replaceCurrentItem(with: item)
       previewSourceURL = sourceURL
     }

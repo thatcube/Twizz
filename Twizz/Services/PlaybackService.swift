@@ -49,6 +49,11 @@ struct PlaybackService {
     private static let clientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
     private static let accessTokenHash = "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9"
     private static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    private static let previewURLCache = PreviewURLCache()
+    private static let previewURLCacheTTL: TimeInterval = 120
+    private static let previewTargetBitrate = 1_500_000
+    private static let previewMaxBitrate = 2_200_000
+    private static let previewMinBitrate = 350_000
 
     /// Headers to attach to the AVURLAsset so every variant playlist and media
     /// segment (across Twitch's CDNs and all quality levels) is fetched with the
@@ -89,6 +94,25 @@ struct PlaybackService {
         let master = buildUsherURL(channel: channel, token: token)
         let qualities = try await fetchQualities(master)
         return StreamPlayback(master: master, qualities: qualities)
+    }
+
+    /// Returns a lower-bitrate live stream URL tailored for lightweight previews
+    /// (hover cards + ambient blurred backdrop). This reduces decoder/network
+    /// pressure versus Source/Auto while preserving live motion.
+    static func previewHLSURL(for channel: String) async throws -> URL {
+        let normalized = channel.lowercased()
+        if let cached = await previewURLCache.value(for: normalized, now: Date()) {
+            return cached
+        }
+
+        let playback = try await resolve(for: normalized)
+        let selected = preferredPreviewQuality(from: playback.qualities)?.url ?? playback.master
+        await previewURLCache.insert(
+            selected,
+            for: normalized,
+            expiresAt: Date().addingTimeInterval(previewURLCacheTTL)
+        )
+        return selected
     }
 
     /// Best-effort fetch of the current live stream title for overlay UI.
@@ -284,5 +308,52 @@ struct PlaybackService {
         let base = name.replacingOccurrences(of: " (source)", with: "")
                        .replacingOccurrences(of: " (Source)", with: "")
         return isSource ? "\(base) (Source)" : base
+    }
+
+    /// Picks a preview-friendly rendition: avoid Source-level bitrates while
+    /// also avoiding ultra-low variants that look muddy when blurred fullscreen.
+    private static func preferredPreviewQuality(from qualities: [StreamQuality]) -> StreamQuality? {
+        let videoQualities = qualities.filter { !$0.isAudioOnly }
+        guard !videoQualities.isEmpty else { return nil }
+
+        return videoQualities.min { lhs, rhs in
+            let lhsScore = previewScore(lhs.bitrate)
+            let rhsScore = previewScore(rhs.bitrate)
+            if lhsScore == rhsScore {
+                // Tie-break toward the higher bitrate for visual quality.
+                return lhs.bitrate > rhs.bitrate
+            }
+            return lhsScore < rhsScore
+        }
+    }
+
+    private static func previewScore(_ bitrate: Int) -> Int {
+        let clamped = max(0, bitrate)
+        let distance = abs(clamped - previewTargetBitrate)
+        let overPenalty = clamped > previewMaxBitrate ? (clamped - previewMaxBitrate) * 4 : 0
+        let underPenalty = clamped < previewMinBitrate ? (previewMinBitrate - clamped) * 2 : 0
+        return distance + overPenalty + underPenalty
+    }
+
+    private actor PreviewURLCache {
+        private struct Entry {
+            let url: URL
+            let expiresAt: Date
+        }
+
+        private var entries: [String: Entry] = [:]
+
+        func value(for channel: String, now: Date) -> URL? {
+            guard let entry = entries[channel] else { return nil }
+            guard entry.expiresAt > now else {
+                entries[channel] = nil
+                return nil
+            }
+            return entry.url
+        }
+
+        func insert(_ url: URL, for channel: String, expiresAt: Date) {
+            entries[channel] = Entry(url: url, expiresAt: expiresAt)
+        }
     }
 }
