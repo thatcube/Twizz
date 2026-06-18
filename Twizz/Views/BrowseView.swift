@@ -62,7 +62,7 @@ private struct BrowseCategoriesView: View {
   @FocusState private var focusedID: String?
 
   private let columns = [
-    GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 24)
+    GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 28)
   ]
 
   var body: some View {
@@ -89,7 +89,7 @@ private struct BrowseCategoriesView: View {
             .foregroundStyle(.orange)
         }
 
-        LazyVGrid(columns: columns, spacing: 24) {
+        LazyVGrid(columns: columns, spacing: 28) {
           ForEach(service.categories) { category in
             let isFocused = focusedID == category.id
             CategoryCard(
@@ -148,11 +148,11 @@ private struct BrowseStreamsView: View {
 
   private var columns: [GridItem] {
     Array(
-      repeating: GridItem(.flexible(), spacing: 20),
+      repeating: GridItem(.flexible(), spacing: 24),
       count: StreamCardSize.resolve(streamCardSizeRaw).visibleCardCount
     )
   }
-  private let gridSpacing: CGFloat = 20
+  private let gridSpacing: CGFloat = 24
   private let gridBottomInset: CGFloat = 12
 
   var body: some View {

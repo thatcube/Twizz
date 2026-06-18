@@ -405,7 +405,8 @@ struct HomeView: View {
     let visibleWidth = max(availableWidth - AppLayout.horizontalPadding + trailingSafeArea, 1)
     let n = targetVisibleCards
     let peek = peekCardFraction
-    let spacing = max(18, min(32, visibleWidth * 0.012))
+    let baseSpacing = max(18, min(32, visibleWidth * 0.012))
+    let spacing = min(baseSpacing + 4, 36)
     // Fit `n` full cards plus a `peek` sliver of the next one, with a full
     // spacing gap before each of those following cards (n gaps total). Solving
     // visibleWidth = (n + peek) * outer + n * spacing for `outer`.
