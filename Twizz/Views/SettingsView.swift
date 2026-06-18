@@ -429,7 +429,7 @@ private struct SettingPill: View {
         }
       }
 
-      PhIcon(icon: .check, filled: false, size: 22)
+      PhIcon(icon: .check, bold: true, size: 26)
         .opacity(isSelected ? 1 : 0)
     }
     .padding(.horizontal, 14)

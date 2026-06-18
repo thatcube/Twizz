@@ -511,8 +511,7 @@ struct PlayerView: View {
           scheduleHide()
         } label: {
           PhIcon(
-            icon: showChat ? .sidebarSimple : .chatCircle,
-            filled: !showChat,
+            icon: showChat ? .arrowLineRight : .arrowLineLeft,
             size: 40
           )
           .accessibilityLabel(showChat ? "Hide Chat" : "Show Chat")
@@ -691,7 +690,7 @@ struct PlayerView: View {
       Button {
         toggleChatSettings()
       } label: {
-        PhIcon(icon: showChatSettings ? .x : .faders, size: 26)
+        PhIcon(icon: showChatSettings ? .x : .slidersHorizontal, size: 26)
           .frame(width: 30, height: 30)
       }
       .TwizzControlButtonStyle()
@@ -929,7 +928,7 @@ struct PlayerView: View {
     return Button(action: action) {
       HStack(spacing: 8) {
         if isSelected {
-          PhIcon(icon: .check, filled: false, size: 18)
+          PhIcon(icon: .check, bold: true, size: 22)
         }
         Text(title)
           .font(.subheadline.weight(isSelected ? .semibold : .regular))
@@ -1272,7 +1271,7 @@ struct PlayerView: View {
               Text(option)
               Spacer()
               if option == preferredQuality {
-                PhIcon(icon: .check, filled: false, size: 28)
+                PhIcon(icon: .check, bold: true, size: 32)
               }
             }
             .frame(width: 360)
