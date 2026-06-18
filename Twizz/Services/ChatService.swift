@@ -1013,8 +1013,12 @@ final class ChatService {
 
     var immediate: [ChatMessage] = []
     var backlog: [ChatMessage] = []
+    // Never hold a message longer than the (effective) delay: a future clock
+    // skew on a server timestamp must not push a genuinely-live message past
+    // the playhead. (Past/old timestamps already fall through to immediate.)
+    let maxReleaseAt = now.addingTimeInterval(delay)
     for message in sorted {
-      let releaseAt = message.timestamp.addingTimeInterval(delay)
+      let releaseAt = min(message.timestamp.addingTimeInterval(delay), maxReleaseAt)
       if releaseAt > now {
         syncBuffer.append(PendingChatMessage(message: message, releaseAt: releaseAt))
       } else if message.timestamp < fullPlayhead {
