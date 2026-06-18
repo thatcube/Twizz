@@ -26,8 +26,8 @@ final class RecommendationsService {
             async let channelsTask = fetchRecommendedChannels(limit: 24)
             async let categoriesTask = fetchRecommendedCategories(limit: 20)
             let (loadedChannels, loadedCategories) = try await (channelsTask, categoriesTask)
-            channels = loadedChannels
-            categories = loadedCategories
+            channels = loadedChannels.filter { !$0.isMature }
+            categories = loadedCategories.filter { !$0.isMature }
         } catch {
             errorMessage = "Could not load recommendations right now."
         }
@@ -40,6 +40,7 @@ final class RecommendationsService {
             let id: String?
             let title: String?
             let viewersCount: Int?
+            let isMature: Bool?
             let previewImageURL: String?
             let broadcaster: Broadcaster?
             let game: Game?
@@ -70,6 +71,7 @@ final class RecommendationsService {
                     id
                     title
                     viewersCount
+                    isMature
                     previewImageURL(width: 640, height: 360)
                     broadcaster {
                       login
@@ -112,7 +114,8 @@ final class RecommendationsService {
                 viewerCount: node.viewersCount,
                 thumbnailURL: previewURL,
                 profileImageURL: profileURL,
-                isLive: true
+                isLive: true,
+                isMature: node.isMature ?? false
             )
         }
     }
@@ -125,6 +128,7 @@ final class RecommendationsService {
             let name: String?
             let boxArtURL: String?
             let viewersCount: Int?
+            let isMature: Bool?
         }
         struct GameEdge: Decodable { let node: GameNode? }
         struct TopGamesConn: Decodable { let edges: [GameEdge]? }
@@ -140,6 +144,7 @@ final class RecommendationsService {
                     name
                     boxArtURL(width: 285, height: 380)
                     viewersCount
+                    isMature
                   }
                 }
               }
@@ -162,7 +167,8 @@ final class RecommendationsService {
                 id: id,
                 name: name,
                 boxArtURL: boxArtURL,
-                viewerCount: node.viewersCount
+                viewerCount: node.viewersCount,
+                isMature: node.isMature ?? false
             )
         }
     }
