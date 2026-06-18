@@ -47,22 +47,6 @@ struct HomeView: View {
     StreamCardSize.resolve(streamCardSizeRaw)
   }
 
-  /// Drives the tab selection while also detecting a "re-tap" of the already
-  /// active Home tab — tvOS `TabView` invokes a selection binding's setter even
-  /// when the value is unchanged, which gives us a place to trigger a manual
-  /// refresh (there's no dedicated reselection callback in SwiftUI).
-  private var sidebarSelection: Binding<SidebarTab> {
-    Binding(
-      get: { selectedSidebarTab },
-      set: { newValue in
-        if newValue == .home && selectedSidebarTab == .home {
-          performManualRefresh()
-        }
-        selectedSidebarTab = newValue
-      }
-    )
-  }
-
   private var targetVisibleCards: CGFloat {
     CGFloat(streamCardSize.visibleCardCount)
   }
@@ -96,7 +80,7 @@ struct HomeView: View {
   }
 
   var body: some View {
-    TabView(selection: sidebarSelection) {
+    TabView(selection: $selectedSidebarTab) {
       tabContainer { homeTab }
         .tag(SidebarTab.home)
         .tabItem {
@@ -289,6 +273,14 @@ struct HomeView: View {
         }
 
         Spacer()
+
+        Button {
+          performManualRefresh()
+        } label: {
+          Image(systemName: "arrow.clockwise")
+            .font(.system(size: 28, weight: .semibold))
+        }
+        .accessibilityLabel("Refresh")
       }
 
       if let errorMessage = follows.errorMessage {
@@ -604,8 +596,8 @@ struct HomeView: View {
   }
 
   /// Force-refreshes every Home rail and surfaces a brief toast so the viewer
-  /// gets feedback that a refresh actually happened. Triggered by re-tapping the
-  /// already-active Home tab. Ignores re-taps while a refresh is already running.
+  /// gets feedback that a refresh actually happened. Triggered by the header
+  /// Refresh button. Ignores taps while a refresh is already running.
   private func performManualRefresh() {
     guard refreshToast == nil else { return }
     Task {
