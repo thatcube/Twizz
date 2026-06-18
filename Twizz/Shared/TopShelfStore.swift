@@ -48,8 +48,21 @@ enum TopShelfStore {
         )
     }
 
+    /// Directory inside the shared container where the snapshot lives.
+    ///
+    /// tvOS keeps the App Group container *root* read-only — only
+    /// subdirectories such as `Library/Caches` are writable. Writing the
+    /// snapshot to the root fails with `NSFileWriteNoPermissionError` (513), so
+    /// it is stored under `Library/Caches` instead. Both the app and the
+    /// extension resolve the same path through this property.
+    private static var snapshotDirectoryURL: URL? {
+        containerURL?
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Caches", isDirectory: true)
+    }
+
     private static var snapshotURL: URL? {
-        containerURL?.appendingPathComponent(TopShelf.snapshotFileName)
+        snapshotDirectoryURL?.appendingPathComponent(TopShelf.snapshotFileName)
     }
 
     /// Records the outcome of the most recent `save` so the in-app diagnostics
@@ -64,13 +77,13 @@ enum TopShelfStore {
     /// error. Creating the directory (and falling back to a non-atomic write)
     /// makes the first publish succeed.
     static func save(_ snapshot: TopShelfSnapshot) {
-        guard let container = containerURL, let url = snapshotURL else {
+        guard let directory = snapshotDirectoryURL, let url = snapshotURL else {
             lastSaveOutcome = "save skipped: no container URL"
             return
         }
         do {
             try FileManager.default.createDirectory(
-                at: container,
+                at: directory,
                 withIntermediateDirectories: true
             )
 
@@ -100,6 +113,40 @@ enum TopShelfStore {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(TopShelfSnapshot.self, from: data)
+    }
+
+    /// Appends a timestamped breadcrumb so the (otherwise invisible) Top Shelf
+    /// extension process can be observed off-device. Writes to the process's own
+    /// Caches (always available) and records whether the shared App Group
+    /// container is reachable. Temporary diagnostic.
+    static func appendExtensionBreadcrumb(_ message: String) {
+        let groupStatus = containerURL?.path ?? "GROUP_CONTAINER_NIL"
+        let line = "\(ISO8601DateFormatter().string(from: Date())) [group=\(groupStatus)] \(message)\n"
+
+        // Own sandbox caches — does not require the App Group entitlement.
+        if let ownCaches = FileManager.default.urls(
+            for: .cachesDirectory, in: .userDomainMask
+        ).first {
+            appendLine(line, to: ownCaches.appendingPathComponent("topshelf-ext-log.txt"))
+        }
+
+        // Also try the shared container (only works if the group is reachable).
+        if let directory = snapshotDirectoryURL {
+            try? FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true
+            )
+            appendLine(line, to: directory.appendingPathComponent("topshelf-ext-log.txt"))
+        }
+    }
+
+    private static func appendLine(_ line: String, to url: URL) {
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            try? handle.close()
+        } else {
+            try? Data(line.utf8).write(to: url)
+        }
     }
 
     /// Whether the shared App Group container is reachable. If this is `false`
