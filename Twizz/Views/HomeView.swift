@@ -12,7 +12,7 @@ struct HomeView: View {
   private let minMediaWidth: CGFloat = 220
   private let maxMediaWidth: CGFloat = 900
   private let focusedCardScale: CGFloat = 1.07
-  private let focusedStreamCardScale: CGFloat = 1.5
+  private let focusedStreamCardScale: CGFloat = 1.25
   private let autoRefreshStaleInterval: TimeInterval = 5 * 60
 
   @State private var selectedSidebarTab: SidebarTab = .home
