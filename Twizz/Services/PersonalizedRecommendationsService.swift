@@ -55,7 +55,14 @@ final class PersonalizedRecommendationsService {
       viewerTier: profile.viewerTier
     )
 
-    let recommended = await SimilarChannelsEngine.recommend(using: signals)
+    // Diversify: draw from more of the viewer's top categories and cap any single
+    // category, so the rail isn't swept by their strongest one (e.g. all GTA V).
+    let recommended = await SimilarChannelsEngine.recommend(
+      using: signals,
+      seedLimit: 6,
+      resultLimit: 18,
+      maxPerCategory: 3
+    )
 
     // Don't recommend channels the viewer already follows or is currently being
     // shown elsewhere on Home — those live in the Following rail.
