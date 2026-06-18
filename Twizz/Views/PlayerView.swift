@@ -108,6 +108,7 @@ struct PlayerView: View {
   @AppStorage("chatEmoteAuto") private var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
   @AppStorage("chatEmoteSizeValue") private var chatEmoteSizeValue = Double(ChatAppearance.defaultEmoteSize)
   @AppStorage("chatLineHeightValue") private var chatLineHeightValue = Double(ChatAppearance.defaultLineHeight)
+  @AppStorage("chatLetterSpacingValue") private var chatLetterSpacingValue = Double(ChatAppearance.defaultLetterSpacing)
   @AppStorage("chatMessageSpacingValue") private var chatMessageSpacingValue = Double(ChatAppearance.defaultMessageSpacing)
   @AppStorage("chatWidthValue") private var chatWidthValue = Double(ChatAppearance.defaultWidth)
   @AppStorage("chatAnimatedEmotes") private var chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
@@ -326,6 +327,7 @@ struct PlayerView: View {
     case text
     case emote
     case lineHeight
+    case letterSpacing
     case messageSpacing
     case width
   }
@@ -336,6 +338,10 @@ struct PlayerView: View {
 
   private var chatLineHeight: CGFloat {
     CGFloat(chatLineHeightValue)
+  }
+
+  private var chatLetterSpacing: CGFloat {
+    CGFloat(chatLetterSpacingValue)
   }
 
   private var chatMessageSpacing: CGFloat {
@@ -1313,6 +1319,7 @@ struct PlayerView: View {
         emoteSize: chatEmoteSize,
         messageSpacing: chatMessageSpacing,
         lineHeight: chatLineHeight,
+        letterSpacing: chatLetterSpacing,
         animatedEmotes: chatAnimatedEmotes,
         fontStyle: chatFontStyle,
         showBadges: chatShowBadges,
@@ -1681,6 +1688,7 @@ struct PlayerView: View {
 
         settingsStepperRow(.text)
         settingsStepperRow(.lineHeight)
+        settingsStepperRow(.letterSpacing)
         settingsStepperRow(.messageSpacing)
       }
 
@@ -1946,6 +1954,8 @@ struct PlayerView: View {
       return ("Emote Size", ChatAppearance.emoteSizeRange, ChatAppearance.emoteSizeStep, CGFloat(chatEmoteSizeValue))
     case .lineHeight:
       return ("Line Height", ChatAppearance.lineHeightRange, ChatAppearance.lineHeightStep, chatLineHeight)
+    case .letterSpacing:
+      return ("Letter Spacing", ChatAppearance.letterSpacingRange, ChatAppearance.letterSpacingStep, chatLetterSpacing)
     case .messageSpacing:
       return ("Message Spacing", ChatAppearance.messageSpacingRange, ChatAppearance.messageSpacingStep, chatMessageSpacing)
     case .width:
@@ -1968,6 +1978,8 @@ struct PlayerView: View {
       chatEmoteSizeValue = Double(next)
     case .lineHeight:
       chatLineHeightValue = Double(next)
+    case .letterSpacing:
+      chatLetterSpacingValue = Double(next)
     case .messageSpacing:
       chatMessageSpacingValue = Double(next)
     case .width:
@@ -1986,6 +1998,7 @@ struct PlayerView: View {
   private func resetChatAppearance() {
     applyChatPreset(.normal)
     chatEmoteSizeValue = Double(ChatAppearance.defaultEmoteSize)
+    chatLetterSpacingValue = Double(ChatAppearance.defaultLetterSpacing)
     chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
   }
 

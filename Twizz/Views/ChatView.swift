@@ -9,6 +9,7 @@ struct ChatView: View {
     var emoteSize: CGFloat = ChatAppearance.defaultEmoteSize
     var messageSpacing: CGFloat = ChatAppearance.defaultMessageSpacing
     var lineHeight: CGFloat = ChatAppearance.defaultLineHeight
+    var letterSpacing: CGFloat = ChatAppearance.defaultLetterSpacing
     var animatedEmotes: Bool = true
     var fontStyle: ChatFontStyle = ChatAppearance.defaultFontStyle
     var showBadges: Bool = ChatAppearance.defaultShowBadges
@@ -98,6 +99,7 @@ struct ChatView: View {
             textSize: textSize,
             emoteSize: emoteSize,
             lineHeight: lineHeight,
+            letterSpacing: letterSpacing,
             animatedEmotes: animatedEmotes,
             fontStyle: fontStyle,
             showBadges: showBadges,

@@ -21,6 +21,11 @@ enum ChatAppearance {
   static let lineHeightRange: ClosedRange<CGFloat> = -4...16
   static let lineHeightStep: CGFloat = 1
 
+  /// Extra spacing inserted *between characters* (tracking). A readability aid —
+  /// looser character spacing is one of the more evidence-backed dyslexia aids.
+  static let letterSpacingRange: ClosedRange<CGFloat> = 0...12
+  static let letterSpacingStep: CGFloat = 1
+
   /// Vertical gap *between* messages.
   static let messageSpacingRange: ClosedRange<CGFloat> = 0...32
   static let messageSpacingStep: CGFloat = 2
@@ -33,6 +38,7 @@ enum ChatAppearance {
 
   static let defaultTextSize: CGFloat = 26
   static let defaultLineHeight: CGFloat = -1
+  static let defaultLetterSpacing: CGFloat = 0
   static let defaultMessageSpacing: CGFloat = 14
   static let defaultWidth: CGFloat = 460
   static let defaultEmoteAuto = true
