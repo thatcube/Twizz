@@ -261,15 +261,18 @@ struct SettingsView: View {
           Text(topShelfStatus)
             .font(.callout)
             .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
 
         Spacer(minLength: 24)
 
-        Button("Republish") {
-          onRepublishTopShelf()
-          topShelfStatus = TopShelfStore.diagnosticsSummary()
+        VStack(spacing: 16) {
+          Button("Republish") {
+            onRepublishTopShelf()
+            topShelfStatus = TopShelfStore.diagnosticsSummary()
+          }
+          .font(.headline)
         }
-        .font(.headline)
       }
       .padding(28)
       .frame(maxWidth: .infinity, alignment: .leading)
