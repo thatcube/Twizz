@@ -978,6 +978,12 @@ struct PlayerView: View {
       .focusSection()
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+    // Treat the whole control row (avatar, quality, chat toggle) as one focus
+    // section so tvOS keeps focus within it during fast trackpad swipes. Without
+    // this, when chat is open the adjacent chat pane (composer, settings button)
+    // offers competing focus targets and a quick swipe can fling focus out of
+    // the row or drop it entirely — which never happens with chat closed.
+    .focusSection()
     .padding(.leading, 48)
     .padding(.trailing, controlsTrailingInset)
     .padding(.top, 12)
