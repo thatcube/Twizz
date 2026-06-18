@@ -72,6 +72,10 @@ struct PlayerView: View {
 
   @State private var chat = ChatService()
   @State private var player = AVPlayer()
+  /// Drives the audio-only visualizer orb. Reacts to real audio when the player
+  /// item exposes a tappable audio track (best effort on live HLS), otherwise
+  /// runs an ambient animation.
+  @State private var audioLevelMonitor = AudioLevelMonitor()
   /// Retained for the player's lifetime: `AVURLAsset` only holds its resource
   /// loader delegate weakly, so the proxy must be owned here to stay alive.
   @State private var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
@@ -365,6 +369,7 @@ struct PlayerView: View {
       chatSyncSendClearTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
+      audioLevelMonitor.stop()
       player.pause()
       chat.disconnect()
       setIdleTimer(disabled: false)
@@ -447,10 +452,42 @@ struct PlayerView: View {
 
   // MARK: - Video + controls
 
+  /// True when the user has explicitly pinned the audio-only rendition, so the
+  /// player surface is black and the visualizer should take over.
+  private var isAudioOnlyActive: Bool {
+    guard let playback else { return false }
+    guard let audioName = playback.qualities.first(where: { $0.isAudioOnly })?.name else {
+      return false
+    }
+    return audioName == preferredQuality
+  }
+
+  /// Direct media-playlist URL for the audio-only rendition, used by the
+  /// visualizer's level decoder.
+  private var audioOnlyPlaylistURL: URL? {
+    playback?.qualities.first(where: { $0.isAudioOnly })?.url
+  }
+
   private var videoColumn: some View {
     ZStack(alignment: .bottom) {
       VideoSurface(player: player)
         .ignoresSafeArea()
+
+      if isAudioOnlyActive, !isLoading, errorMessage == nil {
+        AudioVisualizerView(
+          level: audioLevelMonitor.level,
+          avatarURL: channelAvatarURL,
+          palette: palette
+        )
+        .transition(.opacity)
+        .onAppear {
+          audioLevelMonitor.start(
+            audioPlaylistURL: audioOnlyPlaylistURL,
+            headers: PlaybackService.streamHeaders
+          )
+        }
+        .onDisappear { audioLevelMonitor.stop() }
+      }
 
       if showControls, !isLoading,
         errorMessage == nil
@@ -555,6 +592,8 @@ struct PlayerView: View {
           .font(.headline)
           .foregroundStyle(.white)
           .lineLimit(2)
+          .minimumScaleFactor(0.5)
+          .truncationMode(.tail)
           .fixedSize(horizontal: false, vertical: true)
           .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -576,6 +615,7 @@ struct PlayerView: View {
           options: qualityOptions,
           selectedOption: preferredQuality,
           buttonLabel: qualityButtonLabel,
+          reservedWidthLabels: qualityButtonLabelCandidates,
           displayLabel: { qualityDisplayLabel($0) },
           onSelect: { selectQuality(at: $0) },
           onMenuPresented: {
@@ -1649,6 +1689,21 @@ struct PlayerView: View {
     return Self.shortQualityName(preferredQuality)
   }
 
+  /// Every label the quality button could ever display for the current stream.
+  /// The button reserves the width of the widest of these so the in-player
+  /// title's available space stays constant as the live label changes (e.g.
+  /// "Auto" -> "Auto (1080p60)"), preventing distracting title font reflow.
+  private var qualityButtonLabelCandidates: [String] {
+    var labels: Set<String> = ["Auto"]
+    let videoVariants = (playback?.qualities ?? []).filter { !$0.isAudioOnly }
+    for quality in videoVariants {
+      let short = Self.shortQualityName(quality.name)
+      labels.insert(short)
+      labels.insert("Auto (\(short))")
+    }
+    return Array(labels)
+  }
+
   /// Drops the "(Source)" suffix so the button reads "1080p60", not
   /// "1080p60 (Source)".
   private static func shortQualityName(_ name: String) -> String {
@@ -2431,6 +2486,7 @@ private struct QualityMenu: View, Equatable {
   let options: [String]
   let selectedOption: String
   let buttonLabel: String
+  let reservedWidthLabels: [String]
   let displayLabel: (String) -> String
   let onSelect: (Int) -> Void
   let onMenuPresented: () -> Void
@@ -2440,6 +2496,7 @@ private struct QualityMenu: View, Equatable {
     lhs.options == rhs.options
       && lhs.selectedOption == rhs.selectedOption
       && lhs.buttonLabel == rhs.buttonLabel
+      && lhs.reservedWidthLabels == rhs.reservedWidthLabels
   }
 
   /// Drives the inline `Picker` selection. Reading derives the current index
@@ -2453,28 +2510,63 @@ private struct QualityMenu: View, Equatable {
   }
 
   var body: some View {
-    Menu {
-      // A `Picker` is Apple's recommended single-selection control inside a
-      // menu: it renders a checkmark in a reserved leading gutter so every
-      // row's text stays aligned (no per-row shift), unlike hand-placed
-      // checkmark labels.
-      Picker("Quality", selection: selection) {
-        ForEach(Array(options.enumerated()), id: \.element) { index, option in
-          Text(displayLabel(option)).tag(index)
-        }
+    // Invisible barrier: hidden copies of every possible label reserve the
+    // width of the widest one, so the in-player title's available space stays
+    // constant. The barrier draws nothing and isn't focusable — only the Menu
+    // is interactive, and its platter hugs the live label, so the visible
+    // button stays variable-width. Trailing alignment parks the button against
+    // the next control, letting the reserved slack sit (invisibly) on its left.
+    ZStack(alignment: .trailing) {
+      ForEach(reservedWidthLabels, id: \.self) { candidate in
+        qualityLabelText(candidate).hidden()
       }
-      .pickerStyle(.inline)
-      .onAppear(perform: onMenuPresented)
-      .onDisappear(perform: onMenuDismissed)
-    } label: {
-      Text(buttonLabel)
-        .font(.subheadline)
-        .fontWeight(.semibold)
-        .monospacedDigit()
-        .lineLimit(1)
-        .fixedSize()
-        .accessibilityLabel("Quality, \(buttonLabel)")
+
+      Menu {
+        // A `Picker` is Apple's recommended single-selection control inside a
+        // menu: it renders a checkmark in a reserved leading gutter so every
+        // row's text stays aligned (no per-row shift), unlike hand-placed
+        // checkmark labels.
+        Picker("Quality", selection: selection) {
+          ForEach(Array(options.enumerated()), id: \.element) { index, option in
+            Text(displayLabel(option)).tag(index)
+          }
+        }
+        .pickerStyle(.inline)
+        .onAppear(perform: onMenuPresented)
+        .onDisappear(perform: onMenuDismissed)
+      } label: {
+        qualityLabelText(buttonLabel)
+          .accessibilityLabel("Quality, \(buttonLabel)")
+      }
     }
+  }
+
+  /// `true` for the live "Auto (1080p60)" form, which we render slightly
+  /// smaller so the parenthetical resolution reads as a secondary detail.
+  private func isAutoResolutionLabel(_ text: String) -> Bool {
+    text.hasPrefix("Auto (")
+  }
+
+  @ViewBuilder
+  private func qualityLabelText(_ text: String) -> some View {
+    Group {
+      if isAutoResolutionLabel(text) {
+        Text(text)
+          .font(.system(size: Self.compactQualityFontSize, weight: .semibold))
+      } else {
+        Text(text)
+          .font(.subheadline)
+          .fontWeight(.semibold)
+      }
+    }
+    .monospacedDigit()
+    .lineLimit(1)
+    .fixedSize()
+  }
+
+  /// 20% smaller than `.subheadline`, used for the "Auto (1080p60)" label.
+  private static var compactQualityFontSize: CGFloat {
+    UIFont.preferredFont(forTextStyle: .subheadline).pointSize * 0.8
   }
 }
 
