@@ -72,12 +72,6 @@ private struct SearchResultsView: View {
             .padding(.top, 12)
         }
 
-        if service.query.isEmpty && !service.hasResults && service.errorMessage == nil
-          && !service.isSearching
-        {
-          emptyPrompt
-        }
-
         if !service.categoryResults.isEmpty {
           categoriesSection
         }
@@ -92,18 +86,6 @@ private struct SearchResultsView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-  }
-
-  private var emptyPrompt: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Image(systemName: "magnifyingglass")
-        .font(.system(size: 48, weight: .regular))
-        .foregroundStyle(.secondary)
-      Text("Find live channels and categories by name.")
-        .font(.title3)
-        .foregroundStyle(.secondary)
-    }
-    .padding(.top, 24)
   }
 
   private var categoriesSection: some View {
