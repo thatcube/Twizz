@@ -232,7 +232,7 @@ private struct BrowseStreamsView: View {
                 .onTapGesture {
                   selectedChannel = channel
                 }
-                .scaleEffect(isFocused ? 1.06 : 1)
+                .scaleEffect(isFocused ? 1.5 : 1)
                 .animation(.easeOut(duration: 0.14), value: isFocused)
                 .zIndex(isFocused ? 2 : 0)
               }

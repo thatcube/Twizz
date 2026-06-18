@@ -12,6 +12,7 @@ struct HomeView: View {
   private let minMediaWidth: CGFloat = 220
   private let maxMediaWidth: CGFloat = 900
   private let focusedCardScale: CGFloat = 1.07
+  private let focusedStreamCardScale: CGFloat = 1.5
   private let autoRefreshStaleInterval: TimeInterval = 5 * 60
 
   @State private var selectedSidebarTab: SidebarTab = .home
@@ -261,7 +262,7 @@ struct HomeView: View {
               selectedChannel = channel
             }
             .accessibilityAddTraits(.isButton)
-            .scaleEffect(isFocused ? focusedCardScale : 1)
+            .scaleEffect(isFocused ? focusedStreamCardScale : 1)
             .animation(.easeOut(duration: 0.14), value: isFocused)
             .zIndex(isFocused ? 2 : 0)
           }
@@ -324,7 +325,7 @@ struct HomeView: View {
                 selectedChannel = channel
               }
               .accessibilityAddTraits(.isButton)
-              .scaleEffect(isFocused ? focusedCardScale : 1)
+              .scaleEffect(isFocused ? focusedStreamCardScale : 1)
               .animation(.easeOut(duration: 0.14), value: isFocused)
               .zIndex(isFocused ? 2 : 0)
             }
