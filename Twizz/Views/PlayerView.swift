@@ -823,11 +823,16 @@ struct PlayerView: View {
       try? await Task.sleep(for: .seconds(controlsAutoHideSeconds))
       guard !Task.isCancelled else { return }
       await MainActor.run {
-        // Don't auto-hide while the quality control is engaged. The native
-        // Menu keeps focus parked on `.quality` while it's open, and hiding
-        // the control bar here would dismiss the menu out from under the user.
-        // Normal auto-hide resumes once focus moves to another control.
-        if focus == .quality { return }
+        // Don't auto-hide while the quality menu is engaged. When the native
+        // Menu is open, tvOS owns focus and our FocusState reads nil, while
+        // `lastControlFocus` still points at `.quality`. In that case re-arm
+        // instead of hiding so the control bar — and the menu anchored to it —
+        // stay on screen. Normal auto-hide resumes once focus lands on another
+        // control.
+        if focus == .quality || (focus == nil && lastControlFocus == .quality) {
+          scheduleHide()
+          return
+        }
         hideControls()
       }
     }
@@ -2321,19 +2326,28 @@ private struct QualityMenu<F: Hashable>: View, Equatable {
       && lhs.buttonLabel == rhs.buttonLabel
   }
 
+  /// Drives the inline `Picker` selection. Reading derives the current index
+  /// from `selectedOption`; writing routes through `onSelect` so the player
+  /// applies the quality change and its side effects.
+  private var selection: Binding<Int> {
+    Binding(
+      get: { options.firstIndex(of: selectedOption) ?? 0 },
+      set: { onSelect($0) }
+    )
+  }
+
   var body: some View {
     Menu {
-      ForEach(Array(options.enumerated()), id: \.element) { index, option in
-        Button {
-          onSelect(index)
-        } label: {
-          if option == selectedOption {
-            Label(displayLabel(option), systemImage: "checkmark")
-          } else {
-            Text(displayLabel(option))
-          }
+      // A `Picker` is Apple's recommended single-selection control inside a
+      // menu: it renders a checkmark in a reserved leading gutter so every
+      // row's text stays aligned (no per-row shift), unlike hand-placed
+      // checkmark labels.
+      Picker("Quality", selection: selection) {
+        ForEach(Array(options.enumerated()), id: \.element) { index, option in
+          Text(displayLabel(option)).tag(index)
         }
       }
+      .pickerStyle(.inline)
     } label: {
       Text(buttonLabel)
         .font(.subheadline)
