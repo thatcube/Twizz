@@ -163,8 +163,6 @@ struct SettingsView: View {
     .focusSection()
   }
 
-  // MARK: - Account
-
   private var accountSection: some View {
     Group {
       if auth.isAuthenticated {
@@ -239,7 +237,7 @@ struct SettingsView: View {
     }
   }
 
-  // MARK: - Top Shelf diagnostics
+// MARK: - Theme option card
 
   private var topShelfSection: some View {
     VStack(alignment: .leading, spacing: 24) {
@@ -481,4 +479,3 @@ extension View {
     }
   }
 }
-

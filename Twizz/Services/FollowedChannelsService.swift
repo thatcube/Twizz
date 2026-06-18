@@ -344,7 +344,8 @@ final class FollowedChannelsService {
       viewerCount: stream.viewerCount,
       thumbnailURL: URL(string: thumb),
       profileImageURL: profileImageURL,
-      isLive: stream.type == "live"
+      isLive: stream.type == "live",
+      isMature: stream.isMature
     )
   }
 
@@ -374,6 +375,7 @@ final class FollowedChannelsService {
       let id: String?
       let title: String?
       let viewersCount: Int?
+      let isMature: Bool?
       let previewImageURL: String?
       let broadcaster: Broadcaster?
       let game: Game?
@@ -413,6 +415,7 @@ final class FollowedChannelsService {
               id
               title
               viewersCount
+              isMature
               previewImageURL(width: 640, height: 360)
               broadcaster {
                 login
@@ -472,7 +475,8 @@ final class FollowedChannelsService {
         viewerCount: node.viewersCount,
         thumbnailURL: previewURL,
         profileImageURL: profileURL,
-        isLive: true
+        isLive: true,
+        isMature: node.isMature ?? false
       )
     }
 
@@ -542,6 +546,7 @@ private struct HelixStream: Decodable {
   let gameName: String
   let title: String
   let viewerCount: Int
+  let isMature: Bool
   let thumbnailURL: String
   let type: String
 
@@ -552,6 +557,7 @@ private struct HelixStream: Decodable {
     case gameName = "game_name"
     case title
     case viewerCount = "viewer_count"
+    case isMature = "is_mature"
     case thumbnailURL = "thumbnail_url"
     case type
   }

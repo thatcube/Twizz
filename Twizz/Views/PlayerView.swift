@@ -2,6 +2,12 @@ import AVKit
 import SwiftUI
 import UIKit
 
+/// AVPlayer host that is intentionally non-interactive: Twizz handles all remote
+/// input in SwiftUI and never lets AVKit consume transport/scrub commands.
+private final class PassivePlayerViewController: AVPlayerViewController {
+  override var canBecomeFirstResponder: Bool { false }
+}
+
 /// Hosts an embedded `AVPlayerViewController` with native controls disabled.
 /// This keeps custom Twizz UI while preserving Apple's media rendering paths
 /// better than a raw `AVPlayerLayer`.
@@ -9,12 +15,17 @@ struct VideoSurface: UIViewControllerRepresentable {
   let player: AVPlayer
 
   func makeUIViewController(context: Context) -> AVPlayerViewController {
-    let controller = AVPlayerViewController()
+    let controller = PassivePlayerViewController()
     controller.player = player
     controller.showsPlaybackControls = false
+    controller.requiresLinearPlayback = true
+    controller.allowsPictureInPicturePlayback = false
     controller.videoGravity = .resizeAspect
     // Keep output mode stable while toggling in-app layouts (chat on/off).
     controller.appliesPreferredDisplayCriteriaAutomatically = false
+    // Prevent AVKit's internal gesture/press recognizers from handling Siri
+    // Remote input (seek/scrub/skip). Twizz UI remains fully interactive.
+    controller.view.isUserInteractionEnabled = false
     controller.view.backgroundColor = .black
     return controller
   }
@@ -24,8 +35,11 @@ struct VideoSurface: UIViewControllerRepresentable {
       controller.player = player
     }
     controller.showsPlaybackControls = false
+    controller.requiresLinearPlayback = true
+    controller.allowsPictureInPicturePlayback = false
     controller.videoGravity = .resizeAspect
     controller.appliesPreferredDisplayCriteriaAutomatically = false
+    controller.view.isUserInteractionEnabled = false
   }
 }
 
@@ -53,9 +67,14 @@ struct PlayerView: View {
   @AppStorage("chatSyncToStream") private var chatSyncToStream = false
   @AppStorage("experimentalYouTubeMergeEnabled") private var experimentalYouTubeMergeEnabled = false
   @AppStorage("experimentalYouTubeMergeChannelOrURL") private var experimentalYouTubeMergeChannelOrURL = ""
+  @AppStorage(LowLatencyHLSProxy.settingsKey) private var lowLatencyProxyEnabled = true
+  @AppStorage("showLatencyDiagnostics") private var showLatencyDiagnostics = false
 
   @State private var chat = ChatService()
   @State private var player = AVPlayer()
+  /// Retained for the player's lifetime: `AVURLAsset` only holds its resource
+  /// loader delegate weakly, so the proxy must be owned here to stay alive.
+  @State private var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
   @State private var playback: StreamPlayback?
   @State private var errorMessage: String?
   @State private var isLoading = true
@@ -89,6 +108,12 @@ struct PlayerView: View {
   @State private var playbackWatchdogTask: Task<Void, Never>?
   @State private var wallClockLatencySeconds: Double?
   @State private var liveEdgeLatencySeconds: Double?
+  @State private var smoothedLatencySeconds: Double?
+  // The real (pre-proxy) source URL of the currently loaded item, so we can tell
+  // whether a quality switch actually needs to replace the item. AVURLAsset.url
+  // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
+  // for this comparison directly.
+  @State private var currentSourceURL: URL?
   @State private var isPlaybackActive = false
   @State private var didRequestPlayback = false
   @State private var lastHardCatchUpJumpAt = Date.distantPast
@@ -106,10 +131,38 @@ struct PlayerView: View {
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
   @State private var raidBannerDismissTask: Task<Void, Never>?
 
+  // MARK: Diagnostics (experimental troubleshooting overlay)
+  // Counters and a rolling event log so freezes/jumps can be observed on-device
+  // and reported back, rather than inferred. Only meaningful while the overlay
+  // toggle is on; reset on each fresh load.
+  @State private var diagStallCount = 0
+  @State private var diagJumpCount = 0
+  @State private var diagReloadCount = 0
+  @State private var diagEvents: [DiagnosticsEvent] = []
+  @State private var diagLastPlayheadSeconds: Double?
+  @State private var diagLastSampleAt: Date?
+  @State private var diagWasStalled = false
+  @State private var diagIsFrozen = false
+  @State private var diagFrozenSince: Date?
+  @State private var diagSessionStartedAt: Date?
+  @State private var diagInstabilityScore = 0
+  @State private var diagLastInstabilityAt: Date?
+  @State private var diagAdaptiveFallbackCount = 0
+
   private let controlsAutoHideSeconds: Double = 10
+  // Latency tuning stays at the proven-stable baseline even in low-latency mode.
+  // The latency win comes from the proxy promoting Twitch prefetch segments — not
+  // from starving buffers or chasing the edge, both of which caused freezes and
+  // blur on-device. Freeze-free playback is the top priority, then sharpness.
   private let targetLiveEdgeSeconds: Double = 3.5
   private let softCatchUpThresholdSeconds: Double = 8
-  private let hardCatchUpThresholdSeconds: Double = 14
+  // In low-latency mode the proxy adds prefetch segments to the seekable window,
+  // which inflates the seekable-edge latency metric. A zero-tolerance hard seek
+  // against that inflated edge rebuffers and freezes, so disable hard seeks while
+  // low-latency mode is on and rely on gentle rate correction + a healthy buffer.
+  private var hardCatchUpThresholdSeconds: Double {
+    lowLatencyProxyEnabled ? .greatestFiniteMagnitude : 14
+  }
   private let hardCatchUpCooldownSeconds: Double = 20
   private let maxCatchUpRate: Float = 1.04
   private let edgeLatencyUnavailableEpsilonSeconds: Double = 0.2
@@ -127,6 +180,16 @@ struct PlayerView: View {
   private let startupPlaybackPollMilliseconds: UInt64 = 500
   private let stalledPlaybackThresholdSamples = 6
   private let playbackWatchdogIntervalSeconds: Double = 2
+  // Diagnostics: how much unexplained playhead movement between 1s samples counts
+  // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
+  // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
+  private let diagJumpForwardThresholdSeconds: Double = 2.0
+  private let diagJumpBackwardThresholdSeconds: Double = 1.0
+  // Stability guard: if stalls/jumps stack up within this rolling window while
+  // pinned to a fixed rendition, fall back to Auto/adaptive before we keep
+  // fighting the network with no ABR escape hatch.
+  private let diagInstabilityWindowSeconds: Double = 75
+  private let diagFallbackScoreThreshold = 3
   private let chatReplayMessageCount = 30
   private let chatComposerRowHeight: CGFloat = 62
   private let chatInputFocusedHeight: CGFloat = 62
@@ -144,6 +207,8 @@ struct PlayerView: View {
     case chatWidthOption(Int)
     case chatLayoutOption(Int)
     case chatSyncToggle
+    case chatLowLatencyToggle
+    case chatDiagnosticsToggle
     case youtubeMergeToggle
     case youtubeMergeURL
     case raidFollow
@@ -252,6 +317,7 @@ struct PlayerView: View {
     .task {
       if activeChannel.isEmpty { activeChannel = channel }
       configurePlayerForLive()
+      resetDiagnostics()
       applyExperimentalYouTubeSettings()
       chat.connect(to: activeChannel)
       async let metadataTask: Void = refreshChannelMetadata()
@@ -263,6 +329,11 @@ struct PlayerView: View {
     }
     .onAppear {
       setIdleTimer(disabled: true)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) { notification in
+      guard let stalledItem = notification.object as? AVPlayerItem else { return }
+      guard stalledItem == player.currentItem else { return }
+      markDiagnosticsStall(reason: "AVPlayerItemPlaybackStalled")
     }
     .onDisappear {
       hideTask?.cancel()
@@ -332,6 +403,11 @@ struct PlayerView: View {
     .onChange(of: experimentalYouTubeMergeChannelOrURL) { _, _ in
       applyExperimentalYouTubeSettings()
     }
+    .onChange(of: lowLatencyProxyEnabled) { _, _ in
+      // Rebuild the asset pipeline so the proxy is attached/detached cleanly.
+      configurePlayerForLive()
+      Task { await load(reason: "lowLatencyToggle", resetMetadata: false) }
+    }
     .fullScreenCover(isPresented: $showSignInSheet) {
       SignInView(auth: auth)
     }
@@ -364,6 +440,13 @@ struct PlayerView: View {
                     .strokeBorder(.orange.opacity(0.6), lineWidth: 1)
                 )
             }
+          }
+          if showLatencyDiagnostics {
+            HStack {
+              diagnosticsPanel
+              Spacer()
+            }
+            .padding(.top, 12)
           }
           Spacer()
         }
@@ -575,6 +658,247 @@ struct PlayerView: View {
     .clipShape(shape)
   }
 
+  // MARK: - Diagnostics overlay
+
+  /// Live, read-off-the-screen diagnostics for troubleshooting freezes/jumps.
+  /// Everything here is measured from the player/current item — no estimates.
+  private var diagnosticsPanel: some View {
+    let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+    return VStack(alignment: .leading, spacing: 4) {
+      Text("DIAGNOSTICS")
+        .font(.system(size: 13, weight: .heavy).monospaced())
+        .foregroundStyle(.white.opacity(0.6))
+
+      ForEach(diagnosticsLines, id: \.self) { line in
+        Text(line)
+          .font(.system(size: 14, weight: .semibold).monospaced())
+          .foregroundStyle(.white)
+      }
+
+      if !diagEvents.isEmpty {
+        Divider().overlay(.white.opacity(0.2)).padding(.vertical, 2)
+        ForEach(diagEvents) { event in
+          Text(diagnosticsEventLine(event))
+            .font(.system(size: 13, weight: .regular).monospaced())
+            .foregroundStyle(.white.opacity(0.8))
+        }
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
+    .frame(maxWidth: 520, alignment: .leading)
+    .background(.black.opacity(0.55), in: shape)
+    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    .clipShape(shape)
+  }
+
+  /// The fixed metric rows, each computed live from the current item.
+  private var diagnosticsLines: [String] {
+    var lines: [String] = []
+
+    let mode = lowLatencyProxyEnabled ? "LL proxy ON" : "LL proxy off"
+    let pin = preferredQuality == "Auto" ? "Auto/adaptive" : "\(preferredQuality) (pinned)"
+    lines.append("Mode: \(mode) · \(pin)")
+
+    if let item = player.currentItem {
+      let size = item.presentationSize
+      if size.width > 0, size.height > 0 {
+        lines.append(
+          "Render: \(Int(size.width))×\(Int(size.height)) · Rate: \(diagFormat(Double(player.rate), decimals: 2))x"
+        )
+      } else {
+        lines.append("Render: — · Rate: \(diagFormat(Double(player.rate), decimals: 2))x")
+      }
+
+      if let event = item.accessLog()?.events.last {
+        lines.append(
+          "Bitrate: \(diagBitrate(event.indicatedBitrate)) shown · \(diagBitrate(event.observedBitrate)) obs"
+        )
+        lines.append(
+          "Dropped frames: \(event.numberOfDroppedVideoFrames) · AVStalls: \(event.numberOfStalls)"
+        )
+      } else {
+        lines.append("Bitrate: — (no access log yet)")
+      }
+
+      lines.append("Buffer ahead: \(diagBufferAheadDescription(item))")
+    } else {
+      lines.append("No active item")
+    }
+
+    let edge = liveEdgeLatencySeconds.map { "\(diagFormat($0, decimals: 1))s" } ?? "—"
+    let wall = wallClockLatencySeconds.map { "\(diagFormat($0, decimals: 1))s" } ?? "—"
+    let chatHold =
+      chatSyncToStream
+      ? (chatSyncDelaySeconds.map { "\(diagFormat($0, decimals: 1))s" } ?? "measuring")
+      : "off"
+    if diagIsFrozen {
+      let frozenFor = diagFrozenSince.map { max(0, Int(Date().timeIntervalSince($0).rounded())) } ?? 0
+      lines.append("State: FROZEN (\(frozenFor)s) · Waiting: \(diagWaitingReasonDescription())")
+    } else {
+      lines.append("State: Playing/waiting · Waiting: \(diagWaitingReasonDescription())")
+    }
+    lines.append("Edge gap: \(edge) · Encoder: \(wall)")
+    lines.append("Chat hold: \(chatHold)")
+    lines.append("Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")
+    lines.append("Stability score: \(diagInstabilityScore) · Auto-fallbacks: \(diagAdaptiveFallbackCount)")
+
+    return lines
+  }
+
+  private func diagnosticsEventLine(_ event: DiagnosticsEvent) -> String {
+    let ago = max(0, Int(Date().timeIntervalSince(event.at).rounded()))
+    return "• \(event.text)  (\(ago)s ago)"
+  }
+
+  private func diagFormat(_ value: Double, decimals: Int) -> String {
+    String(format: "%.\(decimals)f", value)
+  }
+
+  private func diagBitrate(_ bitsPerSecond: Double) -> String {
+    guard bitsPerSecond.isFinite, bitsPerSecond > 0 else { return "—" }
+    return "\(diagFormat(bitsPerSecond / 1_000_000, decimals: 1)) Mbps"
+  }
+
+  private func diagBufferAheadDescription(_ item: AVPlayerItem) -> String {
+    let current = CMTimeGetSeconds(item.currentTime())
+    guard current.isFinite else { return "—" }
+    for value in item.loadedTimeRanges {
+      let range = value.timeRangeValue
+      let start = CMTimeGetSeconds(range.start)
+      let end = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+      if start.isFinite, end.isFinite, current >= start - 0.5, current <= end + 0.5 {
+        return "\(diagFormat(max(0, end - current), decimals: 1))s"
+      }
+    }
+    return "—"
+  }
+
+  private func diagWaitingReasonDescription() -> String {
+    if player.timeControlStatus == .playing { return "none" }
+    if let reason = player.reasonForWaitingToPlay {
+      if reason == .toMinimizeStalls { return "toMinimizeStalls" }
+      if reason == .evaluatingBufferingRate { return "evaluatingBufferingRate" }
+      if reason == .noItemToPlay { return "noItemToPlay" }
+      return String(describing: reason)
+    }
+    if player.currentItem?.isPlaybackBufferEmpty == true { return "bufferEmpty" }
+    if player.currentItem?.isPlaybackLikelyToKeepUp == false { return "notLikelyToKeepUp" }
+    return "unknown"
+  }
+
+  /// Records a diagnostics event, keeping only the most recent few (newest first).
+  private func logDiagnosticsEvent(_ text: String) {
+    diagEvents.insert(DiagnosticsEvent(at: Date(), text: text), at: 0)
+    if diagEvents.count > 6 {
+      diagEvents.removeLast(diagEvents.count - 6)
+    }
+  }
+
+  private func markDiagnosticsStall(reason: String) {
+    if !diagIsFrozen {
+      diagIsFrozen = true
+      diagFrozenSince = Date()
+    }
+    if !diagWasStalled {
+      diagWasStalled = true
+      diagStallCount += 1
+      if showLatencyDiagnostics {
+        logDiagnosticsEvent("stall (\(reason))")
+      }
+      registerInstability(points: 2, reason: reason)
+    }
+  }
+
+  private func registerInstability(points: Int, reason: String) {
+    let now = Date()
+    if let last = diagLastInstabilityAt, now.timeIntervalSince(last) > diagInstabilityWindowSeconds {
+      diagInstabilityScore = 0
+    }
+    diagLastInstabilityAt = now
+    diagInstabilityScore += points
+    maybeTriggerAdaptiveFallback(trigger: reason)
+  }
+
+  /// If fixed-quality playback becomes unstable, switch to Auto/adaptive so ABR
+  /// can step down instead of stalling/jumping repeatedly.
+  private func maybeTriggerAdaptiveFallback(trigger: String) {
+    guard diagInstabilityScore >= diagFallbackScoreThreshold else { return }
+    guard preferredQuality != "Auto" else { return }
+    guard playback != nil else { return }
+
+    preferredQuality = "Auto"
+    applyQualityPreference("Auto")
+    diagAdaptiveFallbackCount += 1
+    diagInstabilityScore = 0
+
+    if showLatencyDiagnostics {
+      logDiagnosticsEvent("stability fallback -> Auto (\(trigger))")
+    }
+  }
+
+  /// Detects forward/backward playhead jumps by comparing actual playhead
+  /// advance against wall-clock × rate between 1s samples. A genuine AVPlayer
+  /// skip-to-live shows up as several seconds of unexplained forward advance.
+  private func sampleDiagnostics() {
+    guard showLatencyDiagnostics else {
+      diagLastPlayheadSeconds = nil
+      diagLastSampleAt = nil
+      return
+    }
+    guard isPlaybackActive, let item = player.currentItem else {
+      diagLastPlayheadSeconds = nil
+      diagLastSampleAt = nil
+      return
+    }
+
+    let now = Date()
+    let playhead = CMTimeGetSeconds(item.currentTime())
+    guard playhead.isFinite else { return }
+
+    if let lastPlayhead = diagLastPlayheadSeconds, let lastAt = diagLastSampleAt {
+      let wall = now.timeIntervalSince(lastAt)
+      let advanced = playhead - lastPlayhead
+      let expected = wall * Double(max(player.rate, 0))
+      let forwardDrift = advanced - expected
+
+      if forwardDrift >= diagJumpForwardThresholdSeconds {
+        diagJumpCount += 1
+        logDiagnosticsEvent("jump +\(diagFormat(forwardDrift, decimals: 1))s forward")
+        registerInstability(points: 1, reason: "jump forward")
+      } else if advanced <= -diagJumpBackwardThresholdSeconds {
+        diagJumpCount += 1
+        logDiagnosticsEvent("jump \(diagFormat(advanced, decimals: 1))s back")
+        registerInstability(points: 1, reason: "jump back")
+      }
+
+      if advanced >= 0.05 {
+        diagIsFrozen = false
+        diagFrozenSince = nil
+        diagWasStalled = false
+      }
+    }
+
+    diagLastPlayheadSeconds = playhead
+    diagLastSampleAt = now
+  }
+
+  private func resetDiagnostics() {
+    diagStallCount = 0
+    diagJumpCount = 0
+    diagReloadCount = 0
+    diagEvents = []
+    diagLastPlayheadSeconds = nil
+    diagLastSampleAt = nil
+    diagWasStalled = false
+    diagIsFrozen = false
+    diagFrozenSince = nil
+    diagSessionStartedAt = Date()
+    diagInstabilityScore = 0
+    diagLastInstabilityAt = nil
+    diagAdaptiveFallbackCount = 0
+  }
+
   // MARK: - Controls visibility
 
   private func revealControls(preferredFocus: Focusable) {
@@ -636,6 +960,8 @@ struct PlayerView: View {
       .chatWidthOption,
       .chatLayoutOption,
       .chatSyncToggle,
+      .chatLowLatencyToggle,
+      .chatDiagnosticsToggle,
       .youtubeMergeToggle,
       .youtubeMergeURL:
       return true
@@ -844,6 +1170,39 @@ struct PlayerView: View {
           .font(.caption2)
           .foregroundStyle(.white.opacity(0.6))
           .fixedSize(horizontal: false, vertical: true)
+      }
+      .focusSection()
+
+      VStack(alignment: .leading, spacing: 7) {
+        Text("Playback")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.84))
+          .textCase(.uppercase)
+
+        settingsPill(
+          title: lowLatencyProxyEnabled ? "Low-Latency Mode On" : "Low-Latency Mode Off",
+          isSelected: lowLatencyProxyEnabled,
+          focusTag: .chatLowLatencyToggle
+        ) {
+          lowLatencyProxyEnabled.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        settingsPill(
+          title: showLatencyDiagnostics ? "Diagnostics Overlay On" : "Diagnostics Overlay Off",
+          isSelected: showLatencyDiagnostics,
+          focusTag: .chatDiagnosticsToggle
+        ) {
+          showLatencyDiagnostics.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        Text(
+          "Low-Latency Mode rewrites Twitch prefetch segments to reduce delay. Diagnostics shows live render/bitrate/buffer and freeze/jump events."
+        )
+        .font(.caption2)
+        .foregroundStyle(.white.opacity(0.6))
+        .fixedSize(horizontal: false, vertical: true)
       }
       .focusSection()
 
@@ -1233,7 +1592,9 @@ struct PlayerView: View {
     stopLatencyMonitor()
     player.pause()
     player.replaceCurrentItem(with: nil)
+    currentSourceURL = nil
     chat.disconnect()
+    resetDiagnostics()
     isLoading = true
     errorMessage = nil
     streamTitle = ""
@@ -1266,13 +1627,13 @@ struct PlayerView: View {
             selectQuality(at: index)
           } label: {
             HStack {
-              Text(option)
+              Text(qualityDisplayLabel(option))
               Spacer()
               if option == preferredQuality {
                 Icon(glyph: .check, size: 32)
               }
             }
-            .frame(width: 360)
+            .frame(width: 420)
           }
           .buttonStyle(.bordered)
           .focused($focus, equals: .qualityOption(index))
@@ -1359,6 +1720,15 @@ struct PlayerView: View {
     if videoVariants.count == 1 {
       resolvedQualityName = Self.shortQualityName(videoVariants[0].name)
     }
+  }
+
+  /// Display label for a quality option. "Auto" is the adaptive-bitrate choice;
+  /// when the low-latency proxy is on it's also the low-latency choice (and,
+  /// because ABR can step down instead of stalling, the smoothest one), so we
+  /// surface that in the picker. The stored/compared value stays plain "Auto".
+  private func qualityDisplayLabel(_ option: String) -> String {
+    guard option == "Auto" else { return option }
+    return lowLatencyProxyEnabled ? "Auto (Low Latency)" : "Auto"
   }
 
   private func selectQuality(at index: Int) {
@@ -1463,6 +1833,7 @@ struct PlayerView: View {
         lastError = error
         player.pause()
         player.replaceCurrentItem(with: nil)
+        currentSourceURL = nil
         if attempt < maxAttempts {
           try? await Task.sleep(for: .seconds(Double(attempt)))
         }
@@ -1523,59 +1894,87 @@ struct PlayerView: View {
     return false
   }
 
-  /// Keeps the player on the master playlist for video qualities. We bias ABR
-  /// with preferredPeakBitRate.
+  /// "Auto" plays the adaptive master playlist (ABR picks the rendition). Any
+  /// explicit pick hard-pins that single rendition's media playlist instead, so
+  /// ABR can't silently downshift to a blurrier variant. Note: on the master,
+  /// `preferredPeakBitRate` is only a *ceiling* — ABR is still free to serve
+  /// lower, which is exactly why selecting "1080p60" used to still look soft.
+  /// In-band CEA-608 captions ride inside each rendition, so they survive the
+  /// pin. The trade-off: a pinned rendition has no ABR fallback, so a stream
+  /// whose bitrate exceeds the connection will rebuffer rather than drop down —
+  /// "Auto" remains the safe choice for that case.
   private func applyQualityPreference(_ option: String) {
     guard let playback else { return }
 
     if option == "Auto" {
-      switchToMasterItemIfNeeded(playback.master)
+      switchToSourceIfNeeded(playback.master)
       player.currentItem?.preferredPeakBitRate = 0
       return
     }
 
     guard let match = playback.qualities.first(where: { $0.name == option }) else {
-      switchToMasterItemIfNeeded(playback.master)
+      switchToSourceIfNeeded(playback.master)
       player.currentItem?.preferredPeakBitRate = 0
       return
     }
 
-    if match.isAudioOnly {
-      player.replaceCurrentItem(with: makeItem(url: match.url))
-      player.currentItem?.preferredPeakBitRate = 0
-      startPlayback()
-      return
-    }
-
-    switchToMasterItemIfNeeded(playback.master)
-    let targetBitrate = match.bitrate > 0 ? Double(match.bitrate) * 1.08 : 0
-    player.currentItem?.preferredPeakBitRate = targetBitrate
+    switchToSourceIfNeeded(match.url)
+    player.currentItem?.preferredPeakBitRate = 0
   }
 
-  private func switchToMasterItemIfNeeded(_ masterURL: URL) {
-    guard let asset = player.currentItem?.asset as? AVURLAsset else {
-      player.replaceCurrentItem(with: makeItem(url: masterURL))
-      startPlayback()
-      return
-    }
-
-    guard asset.url != masterURL else { return }
-    player.replaceCurrentItem(with: makeItem(url: masterURL))
+  /// Replaces the current item only when the underlying source actually changes,
+  /// comparing against the real (pre-proxy) source URL.
+  private func switchToSourceIfNeeded(_ url: URL) {
+    guard currentSourceURL != url else { return }
+    player.replaceCurrentItem(with: makeItem(url: url))
     startPlayback()
   }
 
   private func makeItem(url: URL) -> AVPlayerItem {
+    currentSourceURL = url
+    let assetURL: URL
+    if lowLatencyProxyEnabled {
+      assetURL = lowLatencyProxy.proxyURL(for: url)
+    } else {
+      assetURL = url
+    }
     let asset = AVURLAsset(
-      url: url,
+      url: assetURL,
       options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
     )
+    if lowLatencyProxyEnabled {
+      // Promotes Twitch's #EXT-X-TWITCH-PREFETCH segments (which AVPlayer would
+      // otherwise ignore) into real segments, pulling playback closer to live.
+      asset.resourceLoader.setDelegate(lowLatencyProxy, queue: lowLatencyProxy.callbackQueue)
+    }
     let item = AVPlayerItem(asset: asset)
-    item.preferredForwardBufferDuration = 1
+    // A deeper forward buffer in low-latency mode does double duty: it gives
+    // ABR enough headroom to actually climb to the selected quality (fixes soft
+    // 1080p) and it keeps AVPlayer from skipping forward to live when the buffer
+    // runs thin (fixes the "jumps ahead"). The proxy keeps the *content* near
+    // live regardless, so the only cost is a few seconds of latency — which the
+    // user has ranked below freeze-free, smooth, sharp playback.
+    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 5 : 1
     return item
   }
 
-  private var measuredLatencySeconds: Double? {
+  /// "Behind live" as the user experiences it: how far the playhead trails the
+  /// freshest segment we can actually fetch (the seekable-edge gap, ~2-6s).
+  ///
+  /// We deliberately do NOT lead with the PROGRAM-DATE-TIME wall-clock delay.
+  /// That measures distance from Twitch's *encoder* timestamp, which for a
+  /// standard-latency stream is ~18-20s — and every other client (including the
+  /// Twitch phone app) sits that far back too. So it reads "20s behind live"
+  /// while you're visually in sync with your phone, which is just confusing.
+  /// The edge gap is the number that tracks "am I near the freshest content."
+  /// Wall-clock is kept only as a fallback when the edge gap is unavailable.
+  private var rawLatencySeconds: Double? {
     liveEdgeLatencySeconds ?? wallClockLatencySeconds
+  }
+
+  /// Smoothed value actually shown in the UI, to stop the number jumping around.
+  private var measuredLatencySeconds: Double? {
+    smoothedLatencySeconds ?? rawLatencySeconds
   }
 
   private var latencyColor: Color {
@@ -1590,7 +1989,7 @@ struct PlayerView: View {
       return "Waiting for playback"
     }
     if let seconds = measuredLatencySeconds {
-      return "Estimated latency \(formatLatencySeconds(seconds))"
+      return "~\(formatLatencySeconds(seconds)) behind live"
     }
     return "Latency unavailable"
   }
@@ -1605,7 +2004,8 @@ struct PlayerView: View {
   }
 
   private func configurePlayerForLive() {
-    // Prefer reliable startup; latency is corrected by explicit catch-up logic.
+    // Always minimize stalling. Disabling this starves the buffer and caused
+    // hard freezes on-device; the latency win comes from the proxy instead.
     player.automaticallyWaitsToMinimizeStalling = true
   }
 
@@ -1621,6 +2021,8 @@ struct PlayerView: View {
         await MainActor.run {
           updateLatencyMetrics()
           updateResolvedQuality()
+          updateSmoothedLatency()
+          sampleDiagnostics()
           applyChatSyncSettings()
         }
         try? await Task.sleep(for: .seconds(1))
@@ -1633,6 +2035,7 @@ struct PlayerView: View {
     latencyTask = nil
     wallClockLatencySeconds = nil
     liveEdgeLatencySeconds = nil
+    smoothedLatencySeconds = nil
     isPlaybackActive = false
     didRequestPlayback = false
     edgeLatencyLowConfidenceStreak = 0
@@ -1640,6 +2043,8 @@ struct PlayerView: View {
     wallClockLowConfidenceStreak = 0
     lastPlaybackDateSample = nil
     lastPlaybackTimeSampleSeconds = nil
+    diagIsFrozen = false
+    diagFrozenSince = nil
   }
 
   private func startPlaybackWatchdog() {
@@ -1697,8 +2102,12 @@ struct PlayerView: View {
 
       if stalled {
         stalledPlaybackSamples += 1
+        markDiagnosticsStall(reason: "watchdog")
       } else {
         stalledPlaybackSamples = 0
+        diagWasStalled = false
+        diagIsFrozen = false
+        diagFrozenSince = nil
       }
     }
 
@@ -1713,8 +2122,33 @@ struct PlayerView: View {
   private func recoverFromPlaybackStall(reason: String) async {
     guard !isRecoveringPlayback else { return }
     isRecoveringPlayback = true
+    diagReloadCount += 1
+    if showLatencyDiagnostics { logDiagnosticsEvent("reload (\(reason))") }
+    // A reload restarts the timeline, so clear the jump baseline to avoid
+    // counting the discontinuity as a playhead jump.
+    diagLastPlayheadSeconds = nil
+    diagLastSampleAt = nil
     await load(maxAttempts: 2, reason: reason, resetMetadata: false)
     isRecoveringPlayback = false
+  }
+
+  /// Exponential moving average of the raw latency estimate so the on-screen
+  /// number is stable instead of flickering between samples. Snaps directly on
+  /// large jumps (e.g. after a re-snap) rather than crawling toward the new value.
+  private func updateSmoothedLatency() {
+    guard isPlaybackActive, let raw = rawLatencySeconds else {
+      smoothedLatencySeconds = nil
+      return
+    }
+    guard let prev = smoothedLatencySeconds else {
+      smoothedLatencySeconds = raw
+      return
+    }
+    if abs(raw - prev) >= 3 {
+      smoothedLatencySeconds = raw
+    } else {
+      smoothedLatencySeconds = prev * 0.6 + raw * 0.4
+    }
   }
 
   private func updateLatencyMetrics() {
@@ -2214,4 +2648,12 @@ private struct GlassChatPaneStyle: ViewModifier {
         .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
     }
   }
+}
+
+/// A single timestamped diagnostics event (stall, jump, or reload) shown in the
+/// experimental latency overlay so playback hiccups can be observed directly.
+private struct DiagnosticsEvent: Identifiable {
+  let id = UUID()
+  let at: Date
+  let text: String
 }

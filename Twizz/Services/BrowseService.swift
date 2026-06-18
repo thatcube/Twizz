@@ -50,6 +50,7 @@ final class BrowseService {
             let name: String?
             let boxArtURL: String?
             let viewersCount: Int?
+            let isMature: Bool?
         }
         struct GameEdge: Decodable { let node: GameNode? }
         struct TopGamesConn: Decodable { let edges: [GameEdge]? }
@@ -65,6 +66,7 @@ final class BrowseService {
                     name
                     boxArtURL(width: 285, height: 380)
                     viewersCount
+                    isMature
                   }
                 }
               }
@@ -88,7 +90,8 @@ final class BrowseService {
                 id: id,
                 name: name,
                 boxArtURL: boxArtURL,
-                viewerCount: node.viewersCount
+                viewerCount: node.viewersCount,
+                isMature: node.isMature ?? false
             )
         }
     }
@@ -104,6 +107,7 @@ final class BrowseService {
             let title: String?
             let viewersCount: Int?
             let previewImageURL: String?
+            let isMature: Bool?
             let broadcaster: Broadcaster?
 
             struct Broadcaster: Decodable {
@@ -131,6 +135,7 @@ final class BrowseService {
                       id
                       title
                       viewersCount
+                      isMature
                       previewImageURL(width: 640, height: 360)
                       broadcaster {
                         login
@@ -171,7 +176,8 @@ final class BrowseService {
                 viewerCount: node.viewersCount,
                 thumbnailURL: previewURL,
                 profileImageURL: profileURL,
-                isLive: true
+                isLive: true,
+                isMature: node.isMature ?? false
             )
         }
     }
