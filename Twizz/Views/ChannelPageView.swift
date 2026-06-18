@@ -29,15 +29,24 @@ struct ChannelPageView: View {
   @State private var onDemandItem: OnDemandItem?
   @FocusState private var focusedID: String?
 
+  /// Measured height of the identity hero card, so it can straddle the banner's
+  /// bottom edge by exactly 50% regardless of its dynamic content.
+  @State private var heroHeight: CGFloat = 0
+
   private let avatarSize: CGFloat = 96
   private let tileWidth: CGFloat = 360
   private var tileMediaHeight: CGFloat { tileWidth * 9 / 16 }
   // Match the rail-card metrics used across the rest of the app (HomeView).
   private let focusHInset: CGFloat = 18
   private let focusVInset: CGFloat = 18
-  private let cardCorner: CGFloat = 22
+  private let cardCorner: CGFloat = 30
   private let mediaCorner: CGFloat = 18
   private let heroCorner: CGFloat = 28
+  /// Full-bleed banner height. The hero identity card overlaps its bottom edge by
+  /// half, and a mirrored, blurred reflection fills the rest of the page below it.
+  private let bannerHeight: CGFloat = 380
+
+  private var hasBanner: Bool { profile?.bannerImageURL != nil }
 
   private var headerName: String {
     profile?.displayName ?? target.displayName ?? target.login
@@ -56,25 +65,36 @@ struct ChannelPageView: View {
   }
 
   var body: some View {
-    ZStack(alignment: .top) {
-      LinearGradient(colors: palette.backgroundColors, startPoint: .top, endPoint: .bottom)
-        .ignoresSafeArea()
+    GeometryReader { geo in
+      let safeTop = geo.safeAreaInsets.top
+      // Full screen height, including the overscan-safe insets that tvOS adds.
+      let fullHeight = geo.size.height + safeTop + geo.safeAreaInsets.bottom
 
-      bannerBackdrop
+      ZStack(alignment: .top) {
+        LinearGradient(colors: palette.backgroundColors, startPoint: .top, endPoint: .bottom)
+          .ignoresSafeArea()
 
-      ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 30) {
-          heroCard
-          liveOrLastCard
-          clipsRow
-          vodsRow
-          similarRow
-          aboutAndLinks
+        // Edge-to-edge banner with a mirrored reflection beneath it, sitting
+        // behind the scrolling content and bleeding past the safe area.
+        bannerBackdrop(fullHeight: fullHeight)
+
+        ScrollView(.vertical, showsIndicators: false) {
+          VStack(alignment: .leading, spacing: 30) {
+            heroCard
+            liveOrLastCard
+            clipsRow
+            vodsRow
+            similarRow
+            aboutAndLinks
+          }
+          // Push content down so the identity card straddles the banner's
+          // bottom edge by 50%. The banner starts at the true screen top, so we
+          // subtract the safe-area inset the ScrollView already applies.
+          .padding(.top, hasBanner ? max(bannerHeight - safeTop - heroHeight / 2, 0) : 40)
+          .padding(.bottom, 140)
         }
-        .padding(.top, 40)
-        .padding(.bottom, 60)
+        .scrollClipDisabled()
       }
-      .scrollClipDisabled()
     }
     .onExitCommand { dismiss() }
     .task(id: target.id) { await loadAll() }
@@ -84,34 +104,59 @@ struct ChannelPageView: View {
     }
   }
 
-  // MARK: - Banner backdrop
+  // MARK: - Banner
 
-  /// A soft, dimmed wash of the channel banner behind the top of the page, so the
-  /// glass hero card reads as floating over the channel's identity rather than a
-  /// flat color. Fades into the page background.
+  /// Edge-to-edge channel banner topped over a vertically-mirrored, blurred
+  /// reflection that fills the rest of the screen — like the wash under the
+  /// Apple TV home dock. Bleeds past the overscan-safe area on every side and
+  /// renders behind the scrolling content. Purely decorative.
   @ViewBuilder
-  private var bannerBackdrop: some View {
+  private func bannerBackdrop(fullHeight: CGFloat) -> some View {
     if let bannerURL = profile?.bannerImageURL {
-      AsyncImage(url: bannerURL) { image in
-        image.resizable().scaledToFill()
-      } placeholder: {
-        Color.clear
-      }
-      .frame(height: 460)
-      .frame(maxWidth: .infinity)
-      .clipped()
-      .overlay(
-        LinearGradient(
-          colors: [
-            Color.black.opacity(0.25),
-            palette.backgroundColors.last ?? .black,
-          ],
-          startPoint: .top,
-          endPoint: .bottom
+      VStack(spacing: 0) {
+        AsyncImage(url: bannerURL) { image in
+          image.resizable().scaledToFill()
+        } placeholder: {
+          Rectangle().fill(.white.opacity(0.06))
+        }
+        .frame(height: bannerHeight)
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .overlay(
+          LinearGradient(
+            colors: [.clear, .clear, Color.black.opacity(0.28)],
+            startPoint: .top,
+            endPoint: .bottom
+          )
         )
-      )
-      .opacity(0.55)
-      .ignoresSafeArea(edges: .top)
+
+        AsyncImage(url: bannerURL) { image in
+          image.resizable()
+        } placeholder: {
+          Color.clear
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: max(fullHeight - bannerHeight, 0))
+        .scaleEffect(x: 1, y: -1, anchor: .center)
+        .blur(radius: 70)
+        .clipped()
+        // Fade the reflection out toward the bottom with a mask (rather than a
+        // dark overlay) so it can blend additively.
+        .mask(
+          LinearGradient(
+            colors: [.white, .white.opacity(0.6), .clear],
+            startPoint: .top,
+            endPoint: .bottom
+          )
+        )
+        .opacity(0.6)
+        // Add the reflection's light to the dark background instead of averaging
+        // toward it, so a bright/white banner glows in its own color rather than
+        // washing out to gray.
+        .blendMode(.plusLighter)
+      }
+      .frame(maxWidth: .infinity, alignment: .top)
+      .ignoresSafeArea()
       .allowsHitTesting(false)
     }
   }
@@ -137,6 +182,7 @@ struct ChannelPageView: View {
     .padding(24)
     .frame(maxWidth: .infinity, alignment: .leading)
     .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: false, palette: palette)
+    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heroHeight = $0 }
     .padding(.horizontal, AppLayout.horizontalPadding)
   }
 
