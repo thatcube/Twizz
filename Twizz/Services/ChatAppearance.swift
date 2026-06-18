@@ -18,13 +18,13 @@ enum ChatAppearance {
   static let emoteSizeStep: CGFloat = 2
 
   /// Extra spacing applied *within* a wrapped message line.
-  static let lineHeightRange: ClosedRange<CGFloat> = -4...16
+  static let lineHeightRange: ClosedRange<CGFloat> = -8...16
   static let lineHeightStep: CGFloat = 1
 
   /// Extra spacing inserted *between characters* (tracking). A readability aid —
   /// looser character spacing is one of the more evidence-backed dyslexia aids.
   /// Negative values tighten the text for users who prefer denser lines.
-  static let letterSpacingRange: ClosedRange<CGFloat> = -4...12
+  static let letterSpacingRange: ClosedRange<CGFloat> = -8...12
   static let letterSpacingStep: CGFloat = 1
 
   /// Vertical gap *between* messages.
