@@ -12,6 +12,10 @@ struct AudioVisualizerView: View {
   let avatarURL: URL?
   let palette: ThemePalette
   var showAvatar: Bool = true
+  /// Whether the level is real decoded audio (vs the ambient fallback) — shown
+  /// in a temporary on-screen readout while tuning reactivity.
+  var isReactive: Bool = false
+  var debugInfo: String? = nil
 
   // Audio-flavoured accent so the orb pops on the black player backdrop.
   private let accentA = Color(red: 0.62, green: 0.42, blue: 1.00)  // violet
@@ -20,14 +24,14 @@ struct AudioVisualizerView: View {
   var body: some View {
     GeometryReader { geo in
       let side = min(geo.size.width, geo.size.height)
-      let diameter = side * 0.46
+      let diameter = side * 0.42
 
       TimelineView(.animation) { timeline in
         let t = timeline.date.timeIntervalSinceReferenceDate
-        // Continuous gentle breath, lifted by the live audio level.
-        let breath = (sin(t * 1.6) * 0.5 + 0.5) * 0.012
+        // Continuous gentle breath, then a big punch from the live audio level.
+        let breath = (sin(t * 1.6) * 0.5 + 0.5) * 0.02
         let amp = level
-        let scale = 1.0 + breath + amp * 0.06
+        let scale = 1.0 + breath + amp * 0.26
 
         ZStack {
           halo(diameter: diameter, amp: amp, t: t)
@@ -41,23 +45,40 @@ struct AudioVisualizerView: View {
         }
         .frame(width: geo.size.width, height: geo.size.height)
         .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        .overlay(alignment: .topLeading) {
+          if let debugInfo {
+            debugBadge(debugInfo)
+          }
+        }
       }
     }
     .ignoresSafeArea()
     .allowsHitTesting(false)
   }
 
+  private func debugBadge(_ text: String) -> some View {
+    Text(text)
+      .font(.system(size: 22, weight: .semibold, design: .monospaced))
+      .foregroundStyle(isReactive ? Color.green : Color.orange)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 8)
+      .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+      .padding(.top, 40)
+      .padding(.leading, 48)
+  }
+
   // MARK: - Glow halo + drifting caustics
 
   private func halo(diameter: CGFloat, amp: Double, t: Double) -> some View {
-    let haloSize = diameter * 2.3
+    // The glow swells outward with the audio so loud moments visibly bloom.
+    let haloSize = diameter * (2.0 + amp * 1.1)
     return ZStack {
       Circle()
         .fill(
           RadialGradient(
             colors: [
-              accentA.opacity(0.45 * (0.5 + amp)),
-              accentB.opacity(0.22 * (0.5 + amp)),
+              accentA.opacity(0.35 + amp * 0.55),
+              accentB.opacity(0.18 + amp * 0.32),
               .clear,
             ],
             center: .center,
@@ -94,23 +115,25 @@ struct AudioVisualizerView: View {
 
   private func rippleRings(diameter: CGFloat, amp: Double, t: Double) -> some View {
     let ringCount = 3
+    // Calm, slow concentric ripples that lift a little when the audio is loud.
+    let speed = 0.11 + amp * 0.14
     return ZStack {
       ForEach(0..<ringCount, id: \.self) { i in
-        let phase = ((t * 0.32) + Double(i) / Double(ringCount))
+        let phase = ((t * speed) + Double(i) / Double(ringCount))
           .truncatingRemainder(dividingBy: 1.0)
-        let ringDiameter = diameter * (1.0 + phase * 0.95)
+        let ringDiameter = diameter * (1.0 + phase * (0.5 + amp * 0.7))
         let fade = (1.0 - phase)
         Circle()
           .stroke(
             LinearGradient(
-              colors: [accentA.opacity(0.9), accentB.opacity(0.6)],
+              colors: [accentA.opacity(0.85), accentB.opacity(0.6)],
               startPoint: .topLeading,
               endPoint: .bottomTrailing
             ),
-            lineWidth: 1.5 + fade * 2.0
+            lineWidth: 1.5 + fade * (1.5 + amp * 3.5)
           )
           .frame(width: ringDiameter, height: ringDiameter)
-          .opacity(fade * (0.08 + amp * 0.5))
+          .opacity(fade * (0.04 + amp * 0.7))
       }
     }
   }
@@ -167,7 +190,14 @@ struct AudioVisualizerView: View {
     }
     .frame(width: diameter, height: diameter)
     .modifier(LiquidGlassOrbRim(diameter: diameter))
-    .shadow(color: accentA.opacity(0.45 + amp * 0.3), radius: 30 + amp * 24)
+    .shadow(color: accentB.opacity(0.25 + amp * 0.55), radius: 24 + amp * 55)
+    .overlay(
+      // A soft accent rim that brightens with the audio (no harsh flicker).
+      Circle()
+        .stroke(accentB.opacity(amp * 0.5), lineWidth: 2 + amp * 4)
+        .frame(width: diameter, height: diameter)
+        .blur(radius: 8)
+    )
   }
 
   private func shimmer(diameter: CGFloat, amp: Double, t: Double) -> some View {

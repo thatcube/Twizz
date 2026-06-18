@@ -552,13 +552,23 @@ struct PlayerView: View {
         AudioVisualizerView(
           level: audioLevelMonitor.level,
           avatarURL: channelAvatarURL,
-          palette: palette
+          palette: palette,
+          isReactive: audioLevelMonitor.isReceivingRealAudio,
+          debugInfo: String(
+            format: "%@  lvl %.2f  seg %d  q %d  lag %dms",
+            audioLevelMonitor.isReceivingRealAudio ? "REAL" : "AMBIENT",
+            audioLevelMonitor.level,
+            audioLevelMonitor.decodedSegmentCount,
+            audioLevelMonitor.pendingRealSamples,
+            audioLevelMonitor.syncLagMs
+          )
         )
         .transition(.opacity)
         .onAppear {
           audioLevelMonitor.start(
             audioPlaylistURL: audioOnlyPlaylistURL,
-            headers: PlaybackService.streamHeaders
+            headers: PlaybackService.streamHeaders,
+            currentDate: { [weak player] in player?.currentItem?.currentDate() }
           )
         }
         .onDisappear { audioLevelMonitor.stop() }
