@@ -14,8 +14,8 @@ struct RichChatLineView: View {
     var lineHeight: CGFloat = ChatAppearance.defaultLineHeight
     /// When false, emotes render as a static first frame instead of animating.
     var animatedEmotes: Bool = true
-    /// Typeface design applied to all chat text.
-    var fontDesign: Font.Design = ChatAppearance.defaultFontStyle.design
+    /// Typeface applied to all chat text.
+    var fontStyle: ChatFontStyle = ChatAppearance.defaultFontStyle
     /// When false, per-user chat badges (mod/sub/etc.) are hidden.
     var showBadges: Bool = ChatAppearance.defaultShowBadges
     /// Overrides the default white body color (used by the light side-chat).
@@ -105,7 +105,7 @@ struct RichChatLineView: View {
             }
 
             Text(message.isAction ? "\(message.username) " : "\(message.username): ")
-                .font(.system(size: nameFontSize, weight: .bold, design: fontDesign))
+                .font(fontStyle.font(size: nameFontSize, weight: .bold))
                 .foregroundStyle(nameColor)
 
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
@@ -152,7 +152,7 @@ struct RichChatLineView: View {
         switch segment {
         case .text(let text):
             Text(text)
-                .font(.system(size: bodyFontSize, design: fontDesign))
+                .font(fontStyle.font(size: bodyFontSize))
                 .foregroundStyle(bodyColor)
         case .emote(let name, let url):
             EmoteView(name: name, url: url, fallbackColor: bodyColor, fallbackFontSize: bodyFontSize, emoteHeight: emoteHeight, animated: animatedEmotes)

@@ -1314,7 +1314,7 @@ struct PlayerView: View {
         messageSpacing: chatMessageSpacing,
         lineHeight: chatLineHeight,
         animatedEmotes: chatAnimatedEmotes,
-        fontDesign: chatFontStyle.design,
+        fontStyle: chatFontStyle,
         showBadges: chatShowBadges,
         isConnected: chat.isConnected,
         emoteURLs: chat.emoteURLs,
@@ -1722,7 +1722,7 @@ struct PlayerView: View {
       VStack(alignment: .leading, spacing: 10) {
         settingsSectionHeader("Typeface")
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatFontStyle.allCases.enumerated()), id: \.element) { index, style in
             settingsPill(
               title: style.title,
