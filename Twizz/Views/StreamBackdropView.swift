@@ -18,6 +18,7 @@ struct StreamBackdropView: View {
   @State private var activeThumbnailURL: URL?
   @State private var activeThumbnailImage: UIImage?
   @State private var fallbackThumbnailImage: UIImage?
+  @State private var persistentBackdropImage: UIImage?
   @State private var activeThumbnailOpacity = 0.0
   @State private var activeThumbnailDidLoad = false
   @State private var isShowingVideoPreview = false
@@ -30,6 +31,12 @@ struct StreamBackdropView: View {
 
   var body: some View {
     ZStack {
+      if let persistentBackdropImage {
+        Image(uiImage: persistentBackdropImage)
+          .resizable()
+          .scaledToFill()
+      }
+
       if let fallbackThumbnailImage {
         Image(uiImage: fallbackThumbnailImage)
           .resizable()
@@ -133,6 +140,7 @@ struct StreamBackdropView: View {
       await MainActor.run {
         guard activeThumbnailURL == url else { return }
         activeThumbnailImage = image
+        persistentBackdropImage = image
         activeThumbnailDidLoad = true
         if animateWhenReady {
           withAnimation(channelFade) {
