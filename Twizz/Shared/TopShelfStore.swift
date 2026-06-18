@@ -48,8 +48,21 @@ enum TopShelfStore {
         )
     }
 
+    /// Directory inside the shared container where the snapshot lives.
+    ///
+    /// tvOS keeps the App Group container *root* read-only — only
+    /// subdirectories such as `Library/Caches` are writable. Writing the
+    /// snapshot to the root fails with `NSFileWriteNoPermissionError` (513), so
+    /// it is stored under `Library/Caches` instead. Both the app and the
+    /// extension resolve the same path through this property.
+    private static var snapshotDirectoryURL: URL? {
+        containerURL?
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Caches", isDirectory: true)
+    }
+
     private static var snapshotURL: URL? {
-        containerURL?.appendingPathComponent(TopShelf.snapshotFileName)
+        snapshotDirectoryURL?.appendingPathComponent(TopShelf.snapshotFileName)
     }
 
     /// Records the outcome of the most recent `save` so the in-app diagnostics
@@ -64,13 +77,13 @@ enum TopShelfStore {
     /// error. Creating the directory (and falling back to a non-atomic write)
     /// makes the first publish succeed.
     static func save(_ snapshot: TopShelfSnapshot) {
-        guard let container = containerURL, let url = snapshotURL else {
+        guard let directory = snapshotDirectoryURL, let url = snapshotURL else {
             lastSaveOutcome = "save skipped: no container URL"
             return
         }
         do {
             try FileManager.default.createDirectory(
-                at: container,
+                at: directory,
                 withIntermediateDirectories: true
             )
 
