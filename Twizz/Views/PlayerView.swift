@@ -80,7 +80,6 @@ struct PlayerView: View {
   @State private var isLoading = true
   @State private var showChat: Bool = UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
   @State private var chatReplayStartMessageID: ChatMessage.ID?
-  @State private var showQualityPicker = false
   /// Live resolution AVPlayer's adaptive (Auto) selection is currently showing,
   /// e.g. "1080p60". Drives the "Auto (1080p60)" label on the quality button.
   @State private var resolvedQualityName: String?
@@ -212,7 +211,6 @@ struct PlayerView: View {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case chatSend
     case chatSettingsButton
-    case qualityOption(Int)
     case chatTextSizeOption(Int)
     case chatLineHeightOption(Int)
     case chatLineSpacingOption(Int)
@@ -306,10 +304,6 @@ struct PlayerView: View {
         .ignoresSafeArea()
       }
 
-      if showQualityPicker {
-        qualityPicker
-      }
-
       if let raid = chat.pendingRaid {
         raidBanner(raid)
           .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -356,11 +350,7 @@ struct PlayerView: View {
       setIdleTimer(disabled: false)
     }
     .onExitCommand {
-      if showQualityPicker {
-        showQualityPicker = false
-        focus = .quality
-        scheduleHide()
-      } else if showChatSettings {
+      if showChatSettings {
         showChatSettings = false
         focus = .chatSettingsButton
       } else if showControls {
@@ -370,8 +360,6 @@ struct PlayerView: View {
       }
     }
     .onMoveCommand { direction in
-      guard !showQualityPicker else { return }
-
       if !showControls {
         // Directional movement should immediately surface controls and
         // land on chat toggle so moving off chat feels instant.
@@ -397,7 +385,7 @@ struct PlayerView: View {
 
       // Keep control navigation deterministic: if tvOS drops focus to nil
       // while controls are visible, immediately restore last valid control.
-      guard showControls, !showQualityPicker else {
+      guard showControls else {
         return
       }
 
@@ -430,7 +418,7 @@ struct PlayerView: View {
       VideoSurface(player: player)
         .ignoresSafeArea()
 
-      if showControls, !showQualityPicker, !isLoading,
+      if showControls, !isLoading,
         errorMessage == nil
       {
         VStack {
@@ -454,7 +442,7 @@ struct PlayerView: View {
       // Only expose the video focus target while controls are hidden.
       // Otherwise, left-edge movement from the control cluster can escape
       // into this invisible target and appear as lost focus.
-      if !showControls && !showQualityPicker {
+      if !showControls {
         Color.clear
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .contentShape(Rectangle())
@@ -480,7 +468,7 @@ struct PlayerView: View {
         }
         .padding(40)
         .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 24))
-      } else if showControls && !showQualityPicker {
+      } else if showControls {
         bottomOverlay
       }
     }
@@ -541,9 +529,18 @@ struct PlayerView: View {
       Spacer(minLength: 18)
 
       HStack(spacing: 14) {
-        Button {
-          showQualityPicker = true
-          hideTask?.cancel()
+        Menu {
+          ForEach(Array(qualityOptions.enumerated()), id: \.element) { index, option in
+            Button {
+              selectQuality(at: index)
+            } label: {
+              if option == preferredQuality {
+                Label(qualityDisplayLabel(option), systemImage: "checkmark")
+              } else {
+                Text(qualityDisplayLabel(option))
+              }
+            }
+          }
         } label: {
           Text(qualityButtonLabel)
             .font(.subheadline)
@@ -846,7 +843,6 @@ struct PlayerView: View {
       try? await Task.sleep(for: .seconds(controlsAutoHideSeconds))
       guard !Task.isCancelled else { return }
       await MainActor.run {
-        guard !showQualityPicker else { return }
         hideControls()
       }
     }
@@ -1529,44 +1525,6 @@ struct PlayerView: View {
 
   // MARK: - Quality picker
 
-  private var qualityPicker: some View {
-    ZStack {
-      Color.black.opacity(0.5).ignoresSafeArea()
-
-      VStack(alignment: .leading, spacing: 8) {
-        Text("Quality")
-          .font(.title2).bold()
-          .padding(.bottom, 8)
-
-        ForEach(Array(qualityOptions.enumerated()), id: \.element) { index, option in
-          Button {
-            selectQuality(at: index)
-          } label: {
-            HStack {
-              Text(qualityDisplayLabel(option))
-              Spacer()
-              if option == preferredQuality {
-                Icon(glyph: .check, size: 32)
-              }
-            }
-            .frame(width: 420)
-          }
-          .buttonStyle(.bordered)
-          .focused($focus, equals: .qualityOption(index))
-        }
-      }
-      .padding(40)
-      .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 28))
-      .focusSection()
-    }
-    .onAppear {
-      // Move focus into the picker once it's on screen; the underlying
-      // control bar is hidden while the picker is open so it can't steal focus.
-      let target = qualityOptions.firstIndex(of: preferredQuality) ?? 0
-      focus = .qualityOption(target)
-    }
-  }
-
   private var qualityOptions: [String] {
     ["Auto"] + (playback?.qualities.map(\.name) ?? [])
   }
@@ -1651,7 +1609,6 @@ struct PlayerView: View {
     guard qualityOptions.indices.contains(index) else { return }
     let option = qualityOptions[index]
     preferredQuality = option
-    showQualityPicker = false
     applyQualityPreference(option)
     updateResolvedQuality()
     focus = .quality
@@ -2002,7 +1959,7 @@ struct PlayerView: View {
   }
 
   private func samplePlaybackHealth() {
-    guard !isLoading, errorMessage == nil, !showQualityPicker
+    guard !isLoading, errorMessage == nil
     else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
