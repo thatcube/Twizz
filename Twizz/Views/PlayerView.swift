@@ -573,6 +573,8 @@ struct PlayerView: View {
           .font(.headline)
           .foregroundStyle(.white)
           .lineLimit(2)
+          .minimumScaleFactor(0.5)
+          .truncationMode(.tail)
           .fixedSize(horizontal: false, vertical: true)
           .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -594,15 +596,16 @@ struct PlayerView: View {
           options: qualityOptions,
           selectedOption: preferredQuality,
           buttonLabel: qualityButtonLabel,
+          reservedWidthLabels: qualityButtonLabelCandidates,
           displayLabel: { qualityDisplayLabel($0) },
           onSelect: { selectQuality(at: $0) },
           onMenuPresented: {
             focusRecoveryTask?.cancel()
             isQualityMenuPresented = true
-            // Native Menu takes over focus. Clearing our app-level focus state
-            // immediately prevents a stale focused shadow from lingering behind
-            // the popup until the next render tick.
-            focus = nil
+            // Keep `focus == .quality` while the menu is open so tvOS keeps the
+            // button visually "lifted" (its focus shadow) behind the popup for
+            // the menu's whole lifetime, and so focus returns to it instantly
+            // on dismiss.
           },
           onMenuDismissed: {
             isQualityMenuPresented = false
@@ -626,7 +629,6 @@ struct PlayerView: View {
         )
         .equatable()
         .focused($focus, equals: .quality)
-        .focusEffectDisabled(isQualityMenuPresented)
         .onMoveCommand { direction in
           switch direction {
           case .left:
@@ -1631,6 +1633,21 @@ struct PlayerView: View {
     return Self.shortQualityName(preferredQuality)
   }
 
+  /// Every label the quality button could ever display for the current stream.
+  /// The button reserves the width of the widest of these so the in-player
+  /// title's available space stays constant as the live label changes (e.g.
+  /// "Auto" -> "Auto (1080p60)"), preventing distracting title font reflow.
+  private var qualityButtonLabelCandidates: [String] {
+    var labels: Set<String> = ["Auto"]
+    let videoVariants = (playback?.qualities ?? []).filter { !$0.isAudioOnly }
+    for quality in videoVariants {
+      let short = Self.shortQualityName(quality.name)
+      labels.insert(short)
+      labels.insert("Auto (\(short))")
+    }
+    return Array(labels)
+  }
+
   /// Drops the "(Source)" suffix so the button reads "1080p60", not
   /// "1080p60 (Source)".
   private static func shortQualityName(_ name: String) -> String {
@@ -2413,6 +2430,7 @@ private struct QualityMenu: View, Equatable {
   let options: [String]
   let selectedOption: String
   let buttonLabel: String
+  let reservedWidthLabels: [String]
   let displayLabel: (String) -> String
   let onSelect: (Int) -> Void
   let onMenuPresented: () -> Void
@@ -2422,6 +2440,7 @@ private struct QualityMenu: View, Equatable {
     lhs.options == rhs.options
       && lhs.selectedOption == rhs.selectedOption
       && lhs.buttonLabel == rhs.buttonLabel
+      && lhs.reservedWidthLabels == rhs.reservedWidthLabels
   }
 
   /// Drives the inline `Picker` selection. Reading derives the current index
@@ -2435,28 +2454,63 @@ private struct QualityMenu: View, Equatable {
   }
 
   var body: some View {
-    Menu {
-      // A `Picker` is Apple's recommended single-selection control inside a
-      // menu: it renders a checkmark in a reserved leading gutter so every
-      // row's text stays aligned (no per-row shift), unlike hand-placed
-      // checkmark labels.
-      Picker("Quality", selection: selection) {
-        ForEach(Array(options.enumerated()), id: \.element) { index, option in
-          Text(displayLabel(option)).tag(index)
-        }
+    // Invisible barrier: hidden copies of every possible label reserve the
+    // width of the widest one, so the in-player title's available space stays
+    // constant. The barrier draws nothing and isn't focusable — only the Menu
+    // is interactive, and its platter hugs the live label, so the visible
+    // button stays variable-width. Trailing alignment parks the button against
+    // the next control, letting the reserved slack sit (invisibly) on its left.
+    ZStack(alignment: .trailing) {
+      ForEach(reservedWidthLabels, id: \.self) { candidate in
+        qualityLabelText(candidate).hidden()
       }
-      .pickerStyle(.inline)
-      .onAppear(perform: onMenuPresented)
-      .onDisappear(perform: onMenuDismissed)
-    } label: {
-      Text(buttonLabel)
-        .font(.subheadline)
-        .fontWeight(.semibold)
-        .monospacedDigit()
-        .lineLimit(1)
-        .fixedSize()
-        .accessibilityLabel("Quality, \(buttonLabel)")
+
+      Menu {
+        // A `Picker` is Apple's recommended single-selection control inside a
+        // menu: it renders a checkmark in a reserved leading gutter so every
+        // row's text stays aligned (no per-row shift), unlike hand-placed
+        // checkmark labels.
+        Picker("Quality", selection: selection) {
+          ForEach(Array(options.enumerated()), id: \.element) { index, option in
+            Text(displayLabel(option)).tag(index)
+          }
+        }
+        .pickerStyle(.inline)
+        .onAppear(perform: onMenuPresented)
+        .onDisappear(perform: onMenuDismissed)
+      } label: {
+        qualityLabelText(buttonLabel)
+          .accessibilityLabel("Quality, \(buttonLabel)")
+      }
     }
+  }
+
+  /// `true` for the live "Auto (1080p60)" form, which we render slightly
+  /// smaller so the parenthetical resolution reads as a secondary detail.
+  private func isAutoResolutionLabel(_ text: String) -> Bool {
+    text.hasPrefix("Auto (")
+  }
+
+  @ViewBuilder
+  private func qualityLabelText(_ text: String) -> some View {
+    Group {
+      if isAutoResolutionLabel(text) {
+        Text(text)
+          .font(.system(size: Self.compactQualityFontSize, weight: .semibold))
+      } else {
+        Text(text)
+          .font(.subheadline)
+          .fontWeight(.semibold)
+      }
+    }
+    .monospacedDigit()
+    .lineLimit(1)
+    .fixedSize()
+  }
+
+  /// 20% smaller than `.subheadline`, used for the "Auto (1080p60)" label.
+  private static var compactQualityFontSize: CGFloat {
+    UIFont.preferredFont(forTextStyle: .subheadline).pointSize * 0.8
   }
 }
 
