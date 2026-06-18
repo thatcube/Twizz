@@ -11,6 +11,7 @@ struct StreamBackdropView: View {
   @State private var previewTask: Task<Void, Never>?
   @State private var revealVideoTask: Task<Void, Never>?
   @State private var thumbnailCleanupTask: Task<Void, Never>?
+  @State private var videoTeardownTask: Task<Void, Never>?
   @State private var activeChannelID: String?
   @State private var activeThumbnailURL: URL?
   @State private var fallbackThumbnailURL: URL?
@@ -18,6 +19,7 @@ struct StreamBackdropView: View {
   @State private var activeThumbnailDidLoad = false
   @State private var isShowingVideoPreview = false
   @State private var videoOpacity = 0.0
+  @State private var shouldFadeOutCurrentVideoOnThumbnailReady = false
   @State private var hasConfiguredPlayer = false
 
   private let channelFade = Animation.easeInOut(duration: 0.45)
@@ -91,6 +93,8 @@ struct StreamBackdropView: View {
       stopPreviewPlayback(clearItem: true)
       thumbnailCleanupTask?.cancel()
       thumbnailCleanupTask = nil
+      videoTeardownTask?.cancel()
+      videoTeardownTask = nil
     }
   }
 
@@ -146,6 +150,11 @@ struct StreamBackdropView: View {
         thumbnailCleanupTask = nil
       }
     }
+
+    if shouldFadeOutCurrentVideoOnThumbnailReady {
+      shouldFadeOutCurrentVideoOnThumbnailReady = false
+      fadeOutAndTearDownCurrentVideo()
+    }
   }
 
   @MainActor
@@ -154,17 +163,23 @@ struct StreamBackdropView: View {
     previewTask = nil
     revealVideoTask?.cancel()
     revealVideoTask = nil
-    withAnimation(videoFade) {
-      videoOpacity = 0
-    }
-    isShowingVideoPreview = false
-    player.pause()
-    player.replaceCurrentItem(with: nil)
+    videoTeardownTask?.cancel()
+    videoTeardownTask = nil
 
     guard let channel else {
       activeChannelID = nil
+      shouldFadeOutCurrentVideoOnThumbnailReady = false
+      fadeOutAndTearDownCurrentVideo()
       transitionToThumbnail(nil)
       return
+    }
+
+    let hasVisibleVideo = isShowingVideoPreview && videoOpacity > 0.01
+    if hasVisibleVideo {
+      shouldFadeOutCurrentVideoOnThumbnailReady = true
+    } else {
+      shouldFadeOutCurrentVideoOnThumbnailReady = false
+      tearDownVideoImmediately()
     }
 
     activeChannelID = channel.id
@@ -204,6 +219,8 @@ struct StreamBackdropView: View {
   @MainActor
   private func startPreviewPlayback(from sourceURL: URL) {
     configurePlayerIfNeeded()
+    videoTeardownTask?.cancel()
+    videoTeardownTask = nil
     let asset = AVURLAsset(
       url: sourceURL,
       options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
@@ -261,9 +278,38 @@ struct StreamBackdropView: View {
     previewTask = nil
     revealVideoTask?.cancel()
     revealVideoTask = nil
+    videoTeardownTask?.cancel()
+    videoTeardownTask = nil
+    shouldFadeOutCurrentVideoOnThumbnailReady = false
+    if clearItem {
+      tearDownVideoImmediately()
+      return
+    }
+    fadeOutAndTearDownCurrentVideo(clearItem: clearItem)
+  }
+
+  @MainActor
+  private func fadeOutAndTearDownCurrentVideo(clearItem: Bool = true) {
+    guard isShowingVideoPreview else {
+      tearDownVideoImmediately(clearItem: clearItem)
+      return
+    }
     withAnimation(videoFade) {
       videoOpacity = 0
     }
+    videoTeardownTask = Task {
+      try? await Task.sleep(for: .milliseconds(320))
+      guard !Task.isCancelled else { return }
+      await MainActor.run {
+        tearDownVideoImmediately(clearItem: clearItem)
+        videoTeardownTask = nil
+      }
+    }
+  }
+
+  @MainActor
+  private func tearDownVideoImmediately(clearItem: Bool = true) {
+    videoOpacity = 0
     isShowingVideoPreview = false
     player.pause()
     if clearItem {
