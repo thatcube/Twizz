@@ -1009,7 +1009,7 @@ struct PlayerView: View {
           .textCase(.uppercase)
 
         ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
-          ForEach(Array(ChatTextSizeOption.allCases.enumerated()), id: \.offset) { index, option in
+          ForEach(Array(ChatTextSizeOption.allCases.enumerated()), id: \.element) { index, option in
             settingsPill(
               title: option.title,
               isSelected: option == chatTextSize,
@@ -1030,7 +1030,7 @@ struct PlayerView: View {
           .textCase(.uppercase)
 
         ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
-          ForEach(Array(ChatLineHeightOption.allCases.enumerated()), id: \.offset) { index, option in
+          ForEach(Array(ChatLineHeightOption.allCases.enumerated()), id: \.element) { index, option in
             settingsPill(
               title: option.title,
               isSelected: option == chatLineHeight,
@@ -1051,7 +1051,7 @@ struct PlayerView: View {
           .textCase(.uppercase)
 
         ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
-          ForEach(Array(ChatLineSpacingOption.allCases.enumerated()), id: \.offset) { index, option in
+          ForEach(Array(ChatLineSpacingOption.allCases.enumerated()), id: \.element) { index, option in
             settingsPill(
               title: option.title,
               isSelected: option == chatLineSpacing,
@@ -1072,7 +1072,7 @@ struct PlayerView: View {
           .textCase(.uppercase)
 
         ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
-          ForEach(Array(ChatWidthMode.allCases.enumerated()), id: \.offset) { index, mode in
+          ForEach(Array(ChatWidthMode.allCases.enumerated()), id: \.element) { index, mode in
             settingsPill(
               title: mode.title,
               isSelected: mode == chatWidthMode,
@@ -1093,7 +1093,7 @@ struct PlayerView: View {
           .textCase(.uppercase)
 
         ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
-          ForEach(Array(ChatLayoutMode.allCases.enumerated()), id: \.offset) { index, mode in
+          ForEach(Array(ChatLayoutMode.allCases.enumerated()), id: \.element) { index, mode in
             settingsPill(
               title: mode.title,
               isSelected: mode == chatLayoutMode,
@@ -1581,7 +1581,7 @@ struct PlayerView: View {
           .font(.title2).bold()
           .padding(.bottom, 8)
 
-        ForEach(Array(qualityOptions.enumerated()), id: \.offset) { index, option in
+        ForEach(Array(qualityOptions.enumerated()), id: \.element) { index, option in
           Button {
             selectQuality(at: index)
           } label: {
