@@ -61,11 +61,17 @@ final class RecommendationsService {
         struct GQLEnvelope: Decodable { let data: GQLData? }
 
         // `broadcasterLanguages` is a GQL enum (e.g. EN), not a string, so it
-        // is inlined from a whitelist below — never interpolated from raw input.
-        let language = Self.preferredTwitchLanguage()
+        // is taken from a whitelisted token below — never interpolated from raw
+        // input. When the viewer chooses "All", the option is omitted entirely.
+        let languageOption: String
+        if let token = StreamLanguagePreference.currentToken() {
+          languageOption = ", broadcasterLanguages: [\(token)]"
+        } else {
+          languageOption = ""
+        }
         let query = """
             query RecommendedStreams($first: Int!) {
-              streams(first: $first, options: {sort: VIEWER_COUNT, broadcasterLanguages: [\(language)]}) {
+              streams(first: $first, options: {sort: VIEWER_COUNT\(languageOption)}) {
                 edges {
                   node {
                     id
@@ -171,22 +177,6 @@ final class RecommendationsService {
                 isMature: node.isMature ?? false
             )
         }
-    }
-
-    // MARK: - Language
-
-    /// Maps the device's primary language to a Twitch broadcaster-language enum
-    /// token, defaulting to English. Restricted to a whitelist so the value can
-    /// be safely inlined into the GQL query.
-    private static func preferredTwitchLanguage() -> String {
-        let supported: Set<String> = [
-            "EN", "ES", "FR", "DE", "IT", "PT", "RU", "JA", "KO", "ZH",
-            "NL", "PL", "TR", "AR", "CS", "DA", "FI", "EL", "HU", "NO",
-            "RO", "SK", "SV", "TH", "VI", "BG", "ID", "UK", "CA", "HI", "MS",
-        ]
-        let primary = Locale.preferredLanguages.first ?? "en"
-        let code = String(primary.prefix(2)).uppercased()
-        return supported.contains(code) ? code : "EN"
     }
 
     // MARK: - GQL Transport

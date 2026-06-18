@@ -19,6 +19,8 @@ struct HomeView: View {
   @State private var auth = TwitchAuthSession()
   @State private var follows = FollowedChannelsService()
   @State private var recommendations = RecommendationsService()
+  @State private var personalized = PersonalizedRecommendationsService()
+  @State private var watchHistory = WatchHistoryService()
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
@@ -27,8 +29,11 @@ struct HomeView: View {
   @State private var browsePath: [TwitchCategory] = []
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
+  @State private var refreshToast: RefreshToastState?
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
+  @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedEnabled = true
+  @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
 
   @Environment(\.colorScheme) private var systemColorScheme
   @FocusState private var focusedItemID: String?
@@ -118,6 +123,10 @@ struct HomeView: View {
           themeManager: themeManager,
           auth: auth,
           onRequestSignIn: { showSignIn = true },
+          onClearWatchHistory: {
+            watchHistory.clear()
+            Task { await refreshPersonalizedIfNeeded(force: true) }
+          },
           onAccountChanged: {
             Task {
               await refreshFollowedChannelsIfNeeded(force: true)
@@ -136,11 +145,19 @@ struct HomeView: View {
     .background(AppBackground(palette: resolvedPalette))
     .environment(\.themePalette, resolvedPalette)
     .preferredColorScheme(themeManager.theme.preferredColorScheme)
+    .overlay(alignment: .top) {
+      if let refreshToast {
+        RefreshToastView(state: refreshToast)
+          .padding(.top, 48)
+          .transition(.move(edge: .top).combined(with: .opacity))
+      }
+    }
     .task {
       auth.restore()
       promptFirstLaunchSignInIfNeeded()
       await refreshFollowedChannelsIfNeeded(force: true)
       await refreshRecommendationsIfNeeded(force: true)
+      await refreshPersonalizedIfNeeded(force: true)
       requestFocusIfPossible(force: true)
       openDeepLinkedChannelIfNeeded(deepLinkRouter.pendingChannelLogin)
     }
@@ -164,10 +181,25 @@ struct HomeView: View {
       Task {
         await refreshFollowedChannelsIfNeeded(force: false)
         await refreshRecommendationsIfNeeded(force: false)
+        await refreshPersonalizedIfNeeded(force: false)
       }
     }
     .onChange(of: deepLinkRouter.pendingChannelLogin) { _, login in
       openDeepLinkedChannelIfNeeded(login)
+    }
+    .onChange(of: selectedChannel) { _, channel in
+      // Single funnel for every play (Following, recommendations, Browse, Search,
+      // channel page, deep links) — record it for on-device personalization.
+      if let channel { watchHistory.record(channel) }
+    }
+    .onChange(of: personalizedEnabled) { _, _ in
+      Task { await refreshPersonalizedIfNeeded(force: true) }
+    }
+    .onChange(of: streamLanguage) { _, _ in
+      Task {
+        await refreshRecommendationsIfNeeded(force: true)
+        await refreshPersonalizedIfNeeded(force: true)
+      }
     }
     .fullScreenCover(item: $selectedChannel) { channel in
       PlayerView(channel: channel.login, auth: auth)
@@ -216,7 +248,8 @@ struct HomeView: View {
       ScrollView(.vertical, showsIndicators: false) {
         VStack(alignment: .leading, spacing: 72) {
           followingSection(rail: rail)
-          recommendedChannelsSection(rail: rail)
+          recommendedForYouSection(rail: rail)
+          topStreamsSection(rail: rail)
           recommendedCategoriesSection(rail: rail)
           authBanner
         }
@@ -242,15 +275,13 @@ struct HomeView: View {
 
         Spacer()
 
-        Button("Refresh") {
-          Task {
-            await refreshFollowedChannelsIfNeeded(force: true)
-            await refreshRecommendationsIfNeeded(force: true)
-            requestFocusIfPossible(force: true)
-          }
+        Button {
+          performManualRefresh()
+        } label: {
+          Image(systemName: "arrow.clockwise")
+            .font(.system(size: 28, weight: .semibold))
         }
-
-        streamCardSettingsMenu
+        .accessibilityLabel("Refresh")
       }
 
       if let errorMessage = follows.errorMessage {
@@ -306,14 +337,77 @@ struct HomeView: View {
   }
 
   @ViewBuilder
-  private func recommendedChannelsSection(rail: ChannelRailMetrics) -> some View {
-    let followedIDs = Set(follows.channels.map(\.id))
-    let recommended = recommendations.channels.filter { !followedIDs.contains($0.id) }
+  private func recommendedForYouSection(rail: ChannelRailMetrics) -> some View {
+    let channels = personalized.channels
 
-    if !recommended.isEmpty {
+    if personalizedEnabled, !channels.isEmpty {
       VStack(alignment: .leading, spacing: 2) {
         HStack {
-          Text("Recommended channels")
+          Text("Recommended for you")
+            .font(.system(size: 32, weight: .bold))
+
+          if personalized.isLoading {
+            ProgressView()
+              .scaleEffect(0.85)
+          }
+
+          Spacer()
+        }
+
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: rail.spacing) {
+            ForEach(channels) { channel in
+              let itemID = "foryou-\(channel.id)"
+              let isFocused = focusedItemID == itemID
+
+              StreamChannelCard(
+                channel: channel,
+                isFocused: isFocused,
+                layout: .rail(
+                  mediaWidth: rail.mediaWidth,
+                  mediaHeight: rail.mediaHeight,
+                  focusHorizontalInset: focusHorizontalInset,
+                  focusVerticalInset: focusVerticalInset,
+                  cardCornerRadius: cardCornerRadius,
+                  mediaCornerRadius: mediaCornerRadius
+                ),
+                showsGameName: true,
+                onWatch: { selectedChannel = $0 },
+                onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
+              )
+              .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
+              .focusable(true)
+              .focused($focusedItemID, equals: itemID)
+              .focusEffectDisabled()
+              .onTapGesture {
+                selectedChannel = channel
+              }
+              .accessibilityAddTraits(.isButton)
+              .scaleEffect(isFocused ? focusedCardScale : 1)
+              .animation(.easeOut(duration: 0.14), value: isFocused)
+              .zIndex(isFocused ? 2 : 0)
+            }
+          }
+          .padding(.vertical, channelRailVerticalPadding)
+        }
+        .scrollClipDisabled()
+      }
+      .focusSection()
+    }
+  }
+
+  @ViewBuilder
+  private func topStreamsSection(rail: ChannelRailMetrics) -> some View {
+    let followedIDs = Set(follows.channels.map(\.id))
+    let personalizedLogins = Set(personalized.channels.map { $0.login.lowercased() })
+    let top = recommendations.channels.filter {
+      !followedIDs.contains($0.id) && !personalizedLogins.contains($0.login.lowercased())
+    }
+
+    if !top.isEmpty {
+      VStack(alignment: .leading, spacing: 2) {
+        HStack {
+          Text("Top streams")
             .font(.system(size: 32, weight: .bold))
 
           if recommendations.isLoading {
@@ -326,8 +420,8 @@ struct HomeView: View {
 
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: rail.spacing) {
-            ForEach(recommended) { channel in
-              let itemID = "recommended-\(channel.id)"
+            ForEach(top) { channel in
+              let itemID = "topstreams-\(channel.id)"
               let isFocused = focusedItemID == itemID
 
               StreamChannelCard(
@@ -406,21 +500,6 @@ struct HomeView: View {
       }
       .focusSection()
     }
-  }
-
-  private var streamCardSettingsMenu: some View {
-    Menu {
-      Picker("Card Size", selection: $streamCardSizeRaw) {
-        ForEach(StreamCardSize.allCases) { size in
-          Text("\(size.title) · \(size.subtitle)")
-            .tag(size.rawValue)
-        }
-      }
-      // Future: a "Search" entry point can be added here as another menu item.
-    } label: {
-      Icon(glyph: .dimensions, size: 34)
-    }
-    .accessibilityLabel("View settings")
   }
 
   private func channelRailMetrics(for availableWidth: CGFloat, trailingSafeArea: CGFloat = 0) -> ChannelRailMetrics {
@@ -517,6 +596,23 @@ struct HomeView: View {
     }
   }
 
+  /// Force-refreshes every Home rail and surfaces a brief toast so the viewer
+  /// gets feedback that a refresh actually happened. Triggered by the header
+  /// Refresh button. Ignores taps while a refresh is already running.
+  private func performManualRefresh() {
+    guard refreshToast == nil else { return }
+    Task {
+      withAnimation(.easeOut(duration: 0.25)) { refreshToast = .refreshing }
+      await refreshFollowedChannelsIfNeeded(force: true)
+      await refreshRecommendationsIfNeeded(force: true)
+      await refreshPersonalizedIfNeeded(force: true)
+      requestFocusIfPossible(force: true)
+      withAnimation(.easeOut(duration: 0.25)) { refreshToast = .done }
+      try? await Task.sleep(for: .seconds(1.6))
+      withAnimation(.easeOut(duration: 0.25)) { refreshToast = nil }
+    }
+  }
+
   private func refreshFollowedChannelsIfNeeded(force: Bool) async {
     guard force || shouldAutoRefreshFollowedChannels() else { return }
     await follows.refresh(using: auth)
@@ -527,6 +623,16 @@ struct HomeView: View {
     guard force || shouldAutoRefreshRecommendations() else { return }
     await recommendations.refresh()
     publishTopShelfSnapshot()
+  }
+
+  private func refreshPersonalizedIfNeeded(force: Bool) async {
+    guard force || shouldAutoRefreshPersonalized() else { return }
+    await personalized.refresh(
+      follows: follows.channels,
+      followedCategories: follows.followedCategories,
+      followedLogins: follows.followedLogins,
+      history: watchHistory
+    )
   }
 
   private func publishTopShelfSnapshot() {
@@ -585,8 +691,53 @@ struct HomeView: View {
     guard let lastUpdatedAt = recommendations.lastUpdatedAt else { return true }
     return Date().timeIntervalSince(lastUpdatedAt) >= autoRefreshStaleInterval
   }
+
+  private func shouldAutoRefreshPersonalized() -> Bool {
+    guard !personalized.isLoading else { return false }
+    guard let lastUpdatedAt = personalized.lastUpdatedAt else { return true }
+    return Date().timeIntervalSince(lastUpdatedAt) >= autoRefreshStaleInterval
+  }
 }
 
 #Preview {
   HomeView(deepLinkRouter: DeepLinkRouter())
+}
+
+// MARK: - Refresh toast
+
+enum RefreshToastState {
+  case refreshing
+  case done
+}
+
+/// Small pill that confirms a manual Home refresh is happening / finished, so a
+/// re-tap of the Home tab gives the viewer visible feedback.
+private struct RefreshToastView: View {
+  let state: RefreshToastState
+
+  var body: some View {
+    HStack(spacing: 14) {
+      switch state {
+      case .refreshing:
+        ProgressView()
+          .scaleEffect(0.9)
+        Text("Refreshing…")
+      case .done:
+        Icon(glyph: .circleCheckFilled, size: 30)
+          .foregroundStyle(.green)
+        Text("Refreshed")
+      }
+    }
+    .font(.headline)
+    .padding(.horizontal, 30)
+    .padding(.vertical, 18)
+    .background {
+      if #available(tvOS 26.0, *) {
+        Capsule().glassEffect(.regular, in: Capsule())
+      } else {
+        Capsule().fill(.ultraThinMaterial)
+      }
+    }
+    .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+  }
 }
