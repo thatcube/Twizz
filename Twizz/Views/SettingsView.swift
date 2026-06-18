@@ -28,7 +28,7 @@ struct SettingsView: View {
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedRecommendationsEnabled = true
   @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
 
-  private let labelColumnWidth: CGFloat = 360
+  private let labelColumnWidth: CGFloat = 560
 
   var body: some View {
     ZStack {
@@ -62,27 +62,27 @@ struct SettingsView: View {
   private var preferencesGroup: some View {
     VStack(spacing: 0) {
       appearanceRow
-        .padding(.vertical, 20)
+        .padding(.vertical, 16)
 
       groupDivider
 
       streamCardRow
-        .padding(.vertical, 20)
+        .padding(.vertical, 16)
 
       groupDivider
 
       chatRow
-        .padding(.vertical, 20)
+        .padding(.vertical, 16)
 
       groupDivider
 
       languageRow
-        .padding(.vertical, 20)
+        .padding(.vertical, 16)
 
       groupDivider
 
       recommendationsRow
-        .padding(.vertical, 20)
+        .padding(.vertical, 16)
     }
     .padding(.horizontal, 28)
     .glassPanel()
