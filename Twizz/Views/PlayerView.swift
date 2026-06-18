@@ -1701,12 +1701,14 @@ struct PlayerView: View {
   private func outgoingRaidBanner(_ raid: OutgoingRaidEvent) -> some View {
     VStack {
       Spacer()
-      HStack(spacing: 24) {
+      HStack(spacing: 20) {
+        Icon(glyph: .userPlus, size: 34)
+          .foregroundStyle(.white)
         VStack(alignment: .leading, spacing: 4) {
           Text("Raiding to \(raid.toDisplayName)")
             .font(.headline).bold()
             .foregroundStyle(.white)
-          Text("Following in \(outgoingRaidSecondsRemaining)s")
+          Text("Auto-following in \(outgoingRaidSecondsRemaining)s · Cancel to stay here")
             .font(.subheadline)
             .foregroundStyle(.white.opacity(0.85))
         }
