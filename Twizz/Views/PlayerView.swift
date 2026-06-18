@@ -299,9 +299,13 @@ struct PlayerView: View {
         .fullScreenCover(item: $channelPageTarget, onDismiss: { resumeAfterChannelPage() }) { target in
           ChannelPageView(
             target: target,
-            showsHeaderWatch: false,
             onWatchChannel: { channel in
-              pendingSwitchLogin = channel.login
+              // Tapping the live card of the channel we're already watching just
+              // resumes playback; picking a *different* channel (e.g. from the
+              // "More like this" rail) switches the player to it on dismiss.
+              if channel.login.caseInsensitiveCompare(activeChannel) != .orderedSame {
+                pendingSwitchLogin = channel.login
+              }
               channelPageTarget = nil
             }
           )

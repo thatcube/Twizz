@@ -9,10 +9,7 @@ import SwiftUI
 /// of being a dead info card. tvOS has no browser, so social links are plain text.
 struct ChannelPageView: View {
   let target: ChannelPageTarget
-  /// Shows the header "Watch Live" button for *this* channel. Disabled when
-  /// opened from inside the player (already watching this channel).
-  var showsHeaderWatch: Bool = true
-  /// Watches a live channel — either this channel (header button) or one picked
+  /// Watches a live channel — either *this* channel (the live card) or one picked
   /// from the "More like this" rail. The presenter decides what "watch" means
   /// (open the player, or switch the already-open player to that channel).
   var onWatchChannel: ((FollowedChannel) -> Void)?
@@ -32,8 +29,7 @@ struct ChannelPageView: View {
   @State private var onDemandItem: OnDemandItem?
   @FocusState private var focusedID: String?
 
-  private let bannerHeight: CGFloat = 240
-  private let avatarSize: CGFloat = 104
+  private let avatarSize: CGFloat = 96
   private let tileWidth: CGFloat = 360
   private var tileMediaHeight: CGFloat { tileWidth * 9 / 16 }
   // Match the rail-card metrics used across the rest of the app (HomeView).
@@ -41,10 +37,7 @@ struct ChannelPageView: View {
   private let focusVInset: CGFloat = 18
   private let cardCorner: CGFloat = 22
   private let mediaCorner: CGFloat = 18
-
-  private var canWatchThisChannel: Bool {
-    showsHeaderWatch && onWatchChannel != nil && (profile?.isLive ?? false)
-  }
+  private let heroCorner: CGFloat = 28
 
   private var headerName: String {
     profile?.displayName ?? target.displayName ?? target.login
@@ -54,25 +47,35 @@ struct ChannelPageView: View {
     profile?.profileImageURL ?? target.profileImageURL
   }
 
+  /// Twitch's anonymous live preview thumbnail for this channel, used by the
+  /// interactive live card. Refreshed each presentation via a cache-busting id.
+  private var liveThumbnailURL: URL? {
+    let login = (profile?.login ?? target.login).lowercased()
+    guard !login.isEmpty else { return nil }
+    return URL(string: "https://static-cdn.jtvnw.net/previews-ttv/live_user_\(login)-640x360.jpg")
+  }
+
   var body: some View {
-    ZStack {
+    ZStack(alignment: .top) {
       LinearGradient(colors: palette.backgroundColors, startPoint: .top, endPoint: .bottom)
         .ignoresSafeArea()
 
+      bannerBackdrop
+
       ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 34) {
-          hero
-          broadcastSummary
+        VStack(alignment: .leading, spacing: 30) {
+          heroCard
+          liveOrLastCard
           clipsRow
           vodsRow
           similarRow
           aboutAndLinks
         }
+        .padding(.top, 40)
         .padding(.bottom, 60)
       }
       .scrollClipDisabled()
     }
-    .overlay(alignment: .topTrailing) { actionBar }
     .onExitCommand { dismiss() }
     .task(id: target.id) { await loadAll() }
     .fullScreenCover(item: $onDemandItem) { item in
@@ -81,82 +84,60 @@ struct ChannelPageView: View {
     }
   }
 
-  // MARK: - Action bar (Watch / Close)
+  // MARK: - Banner backdrop
 
-  private var actionBar: some View {
-    HStack(spacing: 16) {
-      if canWatchThisChannel {
-        Button {
-          if let profile { onWatchChannel?(followedChannel(from: profile)) }
-        } label: {
-          Label("Watch Live", systemImage: "play.fill")
-            .font(.headline)
-            .padding(.horizontal, 22)
-            .padding(.vertical, 12)
-        }
-        .focused($focusedID, equals: "watch")
+  /// A soft, dimmed wash of the channel banner behind the top of the page, so the
+  /// glass hero card reads as floating over the channel's identity rather than a
+  /// flat color. Fades into the page background.
+  @ViewBuilder
+  private var bannerBackdrop: some View {
+    if let bannerURL = profile?.bannerImageURL {
+      AsyncImage(url: bannerURL) { image in
+        image.resizable().scaledToFill()
+      } placeholder: {
+        Color.clear
       }
-
-      Button {
-        dismiss()
-      } label: {
-        Label("Close", systemImage: "xmark")
-          .font(.headline)
-          .padding(.horizontal, 22)
-          .padding(.vertical, 12)
-      }
-      .focused($focusedID, equals: "close")
-    }
-    .padding(.top, 28)
-    .padding(.trailing, AppLayout.horizontalPadding)
-  }
-
-  // MARK: - Hero
-
-  private var hero: some View {
-    ZStack(alignment: .bottomLeading) {
-      banner
-
-      LinearGradient(
-        colors: [.clear, palette.backgroundColors.last ?? .black],
-        startPoint: .center,
-        endPoint: .bottom
+      .frame(height: 460)
+      .frame(maxWidth: .infinity)
+      .clipped()
+      .overlay(
+        LinearGradient(
+          colors: [
+            Color.black.opacity(0.25),
+            palette.backgroundColors.last ?? .black,
+          ],
+          startPoint: .top,
+          endPoint: .bottom
+        )
       )
-
-      HStack(alignment: .bottom, spacing: 24) {
-        avatar
-        identity
-        Spacer(minLength: 0)
-      }
-      .padding(.horizontal, AppLayout.horizontalPadding)
-      .padding(.bottom, 10)
+      .opacity(0.55)
+      .ignoresSafeArea(edges: .top)
+      .allowsHitTesting(false)
     }
-    .frame(height: bannerHeight)
-    .frame(maxWidth: .infinity)
   }
 
-  private var banner: some View {
-    Group {
-      if let bannerURL = profile?.bannerImageURL {
-        AsyncImage(url: bannerURL) { image in
-          image.resizable().scaledToFill()
-        } placeholder: {
-          bannerFallback
-        }
-      } else {
-        bannerFallback
-      }
-    }
-    .frame(maxWidth: .infinity, maxHeight: bannerHeight)
-    .clipped()
-  }
+  // MARK: - Hero card (channel identity)
 
-  private var bannerFallback: some View {
-    LinearGradient(
-      colors: [Color(red: 0.36, green: 0.25, blue: 0.66), Color(red: 0.20, green: 0.14, blue: 0.42)],
-      startPoint: .topLeading,
-      endPoint: .bottomTrailing
-    )
+  private var heroCard: some View {
+    HStack(alignment: .center, spacing: 22) {
+      avatar
+
+      VStack(alignment: .leading, spacing: 12) {
+        Text(headerName)
+          .font(.system(size: 46, weight: .heavy))
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+          .minimumScaleFactor(0.6)
+
+        infoChips
+      }
+
+      Spacer(minLength: 0)
+    }
+    .padding(24)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: false, palette: palette)
+    .padding(.horizontal, AppLayout.horizontalPadding)
   }
 
   private var avatar: some View {
@@ -173,8 +154,8 @@ struct ChannelPageView: View {
     }
     .frame(width: avatarSize, height: avatarSize)
     .clipShape(Circle())
-    .overlay(Circle().strokeBorder(.white.opacity(0.9), lineWidth: 4))
-    .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
+    .overlay(Circle().strokeBorder(.white.opacity(0.85), lineWidth: 3))
+    .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
   }
 
   private var avatarPlaceholder: some View {
@@ -185,117 +166,150 @@ struct ChannelPageView: View {
     }
   }
 
-  private var identity: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(spacing: 12) {
-        Text(headerName)
-          .font(.system(size: 34, weight: .bold))
-          .foregroundStyle(.white)
-          .lineLimit(1)
-          .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
-        roleBadge
-      }
-
-      HStack(spacing: 18) {
-        if let followers = profile?.followerCount {
-          statLabel(text: "\(Self.compactCount(followers)) followers", systemImage: "heart.fill")
-        }
-        if let joined = profile?.createdAt {
-          statLabel(text: "Joined \(Self.monthYear(joined))", systemImage: "calendar")
-        }
-      }
-      .foregroundStyle(.white.opacity(0.92))
-    }
-    .padding(.bottom, 6)
-  }
-
+  /// Small, glanceable identity facts under the channel name: partner/affiliate
+  /// status, followers, and join date — intentionally understated.
   @ViewBuilder
-  private var roleBadge: some View {
+  private var infoChips: some View {
     if let profile {
-      if profile.isPartner {
-        badge(text: "Partner", systemImage: "checkmark.seal.fill", tint: Color(red: 0.58, green: 0.41, blue: 0.96))
-      } else if profile.isAffiliate {
-        badge(text: "Affiliate", systemImage: "rosette", tint: Color(red: 0.30, green: 0.55, blue: 0.95))
-      }
-    }
-  }
-
-  private func badge(text: String, systemImage: String, tint: Color) -> some View {
-    Label(text, systemImage: systemImage)
-      .font(.subheadline.weight(.semibold))
-      .foregroundStyle(.white)
-      .padding(.horizontal, 12)
-      .padding(.vertical, 5)
-      .background(Capsule().fill(tint.opacity(0.9)))
-  }
-
-  private func statLabel(text: String, systemImage: String) -> some View {
-    Label(text, systemImage: systemImage)
-      .font(.callout.weight(.medium))
-      .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
-  }
-
-  // MARK: - Broadcast summary
-
-  @ViewBuilder
-  private var broadcastSummary: some View {
-    if let profile {
-      Group {
-        if profile.isLive {
-          VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-              liveBadge
-              if let viewers = profile.liveViewerCount {
-                Text("\(Self.plainCount(viewers)) watching")
-                  .font(.headline).foregroundStyle(.secondary)
-              }
-              if let uptime = Self.uptime(since: profile.liveStartedAt) {
-                Text("· \(uptime)").font(.headline).foregroundStyle(.secondary)
-              }
-            }
-            summaryTitleGame(title: profile.liveTitle, game: profile.liveGame)
-          }
-        } else if profile.lastBroadcastTitle != nil || profile.lastBroadcastGame != nil {
-          VStack(alignment: .leading, spacing: 8) {
-            Text(lastSeenLabel(profile.lastBroadcastStartedAt))
-              .font(.headline).foregroundStyle(.secondary)
-            summaryTitleGame(title: profile.lastBroadcastTitle, game: profile.lastBroadcastGame)
-          }
+      HStack(spacing: 10) {
+        if profile.isPartner {
+          infoChip("Partner", systemImage: "checkmark.seal.fill", tint: Color(red: 0.58, green: 0.41, blue: 0.96))
+        } else if profile.isAffiliate {
+          infoChip("Affiliate", systemImage: "rosette", tint: Color(red: 0.30, green: 0.55, blue: 0.95))
+        }
+        if let followers = profile.followerCount {
+          infoChip("\(Self.compactCount(followers)) followers", systemImage: "heart.fill")
+        }
+        if let joined = profile.createdAt {
+          infoChip("Joined \(Self.monthYear(joined))", systemImage: "calendar")
         }
       }
-      .padding(.horizontal, AppLayout.horizontalPadding)
     } else if isLoadingProfile {
-      HStack(spacing: 14) {
+      HStack(spacing: 10) {
         ProgressView()
-        Text("Loading channel…").foregroundStyle(.secondary)
+        Text("Loading channel…").font(.callout).foregroundStyle(.secondary)
       }
-      .padding(.horizontal, AppLayout.horizontalPadding)
     } else if profileFailed {
       Text("Couldn't load this channel's details right now.")
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, AppLayout.horizontalPadding)
+        .font(.callout).foregroundStyle(.secondary)
     }
+  }
+
+  private func infoChip(_ text: String, systemImage: String, tint: Color? = nil) -> some View {
+    Label(text, systemImage: systemImage)
+      .font(.caption.weight(.medium))
+      .foregroundStyle(tint ?? .secondary)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 7)
+      .background(Capsule().fill(Color.primary.opacity(0.08)))
+  }
+
+  // MARK: - Live / last-broadcast card
+
+  @ViewBuilder
+  private var liveOrLastCard: some View {
+    if let profile, profile.isLive {
+      liveCard(profile)
+    } else if let profile, profile.lastBroadcastTitle != nil || profile.lastBroadcastGame != nil {
+      lastBroadcastCard(profile)
+    }
+  }
+
+  /// Full-width, focusable card for a live channel. Selecting it watches the
+  /// stream (open the player, or return to it when opened from the player).
+  private func liveCard(_ profile: ChannelProfile) -> some View {
+    let id = "live"
+    return Button {
+      onWatchChannel?(followedChannel(from: profile))
+    } label: {
+      HStack(spacing: 20) {
+        liveThumbnail
+
+        VStack(alignment: .leading, spacing: 8) {
+          HStack(spacing: 10) {
+            liveBadge
+            if let uptime = Self.uptime(since: profile.liveStartedAt) {
+              metaDot
+              Text("Live for \(uptime)").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+            }
+            if let viewers = profile.liveViewerCount {
+              metaDot
+              Text("\(Self.plainCount(viewers)) viewers").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+            }
+          }
+
+          if let title = profile.liveTitle, !title.isEmpty {
+            Text(title)
+              .font(.headline)
+              .foregroundStyle(.primary)
+              .lineLimit(2)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+
+          if let game = profile.liveGame, !game.isEmpty {
+            Label(game, systemImage: "gamecontroller.fill")
+              .font(.subheadline).foregroundStyle(.secondary)
+          }
+        }
+
+        Spacer(minLength: 0)
+
+        Image(systemName: "play.circle.fill")
+          .font(.system(size: 40))
+          .foregroundStyle(.primary.opacity(0.9))
+      }
+      .padding(18)
+      .frame(maxWidth: .infinity)
+      .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: focusedID == id, palette: palette)
+    }
+    .buttonStyle(.plain)
+    .focused($focusedID, equals: id)
+    .focusEffectDisabled()
+    .scaleEffect(focusedID == id ? 1.01 : 1)
+    .animation(.easeOut(duration: 0.14), value: focusedID)
+    .shadow(color: .black.opacity(focusedID == id ? 0.36 : 0), radius: 22, y: 12)
+    .padding(.horizontal, AppLayout.horizontalPadding)
+  }
+
+  private var liveThumbnail: some View {
+    AsyncImage(url: liveThumbnailURL) { image in
+      image.resizable().scaledToFill()
+    } placeholder: {
+      Rectangle().fill(Color.primary.opacity(0.10))
+    }
+    .frame(width: 248, height: 139.5)
+    .clipShape(RoundedRectangle(cornerRadius: 14))
+  }
+
+  private func lastBroadcastCard(_ profile: ChannelProfile) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(lastSeenLabel(profile.lastBroadcastStartedAt))
+        .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+      if let title = profile.lastBroadcastTitle, !title.isEmpty {
+        Text(title)
+          .font(.headline).foregroundStyle(.primary)
+          .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+      }
+      if let game = profile.lastBroadcastGame, !game.isEmpty {
+        Label(game, systemImage: "gamecontroller.fill")
+          .font(.subheadline).foregroundStyle(.secondary)
+      }
+    }
+    .padding(18)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: false, palette: palette)
+    .padding(.horizontal, AppLayout.horizontalPadding)
   }
 
   private var liveBadge: some View {
     HStack(spacing: 8) {
-      Circle().fill(.red).frame(width: 12, height: 12)
-      Text("LIVE").font(.headline.weight(.bold)).foregroundStyle(.red)
+      Circle().fill(.red).frame(width: 11, height: 11)
+      Text("LIVE").font(.subheadline.weight(.bold)).foregroundStyle(.red)
     }
   }
 
-  @ViewBuilder
-  private func summaryTitleGame(title: String?, game: String?) -> some View {
-    if let title, !title.isEmpty {
-      Text(title)
-        .font(.title3.weight(.semibold))
-        .lineLimit(2)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    if let game, !game.isEmpty {
-      Label(game, systemImage: "gamecontroller.fill")
-        .font(.callout).foregroundStyle(.secondary)
-    }
+  private var metaDot: some View {
+    Text("·").font(.subheadline).foregroundStyle(.secondary)
   }
 
   // MARK: - Clips row
@@ -439,13 +453,21 @@ struct ChannelPageView: View {
         if !links.isEmpty {
           VStack(alignment: .leading, spacing: 8) {
             Text("Links").font(.title3.weight(.bold))
-            HStack(spacing: 36) {
-              ForEach(links.prefix(5)) { link in
-                VStack(alignment: .leading, spacing: 2) {
-                  Text(link.title).font(.callout.weight(.semibold))
-                  Text(Self.prettyURL(link.url))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            HStack(spacing: 28) {
+              ForEach(links.prefix(6)) { link in
+                let platform = SocialPlatform.detect(url: link.url, name: link.title)
+                HStack(spacing: 12) {
+                  Icon(glyph: platform.glyph, size: 30)
+                    .foregroundStyle(platform.tint)
+                  VStack(alignment: .leading, spacing: 2) {
+                    Text(link.title).font(.callout.weight(.semibold))
+                    Text(Self.prettyURL(link.url))
+                      .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                  }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Color.primary.opacity(0.06)))
               }
             }
           }
@@ -527,18 +549,30 @@ struct ChannelPageView: View {
     profile = loadedProfile
     profileFailed = loadedProfile == nil
     isLoadingProfile = false
-    if focusedID == nil {
-      focusedID = canWatchThisChannel ? "watch" : "close"
+    if focusedID == nil, loadedProfile?.isLive == true {
+      focusedID = "live"
     }
 
     let loadedContent = await contentTask
     content = loadedContent
     isLoadingContent = false
+    focusFirstContentIfNeeded()
 
     if let signals = loadedContent?.signals {
       recommendations = await SimilarChannelsEngine.recommend(using: signals)
     }
     isLoadingRecs = false
+  }
+
+  /// Once content lands, drop focus onto the first actionable tile if nothing is
+  /// focused yet (i.e. the channel isn't live, so there's no live card to anchor).
+  private func focusFirstContentIfNeeded() {
+    guard focusedID == nil else { return }
+    if let firstClip = content?.clips.first {
+      focusedID = "clip-\(firstClip.slug)"
+    } else if let firstVOD = content?.videos.first {
+      focusedID = "vod-\(firstVOD.id)"
+    }
   }
 
   private func followedChannel(from profile: ChannelProfile) -> FollowedChannel {

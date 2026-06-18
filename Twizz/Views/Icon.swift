@@ -28,6 +28,20 @@ enum Glyph: String {
   case sidebarRightCollapse = "layout-sidebar-right-collapse"
   case circleCheckFilled = "circle-check-filled"
   case playerPlayFilled = "player-play-filled"
+  // Brand glyphs for channel social links.
+  case brandYoutube = "brand-youtube"
+  case brandInstagram = "brand-instagram"
+  case brandX = "brand-x"
+  case brandTiktok = "brand-tiktok"
+  case brandFacebook = "brand-facebook"
+  case brandDiscord = "brand-discord"
+  case brandTwitch = "brand-twitch"
+  case brandGithub = "brand-github"
+  case brandReddit = "brand-reddit"
+  case brandPatreon = "brand-patreon"
+  case brandSpotify = "brand-spotify"
+  case brandBluesky = "brand-bluesky"
+  case world
 }
 
 /// Renders a vendored Tabler icon as a template image so it tints with the
