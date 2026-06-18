@@ -15,7 +15,6 @@ struct StreamBackdropView: View {
   @State private var activeThumbnailURL: URL?
   @State private var fallbackThumbnailURL: URL?
   @State private var activeThumbnailOpacity = 0.0
-  @State private var fallbackThumbnailOpacity = 0.0
   @State private var activeThumbnailDidLoad = false
   @State private var isShowingVideoPreview = false
   @State private var videoOpacity = 0.0
@@ -26,37 +25,40 @@ struct StreamBackdropView: View {
 
   var body: some View {
     ZStack {
-      if let fallbackThumbnailURL {
-        AsyncImage(url: fallbackThumbnailURL) { image in
-          image
-            .resizable()
-            .scaledToFill()
-        } placeholder: {
-          Color.clear
-        }
-        .opacity(fallbackThumbnailOpacity)
-      }
-
-      if let activeThumbnailURL {
-        AsyncImage(url: activeThumbnailURL) { phase in
-          switch phase {
-          case .success(let image):
+      ZStack {
+        if let fallbackThumbnailURL {
+          AsyncImage(url: fallbackThumbnailURL) { image in
             image
               .resizable()
               .scaledToFill()
-              .onAppear {
-                markActiveThumbnailLoaded(for: activeThumbnailURL)
-              }
-          case .empty:
-            Color.clear
-          case .failure:
-            Color.clear
-          @unknown default:
+          } placeholder: {
             Color.clear
           }
         }
-        .opacity(activeThumbnailOpacity)
+
+        if let activeThumbnailURL {
+          AsyncImage(url: activeThumbnailURL) { phase in
+            switch phase {
+            case .success(let image):
+              image
+                .resizable()
+                .scaledToFill()
+                .onAppear {
+                  markActiveThumbnailLoaded(for: activeThumbnailURL)
+                }
+            case .empty:
+              Color.clear
+            case .failure:
+              Color.clear
+            @unknown default:
+              Color.clear
+            }
+          }
+          .opacity(activeThumbnailOpacity)
+        }
       }
+      .compositingGroup()
+      .drawingGroup(opaque: false, colorMode: .linear)
 
       if isShowingVideoPreview {
         VideoSurface(player: player)
@@ -107,7 +109,6 @@ struct StreamBackdropView: View {
     activeThumbnailURL = initialThumbnailURL
     fallbackThumbnailURL = nil
     activeThumbnailOpacity = initialThumbnailURL == nil ? 0 : 1
-    fallbackThumbnailOpacity = 0
     activeThumbnailDidLoad = initialThumbnailURL != nil
   }
 
@@ -118,7 +119,6 @@ struct StreamBackdropView: View {
     thumbnailCleanupTask = nil
 
     fallbackThumbnailURL = activeThumbnailURL ?? fallbackThumbnailURL
-    fallbackThumbnailOpacity = fallbackThumbnailURL == nil ? 0 : 1
     activeThumbnailURL = thumbnailURL
     activeThumbnailDidLoad = false
     activeThumbnailOpacity = 0
@@ -136,11 +136,12 @@ struct StreamBackdropView: View {
 
     thumbnailCleanupTask?.cancel()
     thumbnailCleanupTask = Task {
-      try? await Task.sleep(for: .milliseconds(420))
+      try? await Task.sleep(for: .milliseconds(620))
       guard !Task.isCancelled else { return }
       await MainActor.run {
         guard fallbackThumbnailURL != nil else { return }
-        fallbackThumbnailOpacity = 0
+        guard activeThumbnailDidLoad else { return }
+        guard activeThumbnailOpacity >= 0.99 else { return }
         fallbackThumbnailURL = nil
         thumbnailCleanupTask = nil
       }
