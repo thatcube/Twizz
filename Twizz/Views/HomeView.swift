@@ -380,12 +380,12 @@ struct HomeView: View {
               let itemID = "category-\(category.id)"
               let isFocused = focusedItemID == itemID
 
-              HomeCategoryCard(
+              CategoryCardView(
                 category: category,
                 isFocused: isFocused,
                 width: categoryWidth
               )
-              .contentShape(RoundedRectangle(cornerRadius: 24))
+              .contentShape(RoundedRectangle(cornerRadius: CategoryCardView.contentShapeCornerRadius))
               .focusable(true)
               .focused($focusedItemID, equals: itemID)
               .focusEffectDisabled()
@@ -583,65 +583,6 @@ struct HomeView: View {
     guard !recommendations.isLoading else { return false }
     guard let lastUpdatedAt = recommendations.lastUpdatedAt else { return true }
     return Date().timeIntervalSince(lastUpdatedAt) >= autoRefreshStaleInterval
-  }
-}
-
-private struct HomeCategoryCard: View {
-  let category: TwitchCategory
-  let isFocused: Bool
-  let width: CGFloat
-
-  @Environment(\.themePalette) private var palette
-
-  private let cornerRadius: CGFloat = 24
-  private let artRatio: CGFloat = 285.0 / 380.0
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      AsyncImage(url: category.boxArtURL) { img in
-        img
-          .resizable()
-          .scaledToFill()
-      } placeholder: {
-        Color.primary.opacity(0.08)
-      }
-      .frame(width: width, height: width / artRatio)
-      .clipShape(RoundedRectangle(cornerRadius: cornerRadius - 2))
-
-      VStack(alignment: .leading, spacing: 4) {
-        Text(category.name)
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
-          .lineLimit(2, reservesSpace: true)
-
-        if let viewers = category.viewerCount {
-          Text("\(viewers) watching")
-            .font(.caption2)
-            .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
-        } else {
-          Text(" ")
-            .font(.caption2)
-            .hidden()
-        }
-      }
-      .padding(.horizontal, 10)
-      .padding(.bottom, 12)
-    }
-    .padding(10)
-    .frame(width: width + 20)
-    .twizzLiquidGlassCard(
-      cornerRadius: cornerRadius,
-      isFocused: isFocused,
-      palette: palette
-    )
-  }
-
-  private var usesLiftFocusedText: Bool {
-    guard isFocused else { return false }
-    if #available(tvOS 26.0, *) {
-      return false
-    }
-    return true
   }
 }
 
