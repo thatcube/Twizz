@@ -111,6 +111,7 @@ struct PlayerView: View {
   @State private var pendingSwitchLogin: String?
   @State private var chatDraft: String = ""
   @State private var chatInputActivationToken: Int = 0
+  @State private var youtubeInputActivationToken: Int = 0
   @State private var isSendingChat = false
   @State private var chatSendError: String?
   /// When chat sync is active, a sent message is held until it appears in the
@@ -1551,23 +1552,43 @@ struct PlayerView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        TextField("YouTube handle/URL (defaults to @\(activeChannel))", text: $experimentalYouTubeMergeChannelOrURL)
-          .textFieldStyle(.plain)
-          .font(.callout)
-          .foregroundStyle(focus == .youtubeMergeURL ? .black : .white)
-          .tint(focus == .youtubeMergeURL ? .black : .white)
-          .lineLimit(1)
-          .padding(.horizontal, 14)
-          .focusEffectDisabled()
-          .frame(height: 44)
-        .frame(maxWidth: .infinity)
-        .background(.white.opacity(focus == .youtubeMergeURL ? 0.86 : 0.09), in: RoundedRectangle(cornerRadius: 11))
-        .overlay(
-          RoundedRectangle(cornerRadius: 11)
-            .stroke(.white.opacity(0.22), lineWidth: 1)
-        )
-        .clipped()
+        Button {
+          // Seed the keyboard with the value the field is showing so editing
+          // starts from the resolved default rather than a blank line.
+          if experimentalYouTubeMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+             !youtubeMergeDefaultTarget.isEmpty {
+            experimentalYouTubeMergeChannelOrURL = youtubeMergeDefaultTarget
+          }
+          youtubeInputActivationToken &+= 1
+        } label: {
+          Text(youtubeMergeDisplayText)
+            .font(.subheadline)
+            .foregroundStyle(focus == .youtubeMergeURL ? .black : .white)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 28)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .modifier(ChatGlassFieldStyle(isFocused: focus == .youtubeMergeURL))
+            .background(
+              ChatKeyboardHostField(
+                text: $experimentalYouTubeMergeChannelOrURL,
+                activationToken: youtubeInputActivationToken,
+                onSubmit: {},
+                returnKeyType: .done,
+                dismissesOnReturn: true,
+                keyboardPrompt: "YouTube handle or channel URL"
+              )
+              .allowsHitTesting(false)
+              .accessibilityHidden(true)
+            )
+        }
+        .buttonStyle(ChatInputButtonStyle())
+        .focusEffectDisabled()
         .focused($focus, equals: .youtubeMergeURL)
+        .frame(maxWidth: .infinity)
+        .animation(.easeOut(duration: 0.18), value: focus == .youtubeMergeURL)
 
         if let status = chat.youtubeStatusMessage, experimentalYouTubeMergeEnabled {
           HStack(spacing: 6) {
@@ -2371,6 +2392,20 @@ struct PlayerView: View {
     updateResolvedQuality()
     focus = .quality
     scheduleHide()
+  }
+
+  /// The effective YouTube merge target shown in the settings input: the manual
+  /// entry when present, otherwise the resolved default handle for the channel.
+  private var youtubeMergeDisplayText: String {
+    let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !manual.isEmpty { return manual }
+    return youtubeMergeDefaultTarget.isEmpty ? "YouTube handle or channel URL" : youtubeMergeDefaultTarget
+  }
+
+  /// The handle the merge falls back to when no manual value is entered.
+  private var youtubeMergeDefaultTarget: String {
+    let base = activeChannel.isEmpty ? channel : activeChannel
+    return base.isEmpty ? "" : "@\(base)"
   }
 
   private func applyExperimentalYouTubeSettings() {
@@ -3308,12 +3343,18 @@ private struct ChatKeyboardHostField: UIViewRepresentable {
   @Binding var text: String
   var activationToken: Int = 0
   var onSubmit: () -> Void = {}
+  /// Keyboard return-key label. The chat composer uses `.send`; the settings
+  /// URL field uses `.done` (and dismisses on return rather than posting).
+  var returnKeyType: UIReturnKeyType = .send
+  /// When true, pressing return resigns first responder and dismisses the
+  /// keyboard instead of keeping the field active.
+  var dismissesOnReturn: Bool = false
 
   /// Shown only as the prompt at the top of the tvOS keyboard entry screen
   /// (the placeholder is surfaced there by the system). It is applied just
   /// before the keyboard presents and cleared when editing ends, so it never
   /// renders inline behind the resting glass capsule.
-  private static let keyboardPrompt = "Your message posts to chat immediately"
+  var keyboardPrompt: String = "Your message posts to chat immediately"
 
   func makeUIView(context: Context) -> UITextField {
     let field = NonFocusableTextField()
@@ -3323,8 +3364,8 @@ private struct ChatKeyboardHostField: UIViewRepresentable {
     field.textColor = .clear
     field.tintColor = .clear
     field.font = .preferredFont(forTextStyle: .callout)
-    field.returnKeyType = .send
-    field.enablesReturnKeyAutomatically = true
+    field.returnKeyType = returnKeyType
+    field.enablesReturnKeyAutomatically = !dismissesOnReturn
     field.autocorrectionType = .no
     field.smartQuotesType = .no
     field.smartDashesType = .no
@@ -3349,7 +3390,7 @@ private struct ChatKeyboardHostField: UIViewRepresentable {
           // Set the prompt right before presenting so the keyboard screen shows
           // it; it's cleared again in textFieldDidEndEditing to avoid leaking
           // behind the resting capsule.
-          uiView.placeholder = Self.keyboardPrompt
+          uiView.placeholder = self.keyboardPrompt
           uiView.becomeFirstResponder()
         }
       }
@@ -3380,6 +3421,10 @@ private struct ChatKeyboardHostField: UIViewRepresentable {
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
       parent.onSubmit()
+      if parent.dismissesOnReturn {
+        textField.resignFirstResponder()
+        return true
+      }
       return false
     }
   }
