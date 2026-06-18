@@ -10,10 +10,10 @@ struct CategoryCardView: View {
 
   @Environment(\.themePalette) private var palette
 
-  /// Aggressive rounding on the outer glass card only; the inner box art keeps a
-  /// tighter radius so it reads as nested inside the card.
-  private let outerCornerRadius: CGFloat = 28
-  private let artCornerRadius: CGFloat = 12
+  /// Match the stream cards: aggressive outer glass rounding with the inner box
+  /// art rounded to the same radius the stream card media uses.
+  private let outerCornerRadius: CGFloat = 30
+  private let artCornerRadius: CGFloat = 18
   private let artRatio: CGFloat = 285.0 / 380.0
 
   var body: some View {
@@ -56,7 +56,7 @@ struct CategoryCardView: View {
 
   /// The corner radius callers should use for the focus/hit-test content shape so
   /// it matches the card's outer rounding.
-  static let contentShapeCornerRadius: CGFloat = 28
+  static let contentShapeCornerRadius: CGFloat = 30
 
   private var usesLiftFocusedText: Bool {
     guard isFocused else { return false }
