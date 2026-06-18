@@ -97,8 +97,8 @@ private struct SearchResultsView: View {
         ForEach(service.categoryResults) { category in
           let id = "category-\(category.id)"
           let isFocused = focusedID == id
-          SearchCategoryCard(category: category, isFocused: isFocused)
-            .contentShape(RoundedRectangle(cornerRadius: 14))
+          CategoryCardView(category: category, isFocused: isFocused)
+            .contentShape(RoundedRectangle(cornerRadius: CategoryCardView.contentShapeCornerRadius))
             .focusable(true)
             .focused($focusedID, equals: id)
             .focusEffectDisabled()
@@ -140,62 +140,5 @@ private struct SearchResultsView: View {
       }
       .focusSection()
     }
-  }
-}
-
-// MARK: - Category Card
-
-private struct SearchCategoryCard: View {
-  let category: TwitchCategory
-  let isFocused: Bool
-
-  @Environment(\.themePalette) private var palette
-
-  private let cornerRadius: CGFloat = 14
-  private let artRatio: CGFloat = 285.0 / 380.0
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      AsyncImage(url: category.boxArtURL) { img in
-        img.resizable().scaledToFill()
-      } placeholder: {
-        Color.primary.opacity(0.08)
-      }
-      .aspectRatio(artRatio, contentMode: .fit)
-      .clipShape(RoundedRectangle(cornerRadius: cornerRadius - 2))
-
-      VStack(alignment: .leading, spacing: 4) {
-        Text(category.name)
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
-          .lineLimit(2, reservesSpace: true)
-
-        if let viewers = category.viewerCount {
-          Text("\(viewers) watching")
-            .font(.caption2)
-            .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
-        } else {
-          Text(" ")
-            .font(.caption2)
-            .hidden()
-        }
-      }
-      .padding(.horizontal, 10)
-      .padding(.bottom, 12)
-    }
-    .padding(10)
-    .twizzLiquidGlassCard(
-      cornerRadius: cornerRadius,
-      isFocused: isFocused,
-      palette: palette
-    )
-  }
-
-  private var usesLiftFocusedText: Bool {
-    guard isFocused else { return false }
-    if #available(tvOS 26.0, *) {
-      return false
-    }
-    return true
   }
 }

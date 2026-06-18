@@ -1,0 +1,10 @@
+# Deliverfile — defaults for upload_to_app_store (deliver).
+# Lane-level options in the Fastfile take precedence over anything here.
+
+app_identifier "com.thatcube.Twizz"
+
+# Twizz has no in-app purchases; skip that precheck step.
+precheck_include_in_app_purchases false
+
+# We manage screenshots/binary explicitly per-lane.
+overwrite_screenshots true
