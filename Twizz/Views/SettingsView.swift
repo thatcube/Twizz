@@ -12,19 +12,23 @@ struct SettingsView: View {
   @Bindable var themeManager: ThemeManager
   let auth: TwitchAuthSession
   var onRequestSignIn: () -> Void = {}
+  var onClearWatchHistory: () -> Void = {}
   var onAccountChanged: () -> Void = {}
   var onRepublishTopShelf: () -> Void = {}
 
   @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
+  @State private var showClearHistoryConfirm = false
   @State private var topShelfStatus = TopShelfStore.diagnosticsSummary()
   @FocusState private var focusedTheme: AppTheme?
   @FocusState private var focusedCardSize: StreamCardSize?
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage("showChatByDefault") private var showChatByDefault = true
+  @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedRecommendationsEnabled = true
+  @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
 
-  private let labelColumnWidth: CGFloat = 360
+  private let labelColumnWidth: CGFloat = 420
 
   var body: some View {
     ZStack {
@@ -58,17 +62,27 @@ struct SettingsView: View {
   private var preferencesGroup: some View {
     VStack(spacing: 0) {
       appearanceRow
-        .padding(.vertical, 20)
+        .padding(.vertical, 16)
 
       groupDivider
 
       streamCardRow
-        .padding(.vertical, 20)
+        .padding(.vertical, 16)
 
       groupDivider
 
       chatRow
-        .padding(.vertical, 20)
+        .padding(.vertical, 16)
+
+      groupDivider
+
+      languageRow
+        .padding(.vertical, 16)
+
+      groupDivider
+
+      recommendationsRow
+        .padding(.vertical, 16)
     }
     .padding(.horizontal, 28)
     .glassPanel()
@@ -82,7 +96,7 @@ struct SettingsView: View {
   private var appearanceRow: some View {
     settingRow(
       title: "Appearance",
-      subtitle: "Theme used throughout the app."
+      subtitle: nil
     ) {
       ForEach(AppTheme.allCases) { theme in
         Button {
@@ -94,13 +108,12 @@ struct SettingsView: View {
         .focused($focusedTheme, equals: theme)
       }
     }
-    .defaultFocus($focusedTheme, AppTheme.system)
   }
 
   private var streamCardRow: some View {
     settingRow(
       title: "Stream Cards",
-      subtitle: "How large stream cards appear on Home and Browse."
+      subtitle: "Card size on Home and Browse."
     ) {
       ForEach(StreamCardSize.allCases) { size in
         Button {
@@ -120,8 +133,8 @@ struct SettingsView: View {
 
   private var chatRow: some View {
     settingRow(
-      title: "Chat",
-      subtitle: "Show chat automatically when you open a stream."
+      title: "Open chat by default",
+      subtitle: nil
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {
@@ -131,6 +144,65 @@ struct SettingsView: View {
         }
         .settingPillStyle(isSelected: showChatByDefault == on)
       }
+    }
+  }
+
+  private var languageRow: some View {
+    settingRow(
+      title: "Stream Language",
+      subtitle: "Only show streams in this language."
+    ) {
+      Menu {
+        ForEach(StreamLanguagePreference.options, id: \.value) { option in
+          Button {
+            streamLanguage = option.value
+          } label: {
+            if streamLanguage == option.value {
+              Label(option.name, systemImage: "checkmark")
+            } else {
+              Text(option.name)
+            }
+          }
+        }
+      } label: {
+        SettingPill(title: StreamLanguagePreference.displayName(streamLanguage), isSelected: false)
+      }
+      .prominentActionButtonStyle()
+    }
+  }
+
+  private var recommendationsRow: some View {
+    settingRow(
+      title: "Recommendations",
+      subtitle: "Based on who you follow and watch. History stays on this Apple TV."
+    ) {
+      ForEach([true, false], id: \.self) { on in
+        Button {
+          personalizedRecommendationsEnabled = on
+        } label: {
+          SettingPill(title: on ? "On" : "Off", isSelected: personalizedRecommendationsEnabled == on)
+        }
+        .settingPillStyle(isSelected: personalizedRecommendationsEnabled == on)
+      }
+
+      Button {
+        showClearHistoryConfirm = true
+      } label: {
+        SettingPill(title: "Clear History", isSelected: false)
+      }
+      .settingPillStyle(isSelected: false)
+    }
+    .confirmationDialog(
+      "Clear watch history?",
+      isPresented: $showClearHistoryConfirm,
+      titleVisibility: .visible
+    ) {
+      Button("Clear History", role: .destructive) {
+        onClearWatchHistory()
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This permanently removes the watch history stored on this device.")
     }
   }
 
@@ -423,10 +495,14 @@ private struct SettingPill: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(title)
           .font(.headline)
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
         if let subtitle {
           Text(subtitle)
             .font(.caption2)
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
         }
       }
 
@@ -452,22 +528,18 @@ extension View {
     }
   }
 
-  /// Selectable option styling: native Liquid Glass with the active option
-  /// rendered prominent. Falls back to bordered styles before tvOS 26.
+  /// Selectable option styling. The selected/unselected appearance is driven by
+  /// a custom `ButtonStyle` that takes `isSelected` as a stored property rather
+  /// than swapping between two different button-style modifiers. Swapping styles
+  /// (e.g. `.glass` ↔ `.glassProminent`) changes the view's identity, so toggling
+  /// an option destroys the focused pill and tvOS snaps focus back to the first
+  /// item. Keeping a single style preserves identity, so focus stays put.
   @ViewBuilder
   fileprivate func settingPillStyle(isSelected: Bool) -> some View {
     if #available(tvOS 26.0, *) {
-      if isSelected {
-        self.buttonStyle(.glassProminent)
-      } else {
-        self.buttonStyle(.glass)
-      }
+      self.buttonStyle(GlassPillButtonStyle(isSelected: isSelected))
     } else {
-      if isSelected {
-        self.buttonStyle(.borderedProminent)
-      } else {
-        self.buttonStyle(.bordered)
-      }
+      self.buttonStyle(BorderedPillButtonStyle(isSelected: isSelected))
     }
   }
 
@@ -479,6 +551,72 @@ extension View {
       self.buttonStyle(.glassProminent)
     } else {
       self.buttonStyle(.borderedProminent)
+    }
+  }
+}
+
+// MARK: - Selectable pill button styles
+
+/// Liquid Glass pill whose selected/focused appearance is rendered inside a
+/// single, stable `ButtonStyle`. Because `isSelected` is a stored property (not
+/// a structural `if` that swaps the whole style), flipping it doesn't change the
+/// button's identity — so toggling an option never tears down the focused pill,
+/// and tvOS keeps focus where it is.
+@available(tvOS 26.0, *)
+private struct GlassPillButtonStyle: ButtonStyle {
+  var isSelected: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    PillBody(configuration: configuration, isSelected: isSelected)
+  }
+
+  private struct PillBody: View {
+    let configuration: ButtonStyleConfiguration
+    let isSelected: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+      configuration.label
+        .glassEffect(
+          isSelected
+            ? .regular.tint(.white.opacity(0.85)).interactive()
+            : .regular.interactive(),
+          in: Capsule()
+        )
+        .overlay(
+          Capsule().strokeBorder(.white.opacity(isFocused ? 0.9 : 0), lineWidth: 4)
+        )
+        .scaleEffect(isFocused ? 1.1 : (configuration.isPressed ? 0.96 : 1))
+        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+  }
+}
+
+/// Pre-tvOS 26 fallback with the same identity-stable structure.
+private struct BorderedPillButtonStyle: ButtonStyle {
+  var isSelected: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    PillBody(configuration: configuration, isSelected: isSelected)
+  }
+
+  private struct PillBody: View {
+    let configuration: ButtonStyleConfiguration
+    let isSelected: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+      configuration.label
+        .foregroundStyle(isSelected ? Color.black : Color.white)
+        .background(
+          Capsule().fill(isSelected ? Color.white.opacity(0.92) : Color.white.opacity(0.14))
+        )
+        .overlay(
+          Capsule().strokeBorder(.white.opacity(isFocused ? 0.9 : 0), lineWidth: 4)
+        )
+        .scaleEffect(isFocused ? 1.1 : 1)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
   }
 }
