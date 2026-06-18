@@ -100,6 +100,7 @@ struct PlayerView: View {
   @State private var chatSyncSendClearTask: Task<Void, Never>?
   @State private var hideTask: Task<Void, Never>?
   @State private var focusRecoveryTask: Task<Void, Never>?
+  @State private var isQualityMenuPresented = false
   @State private var latencyTask: Task<Void, Never>?
   @State private var playbackWatchdogTask: Task<Void, Never>?
   @State private var wallClockLatencySeconds: Double?
@@ -393,6 +394,20 @@ struct PlayerView: View {
         focusRecoveryTask?.cancel()
         lastControlFocus = newFocus
         scheduleHide()
+      } else if newFocus == nil, !isQualityMenuPresented {
+        // tvOS can briefly drop focus to nil after system surfaces (like Menu)
+        // dismiss. Re-assert the last control if focus doesn't come back.
+        focusRecoveryTask?.cancel()
+        let target = lastControlFocus
+        focusRecoveryTask = Task {
+          try? await Task.sleep(for: .milliseconds(140))
+          guard !Task.isCancelled else { return }
+          await MainActor.run {
+            guard showControls, !showChatSettings, !isQualityMenuPresented else { return }
+            guard focus == nil else { return }
+            focus = target
+          }
+        }
       }
     }
     .onChange(of: experimentalYouTubeMergeEnabled) { _, _ in
@@ -543,7 +558,25 @@ struct PlayerView: View {
           selectedOption: preferredQuality,
           buttonLabel: qualityButtonLabel,
           displayLabel: { qualityDisplayLabel($0) },
-          onSelect: { selectQuality(at: $0) }
+          onSelect: { selectQuality(at: $0) },
+          onMenuPresented: {
+            focusRecoveryTask?.cancel()
+            isQualityMenuPresented = true
+          },
+          onMenuDismissed: {
+            isQualityMenuPresented = false
+            focusRecoveryTask?.cancel()
+            focusRecoveryTask = Task {
+              // Let close animation settle, then restore anchor focus if needed.
+              try? await Task.sleep(for: .milliseconds(40))
+              guard !Task.isCancelled else { return }
+              await MainActor.run {
+                guard showControls, !showChatSettings, !isQualityMenuPresented else { return }
+                guard focus == nil else { return }
+                focus = .quality
+              }
+            }
+          }
         )
         .equatable()
         .focused($focus, equals: .quality)
@@ -2331,6 +2364,8 @@ private struct QualityMenu: View, Equatable {
   let buttonLabel: String
   let displayLabel: (String) -> String
   let onSelect: (Int) -> Void
+  let onMenuPresented: () -> Void
+  let onMenuDismissed: () -> Void
 
   nonisolated static func == (lhs: QualityMenu, rhs: QualityMenu) -> Bool {
     lhs.options == rhs.options
@@ -2360,6 +2395,8 @@ private struct QualityMenu: View, Equatable {
         }
       }
       .pickerStyle(.inline)
+      .onAppear(perform: onMenuPresented)
+      .onDisappear(perform: onMenuDismissed)
     } label: {
       Text(buttonLabel)
         .font(.subheadline)
