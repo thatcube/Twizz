@@ -530,9 +530,15 @@ struct PlayerView: View {
     }
     .onMoveCommand { direction in
       if !showControls {
-        // Directional movement should immediately surface controls and
-        // land on chat toggle so moving off chat feels instant.
-        revealControls(preferredFocus: .chatToggle)
+        // Directional movement should immediately surface controls. Pressing
+        // right with chat open means the user wants the composer, so land
+        // there directly instead of bouncing focus to the chat toggle first.
+        switch direction {
+        case .right where showChat:
+          revealControls(preferredFocus: .chatInput)
+        default:
+          revealControls(preferredFocus: .chatToggle)
+        }
       } else {
         scheduleHide()
       }
