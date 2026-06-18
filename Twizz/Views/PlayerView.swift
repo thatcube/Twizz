@@ -89,6 +89,7 @@ struct PlayerView: View {
   @State private var streamTitle: String = ""
   @State private var channelDisplayName: String = ""
   @State private var channelAvatarURL: URL?
+  @State private var channelPageTarget: ChannelPageTarget?
   @State private var chatDraft: String = ""
   @State private var chatInputActivationToken: Int = 0
   @State private var isSendingChat = false
@@ -424,6 +425,10 @@ struct PlayerView: View {
     .fullScreenCover(isPresented: $showSignInSheet) {
       SignInView(auth: auth)
     }
+    .fullScreenCover(item: $channelPageTarget, onDismiss: { resumeAfterChannelPage() }) { target in
+      ChannelPageView(target: target)
+        .environment(\.themePalette, palette)
+    }
   }
 
   // MARK: - Video + controls
@@ -493,7 +498,7 @@ struct PlayerView: View {
     HStack(alignment: .top, spacing: 24) {
       HStack(alignment: .top, spacing: 12) {
         Button {
-          scheduleHide()
+          presentChannelPage()
         } label: {
           Group {
             if let channelAvatarURL {
@@ -897,6 +902,37 @@ struct PlayerView: View {
         }
         hideControls()
       }
+    }
+  }
+
+  // MARK: - Channel page
+
+  /// Opens the full-screen channel page for the active channel. The live stream
+  /// is paused while the page is up, and its latency monitor + watchdog are
+  /// suspended so the non-advancing playhead isn't mistaken for a stall.
+  private func presentChannelPage() {
+    hideTask?.cancel()
+    focusRecoveryTask?.cancel()
+    stopPlaybackWatchdog()
+    stopLatencyMonitor()
+    player.pause()
+    channelPageTarget = ChannelPageTarget(
+      login: activeChannel,
+      displayName: channelDisplayName.isEmpty ? activeChannel : channelDisplayName,
+      profileImageURL: channelAvatarURL
+    )
+  }
+
+  /// Resumes live playback once the channel page is dismissed.
+  private func resumeAfterChannelPage() {
+    startPlayback()
+    startLatencyMonitor()
+    startPlaybackWatchdog()
+    if showControls {
+      focus = .streamInfo
+      scheduleHide()
+    } else {
+      focus = .video
     }
   }
 
