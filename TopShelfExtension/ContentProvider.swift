@@ -10,13 +10,7 @@ final class ContentProvider: TVTopShelfContentProvider {
     override func loadTopShelfContent(
         completionHandler: @escaping (TVTopShelfContent?) -> Void
     ) {
-        let snapshot = TopShelfStore.load()
-        TopShelfStore.appendExtensionBreadcrumb(
-            "invoked; snapshot=\(snapshot != nil) sections=\(snapshot?.sections.count ?? -1)"
-        )
-
-        guard let snapshot, !snapshot.sections.isEmpty else {
-            TopShelfStore.appendExtensionBreadcrumb("returning nil (no snapshot/sections)")
+        guard let snapshot = TopShelfStore.load(), !snapshot.sections.isEmpty else {
             completionHandler(nil)
             return
         }
@@ -31,12 +25,10 @@ final class ContentProvider: TVTopShelfContentProvider {
             }
 
         guard !collections.isEmpty else {
-            TopShelfStore.appendExtensionBreadcrumb("returning nil (no collections)")
             completionHandler(nil)
             return
         }
 
-        TopShelfStore.appendExtensionBreadcrumb("returning \(collections.count) collections")
         completionHandler(TVTopShelfSectionedContent(sections: collections))
     }
 

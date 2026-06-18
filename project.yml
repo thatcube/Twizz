@@ -86,4 +86,12 @@ targets:
         DEVELOPMENT_TEAM: N8Z5T4AK3X
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: TopShelfExtension/Info.plist
+        # tvOS's legacy TVExtensionMain entry point (set by the
+        # com.apple.product-type.tv-app-extension product type) is a no-op stub
+        # in modern tvOS — it simply returns, so the extension process launched
+        # and exited immediately without ever instantiating the principal class,
+        # leaving the Top Shelf empty. Modern Top Shelf extensions must enter
+        # through NSExtensionMain (provided by Foundation), which sets up the
+        # ExtensionKit/XPC runtime and instantiates ContentProvider.
+        LD_ENTRY_POINT: _NSExtensionMain
         CODE_SIGN_ENTITLEMENTS: TopShelfExtension/TopShelfExtension.entitlements
