@@ -20,10 +20,26 @@ struct SimilarChannelsEngine {
   private static let candidatesPerCategory = 40
   private static let maxResults = 12
 
-  /// Returns up to `maxResults` recommended live channels ranked by similarity to
-  /// the channel described by `signals`. Returns an empty list if there is not
-  /// enough signal (e.g. a brand-new channel with no broadcast history).
-  static func recommend(using signals: ChannelSignals) async -> [FollowedChannel] {
+  /// Returns recommended live channels ranked by similarity to the channel
+  /// described by `signals`. Returns an empty list if there is not enough signal
+  /// (e.g. a brand-new channel with no broadcast history).
+  ///
+  /// - Parameters:
+  ///   - seedLimit: How many of the channel's top categories to search from.
+  ///   - resultLimit: Maximum channels to return.
+  ///   - maxPerCategory: When set, no single category may occupy more than this
+  ///     many slots — diversifying rails that would otherwise be swept by the
+  ///     viewer's single strongest category. `nil` keeps the pure score ranking.
+  ///
+  /// Results are always filtered to the viewer's `StreamLanguagePreference` (a
+  /// hard filter — unlike the soft language *score*), so an English-only viewer
+  /// never sees, say, French GTA streams just because the category matches.
+  static func recommend(
+    using signals: ChannelSignals,
+    seedLimit: Int = seedCategoryCount,
+    resultLimit: Int = maxResults,
+    maxPerCategory: Int? = nil
+  ) async -> [FollowedChannel] {
     // Seed the search from the channel's most defining categories. Prefer its
     // *specific* niches over generic catch-alls (Just Chatting, etc.) so a
     // sanctuary seeds from "Animals, Aquariums, and Zoos" rather than the
@@ -32,7 +48,7 @@ struct SimilarChannelsEngine {
     let ranked = signals.rankedCategories
     let specific = ranked.filter { !ChannelContentService.isGeneric($0) }
     let seedSource = specific.isEmpty ? ranked : specific
-    let seeds = Array(seedSource.prefix(seedCategoryCount))
+    let seeds = Array(seedSource.prefix(max(seedLimit, 1)))
     guard !seeds.isEmpty else { return [] }
 
     // Fetch candidate pools for each seed category in parallel.
@@ -56,12 +72,53 @@ struct SimilarChannelsEngine {
       byLogin[key] = candidate
     }
 
-    let scored = byLogin.values
+    // Hard language filter: keep only streams in the viewer's chosen language
+    // (Twitch returns `broadcastSettings.language` as an uppercase enum token, so
+    // these compare directly). Streams with an unknown language are dropped while
+    // a filter is active so non-matching streams can't leak through.
+    let requiredLanguage = StreamLanguagePreference.currentToken()
+    let candidates = byLogin.values.filter { candidate in
+      guard let required = requiredLanguage else { return true }
+      return candidate.language?.uppercased() == required
+    }
+
+    let ranking = candidates
       .map { (candidate: $0, score: score($0, against: signals)) }
       .sorted { $0.score > $1.score }
-      .prefix(maxResults)
 
-    return scored.map { $0.candidate.asFollowedChannel }
+    let selected = select(from: ranking, limit: resultLimit, maxPerCategory: maxPerCategory)
+    return selected.map { $0.candidate.asFollowedChannel }
+  }
+
+  /// Applies the optional per-category diversity cap to a score-ranked list,
+  /// backfilling by score if the cap leaves fewer than `limit` results.
+  private static func select(
+    from ranked: [(candidate: CandidateStream, score: Double)],
+    limit: Int,
+    maxPerCategory: Int?
+  ) -> [(candidate: CandidateStream, score: Double)] {
+    guard let cap = maxPerCategory, cap > 0 else {
+      return Array(ranked.prefix(limit))
+    }
+
+    var counts: [String: Int] = [:]
+    var picked: [(candidate: CandidateStream, score: Double)] = []
+    for item in ranked {
+      guard picked.count < limit else { break }
+      let key = (item.candidate.gameName ?? item.candidate.gameDisplayName ?? "").lowercased()
+      if counts[key, default: 0] >= cap { continue }
+      counts[key, default: 0] += 1
+      picked.append(item)
+    }
+
+    if picked.count < limit {
+      let pickedLogins = Set(picked.map { $0.candidate.login.lowercased() })
+      for item in ranked where !pickedLogins.contains(item.candidate.login.lowercased()) {
+        guard picked.count < limit else { break }
+        picked.append(item)
+      }
+    }
+    return picked
   }
 
   // MARK: - Scoring

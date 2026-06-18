@@ -31,6 +31,7 @@ struct HomeView: View {
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedEnabled = true
+  @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
 
   @Environment(\.colorScheme) private var systemColorScheme
   @FocusState private var focusedItemID: String?
@@ -184,6 +185,12 @@ struct HomeView: View {
     }
     .onChange(of: personalizedEnabled) { _, _ in
       Task { await refreshPersonalizedIfNeeded(force: true) }
+    }
+    .onChange(of: streamLanguage) { _, _ in
+      Task {
+        await refreshRecommendationsIfNeeded(force: true)
+        await refreshPersonalizedIfNeeded(force: true)
+      }
     }
     .fullScreenCover(item: $selectedChannel) { channel in
       PlayerView(channel: channel.login, auth: auth)

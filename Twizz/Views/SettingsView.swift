@@ -26,6 +26,7 @@ struct SettingsView: View {
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage("showChatByDefault") private var showChatByDefault = true
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedRecommendationsEnabled = true
+  @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
 
   private let labelColumnWidth: CGFloat = 360
 
@@ -71,6 +72,11 @@ struct SettingsView: View {
       groupDivider
 
       chatRow
+        .padding(.vertical, 20)
+
+      groupDivider
+
+      languageRow
         .padding(.vertical, 20)
 
       groupDivider
@@ -139,6 +145,30 @@ struct SettingsView: View {
         }
         .settingPillStyle(isSelected: showChatByDefault == on)
       }
+    }
+  }
+
+  private var languageRow: some View {
+    settingRow(
+      title: "Stream Language",
+      subtitle: "Only show live streams broadcast in this language across Home and recommendations."
+    ) {
+      Menu {
+        ForEach(StreamLanguagePreference.options, id: \.value) { option in
+          Button {
+            streamLanguage = option.value
+          } label: {
+            if streamLanguage == option.value {
+              Label(option.name, systemImage: "checkmark")
+            } else {
+              Text(option.name)
+            }
+          }
+        }
+      } label: {
+        SettingPill(title: StreamLanguagePreference.displayName(streamLanguage), isSelected: false)
+      }
+      .settingPillStyle(isSelected: true)
     }
   }
 
