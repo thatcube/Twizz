@@ -420,12 +420,12 @@ struct PlayerView: View {
       {
         VStack {
           HStack {
-            latencyBadge
+            LatencyBadge(color: latencyColor, label: latencyLabel)
             Spacer()
           }
           if showLatencyDiagnostics {
             HStack {
-              diagnosticsPanel
+              DiagnosticsPanel(lines: diagnosticsLines, events: diagEvents)
               Spacer()
             }
             .padding(.top, 12)
@@ -600,60 +600,7 @@ struct PlayerView: View {
     )
   }
 
-  private var latencyBadge: some View {
-    let shape = Capsule(style: .continuous)
-    return HStack(spacing: 8) {
-      Circle()
-        .fill(latencyColor)
-        .frame(width: 8, height: 8)
-
-      Text(latencyLabel)
-        .font(.caption)
-        .fontWeight(.semibold)
-        .foregroundStyle(.white)
-    }
-    .padding(.horizontal, 14)
-    .padding(.vertical, 9)
-    // Frosted material rather than focusable Liquid Glass: this is a passive
-    // HUD readout, so it should read as an info chip, not a pressable control.
-    .background(.ultraThinMaterial, in: shape)
-    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
-    .clipShape(shape)
-  }
-
   // MARK: - Diagnostics overlay
-
-  /// Live, read-off-the-screen diagnostics for troubleshooting freezes/jumps.
-  /// Everything here is measured from the player/current item — no estimates.
-  private var diagnosticsPanel: some View {
-    let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-    return VStack(alignment: .leading, spacing: 4) {
-      Text("DIAGNOSTICS")
-        .font(.system(size: 13, weight: .heavy).monospaced())
-        .foregroundStyle(.white.opacity(0.6))
-
-      ForEach(diagnosticsLines, id: \.self) { line in
-        Text(line)
-          .font(.system(size: 14, weight: .semibold).monospaced())
-          .foregroundStyle(.white)
-      }
-
-      if !diagEvents.isEmpty {
-        Divider().overlay(.white.opacity(0.2)).padding(.vertical, 2)
-        ForEach(diagEvents) { event in
-          Text(diagnosticsEventLine(event))
-            .font(.system(size: 13, weight: .regular).monospaced())
-            .foregroundStyle(.white.opacity(0.8))
-        }
-      }
-    }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 12)
-    .frame(maxWidth: 520, alignment: .leading)
-    .background(.black.opacity(0.55), in: shape)
-    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
-    .clipShape(shape)
-  }
 
   /// The fixed metric rows, each computed live from the current item.
   private var diagnosticsLines: [String] {
@@ -707,11 +654,6 @@ struct PlayerView: View {
     lines.append("Stability score: \(diagInstabilityScore) · Auto-fallbacks: \(diagAdaptiveFallbackCount)")
 
     return lines
-  }
-
-  private func diagnosticsEventLine(_ event: DiagnosticsEvent) -> String {
-    let ago = max(0, Int(Date().timeIntervalSince(event.at).rounded()))
-    return "• \(event.text)  (\(ago)s ago)"
   }
 
   private func diagFormat(_ value: Double, decimals: Int) -> String {
@@ -2556,4 +2498,76 @@ private struct DiagnosticsEvent: Identifiable {
   let id = UUID()
   let at: Date
   let text: String
+}
+
+/// Passive latency HUD chip. Its own `View` type so the per-second latency
+/// refresh only invalidates this chip, not the whole `PlayerView` body.
+private struct LatencyBadge: View {
+  let color: Color
+  let label: String
+
+  var body: some View {
+    let shape = Capsule(style: .continuous)
+    return HStack(spacing: 8) {
+      Circle()
+        .fill(color)
+        .frame(width: 8, height: 8)
+
+      Text(label)
+        .font(.caption)
+        .fontWeight(.semibold)
+        .foregroundStyle(.white)
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 9)
+    // Frosted material rather than focusable Liquid Glass: this is a passive
+    // HUD readout, so it should read as an info chip, not a pressable control.
+    .background(.ultraThinMaterial, in: shape)
+    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    .clipShape(shape)
+  }
+}
+
+/// Live, read-off-the-screen diagnostics for troubleshooting freezes/jumps.
+/// Its own `View` type so the per-second diagnostics refresh invalidates only
+/// this panel. The parent computes `lines` (it owns the player state) and
+/// passes them in; rendering lives here.
+private struct DiagnosticsPanel: View {
+  let lines: [String]
+  let events: [DiagnosticsEvent]
+
+  var body: some View {
+    let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+    return VStack(alignment: .leading, spacing: 4) {
+      Text("DIAGNOSTICS")
+        .font(.system(size: 13, weight: .heavy).monospaced())
+        .foregroundStyle(.white.opacity(0.6))
+
+      ForEach(lines, id: \.self) { line in
+        Text(line)
+          .font(.system(size: 14, weight: .semibold).monospaced())
+          .foregroundStyle(.white)
+      }
+
+      if !events.isEmpty {
+        Divider().overlay(.white.opacity(0.2)).padding(.vertical, 2)
+        ForEach(events) { event in
+          Text(Self.eventLine(event))
+            .font(.system(size: 13, weight: .regular).monospaced())
+            .foregroundStyle(.white.opacity(0.8))
+        }
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
+    .frame(maxWidth: 520, alignment: .leading)
+    .background(.black.opacity(0.55), in: shape)
+    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    .clipShape(shape)
+  }
+
+  private static func eventLine(_ event: DiagnosticsEvent) -> String {
+    let ago = max(0, Int(Date().timeIntervalSince(event.at).rounded()))
+    return "• \(event.text)  (\(ago)s ago)"
+  }
 }
