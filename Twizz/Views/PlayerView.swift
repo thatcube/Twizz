@@ -95,7 +95,7 @@ struct PlayerView: View {
   @State private var resolvedQualityName: String?
   @State private var showSignInSheet = false
   @State private var showChatSettings = false
-  @State private var showChatSettingsAdvanced = false
+  @State private var chatSettingsPage: ChatSettingsPage = .main
   @State private var showControls = false
   @State private var streamTitle: String = ""
   @State private var channelDisplayName: String = ""
@@ -236,6 +236,7 @@ struct PlayerView: View {
     // Main settings page
     case chatPresetOption(Int)
     case chatAdvancedButton
+    case chatMoreButton
     case chatWidthOption(Int)
     case chatLayoutOption(Int)
     case chatSyncToggle
@@ -252,12 +253,23 @@ struct PlayerView: View {
     case chatResetButton
   }
 
+  /// Which page of the chat settings panel is currently shown.
+  enum ChatSettingsPage: Hashable {
+    /// Top-level: presets, layout, and drill-in rows.
+    case main
+    /// Fine-grained version of the Size preset (text/emote/line/spacing).
+    case appearance
+    /// Playback, stream sync, diagnostics, and experimental toggles.
+    case playback
+  }
+
   /// The granular dimensions adjusted by the Advanced page steppers.
   enum ChatStepperField: Hashable {
     case text
     case emote
     case lineHeight
     case messageSpacing
+    case width
   }
 
   private var chatTextSize: CGFloat {
@@ -439,8 +451,12 @@ struct PlayerView: View {
     }
     .onExitCommand {
       if showChatSettings {
-        showChatSettings = false
-        focus = .chatSettingsButton
+        if chatSettingsPage != .main {
+          closeSubpage()
+        } else {
+          showChatSettings = false
+          focus = .chatSettingsButton
+        }
       } else if showControls {
         hideControls()
       } else {
@@ -1186,6 +1202,7 @@ struct PlayerView: View {
     case .chatSettingsButton,
       .chatPresetOption,
       .chatAdvancedButton,
+      .chatMoreButton,
       .chatWidthOption,
       .chatLayoutOption,
       .chatSyncToggle,
@@ -1258,7 +1275,7 @@ struct PlayerView: View {
     .animation(.easeOut(duration: 0.18), value: showChatSettings)
   }
 
-  private let chatSettingsPanelWidth: CGFloat = 600
+  private let chatSettingsPanelWidth: CGFloat = 520
   private let chatSettingsPanelGap: CGFloat = 16
 
   // MARK: - Floating chat settings
@@ -1286,20 +1303,25 @@ struct PlayerView: View {
 
   /// The focus target for the first control on whichever settings page is shown.
   private var firstChatSettingsFocus: Focusable {
-    if showChatSettingsAdvanced {
+    switch chatSettingsPage {
+    case .appearance, .playback:
       return .chatAdvancedBack
+    case .main:
+      let index = (activeChatPreset.flatMap { ChatAppearancePreset.allCases.firstIndex(of: $0) }) ?? 1
+      return .chatPresetOption(index)
     }
-    let index = (activeChatPreset.flatMap { ChatAppearancePreset.allCases.firstIndex(of: $0) }) ?? 1
-    return .chatPresetOption(index)
   }
 
   private var chatSettingsPanel: some View {
     ScrollView(.vertical, showsIndicators: false) {
       Group {
-        if showChatSettingsAdvanced {
-          advancedSettingsContent
-        } else {
+        switch chatSettingsPage {
+        case .main:
           mainSettingsContent
+        case .appearance:
+          appearanceSettingsContent
+        case .playback:
+          playbackSettingsContent
         }
       }
       .padding(.vertical, 18)
@@ -1323,7 +1345,7 @@ struct PlayerView: View {
   private var mainSettingsContent: some View {
     VStack(alignment: .leading, spacing: 18) {
       VStack(alignment: .leading, spacing: 7) {
-        settingsSectionHeader("Size")
+        settingsSectionHeader("Appearance")
 
         HStack(spacing: 8) {
           ForEach(Array(ChatAppearancePreset.allCases.enumerated()), id: \.element) { index, preset in
@@ -1335,20 +1357,20 @@ struct PlayerView: View {
               applyChatPreset(preset)
             }
           }
-
-          settingsPill(
-            title: activeChatPreset == nil ? "Custom" : "Advanced",
-            isSelected: false,
-            icon: .adjustmentsHorizontal,
-            focusTag: .chatAdvancedButton
-          ) {
-            openAdvancedSettings()
-          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
 
-        Text("Presets adjust text, emote, line height, and spacing together. Use Advanced for fine control.")
+        settingsDisclosureRow(
+          title: "Advanced",
+          detail: activeChatPreset?.title ?? "Custom",
+          focusTag: .chatAdvancedButton
+        ) {
+          openSubpage(.appearance)
+        }
+        .focusSection()
+
+        Text("Presets adjust text, emote, line height, and spacing together. Use Advanced for per-value control.")
           .font(.caption2)
           .foregroundStyle(.white.opacity(0.55))
           .fixedSize(horizontal: false, vertical: true)
@@ -1356,20 +1378,7 @@ struct PlayerView: View {
 
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Chat Width")
-
-        HStack(spacing: 8) {
-          ForEach(Array(ChatWidthMode.allCases.enumerated()), id: \.element) { index, mode in
-            settingsPill(
-              title: mode.title,
-              isSelected: chatWidth == mode.width,
-              focusTag: .chatWidthOption(index)
-            ) {
-              chatWidthValue = Double(mode.width)
-            }
-          }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .focusSection()
+        settingsStepperRow(.width)
       }
 
       VStack(alignment: .leading, spacing: 7) {
@@ -1395,6 +1404,23 @@ struct PlayerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
       }
+
+      settingsDisclosureRow(
+        title: "Playback & Diagnostics",
+        detail: lowLatencyProxyEnabled ? "Low-Latency On" : nil,
+        focusTag: .chatMoreButton
+      ) {
+        openSubpage(.playback)
+      }
+      .focusSection()
+    }
+  }
+
+  // MARK: Playback & diagnostics sub-page
+
+  private var playbackSettingsContent: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      subpageHeader("Playback & Diagnostics")
 
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Stream Sync")
@@ -1504,11 +1530,6 @@ struct PlayerView: View {
         )
         .clipped()
         .focused($focus, equals: .youtubeMergeURL)
-        .onMoveCommand { direction in
-          if direction == .left {
-            focus = .chatSettingsButton
-          }
-        }
 
         if let status = chat.youtubeStatusMessage, experimentalYouTubeMergeEnabled {
           HStack(spacing: 6) {
@@ -1528,34 +1549,11 @@ struct PlayerView: View {
     }
   }
 
-  // MARK: Advanced settings page
+  // MARK: Appearance (Advanced) sub-page
 
-  private var advancedSettingsContent: some View {
+  private var appearanceSettingsContent: some View {
     VStack(alignment: .leading, spacing: 18) {
-      HStack(spacing: 12) {
-        Button {
-          closeAdvancedSettings()
-        } label: {
-          HStack(spacing: 6) {
-            Icon(glyph: .chevronLeft, size: 20)
-            Text("Back")
-              .font(.subheadline.weight(.semibold))
-          }
-          .padding(.horizontal, 14)
-          .padding(.vertical, 8)
-          .modifier(ChatSettingsGlassStyle(isFocused: focus == .chatAdvancedBack, isSelected: false))
-        }
-        .buttonStyle(ChatSettingsPillButtonStyle())
-        .focusEffectDisabled()
-        .focused($focus, equals: .chatAdvancedBack)
-
-        Text("Advanced")
-          .font(.headline)
-          .foregroundStyle(.white)
-
-        Spacer(minLength: 0)
-      }
-      .focusSection()
+      subpageHeader("Advanced")
 
       VStack(alignment: .leading, spacing: 10) {
         settingsSectionHeader("Readability")
@@ -1636,19 +1634,9 @@ struct PlayerView: View {
 
     return Button(action: action) {
       HStack(spacing: 8) {
-        // Reserve the leading icon slot whether or not it's filled so a pill's
-        // width never changes when it becomes selected (the check icon would
-        // otherwise widen it and reflow/​wrap the row).
-        Group {
-          if isSelected {
-            Icon(glyph: .check, size: 22)
-          } else if let icon {
-            Icon(glyph: icon, size: 22)
-          } else {
-            Color.clear
-          }
+        if let icon {
+          Icon(glyph: icon, size: 22)
         }
-        .frame(width: 22, height: 22)
 
         Text(title)
           .font(.subheadline.weight(isSelected ? .semibold : .regular))
@@ -1664,6 +1652,75 @@ struct PlayerView: View {
     .buttonStyle(ChatSettingsPillButtonStyle())
     .focusEffectDisabled()
     .focused($focus, equals: focusTag)
+  }
+
+  /// Full-width disclosure row (Apple-style): title on the left, optional detail
+  /// plus a right-facing chevron on the right, used to drill into a sub-page.
+  private func settingsDisclosureRow(
+    title: String,
+    detail: String? = nil,
+    focusTag: Focusable,
+    action: @escaping () -> Void
+  ) -> some View {
+    let isFocused = focus == focusTag
+
+    return Button(action: action) {
+      HStack(spacing: 10) {
+        Text(title)
+          .font(.subheadline.weight(.semibold))
+          .lineLimit(1)
+
+        Spacer(minLength: 12)
+
+        if let detail {
+          Text(detail)
+            .font(.caption)
+            .foregroundStyle(isFocused ? AnyShapeStyle(.black.opacity(0.55)) : AnyShapeStyle(.white.opacity(0.55)))
+            .lineLimit(1)
+        }
+
+        // No dedicated right-chevron glyph exists, so reuse the left chevron
+        // rotated 180°.
+        Icon(glyph: .chevronLeft, size: 18)
+          .rotationEffect(.degrees(180))
+          .opacity(0.7)
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: false))
+    }
+    .buttonStyle(ChatSettingsPillButtonStyle())
+    .focusEffectDisabled()
+    .focused($focus, equals: focusTag)
+  }
+
+  /// The Back button + title shown at the top of a settings sub-page.
+  private func subpageHeader(_ title: String) -> some View {
+    HStack(spacing: 12) {
+      Button {
+        closeSubpage()
+      } label: {
+        HStack(spacing: 6) {
+          Icon(glyph: .chevronLeft, size: 20)
+          Text("Back")
+            .font(.subheadline.weight(.semibold))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .modifier(ChatSettingsGlassStyle(isFocused: focus == .chatAdvancedBack, isSelected: false))
+      }
+      .buttonStyle(ChatSettingsPillButtonStyle())
+      .focusEffectDisabled()
+      .focused($focus, equals: .chatAdvancedBack)
+
+      Text(title)
+        .font(.headline)
+        .foregroundStyle(.white)
+
+      Spacer(minLength: 0)
+    }
+    .focusSection()
   }
 
   private func settingsStepperRow(_ field: ChatStepperField) -> some View {
@@ -1738,6 +1795,8 @@ struct PlayerView: View {
       return ("Line Height", ChatAppearance.lineHeightRange, ChatAppearance.lineHeightStep, chatLineHeight)
     case .messageSpacing:
       return ("Message Spacing", ChatAppearance.messageSpacingRange, ChatAppearance.messageSpacingStep, chatMessageSpacing)
+    case .width:
+      return ("Width", ChatAppearance.widthRange, ChatAppearance.widthStep, chatWidth)
     }
   }
 
@@ -1758,6 +1817,8 @@ struct PlayerView: View {
       chatLineHeightValue = Double(next)
     case .messageSpacing:
       chatMessageSpacingValue = Double(next)
+    case .width:
+      chatWidthValue = Double(next)
     }
   }
 
@@ -1775,8 +1836,8 @@ struct PlayerView: View {
     chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
   }
 
-  private func openAdvancedSettings() {
-    showChatSettingsAdvanced = true
+  private func openSubpage(_ page: ChatSettingsPage) {
+    chatSettingsPage = page
     let target: Focusable = .chatAdvancedBack
     lastChatSettingsFocus = target
     Task { @MainActor in
@@ -1784,12 +1845,12 @@ struct PlayerView: View {
     }
   }
 
-  private func closeAdvancedSettings() {
-    showChatSettingsAdvanced = false
-    let target: Focusable = .chatAdvancedButton
-    lastChatSettingsFocus = target
+  private func closeSubpage() {
+    let returnFocus: Focusable = chatSettingsPage == .playback ? .chatMoreButton : .chatAdvancedButton
+    chatSettingsPage = .main
+    lastChatSettingsFocus = returnFocus
     Task { @MainActor in
-      focus = target
+      focus = returnFocus
     }
   }
 
@@ -1800,7 +1861,7 @@ struct PlayerView: View {
       lastChatSettingsFocus = target
       focus = target
     } else {
-      showChatSettingsAdvanced = false
+      chatSettingsPage = .main
       lastChatSettingsFocus = .chatSettingsButton
       focus = .chatSettingsButton
     }
@@ -2979,10 +3040,18 @@ private struct ChatSettingsGlassStyle: ViewModifier {
       .foregroundStyle(isFocused ? AnyShapeStyle(.black) : AnyShapeStyle(.white))
     if #available(tvOS 26.0, *) {
       tinted
+        // A deterministic dark base sits *behind* the glass so a resting pill
+        // never lightens to the point of making its white text illegible over
+        // bright video. Focused pills get a bright white glass + black text.
+        .background(
+          shape.fill(isFocused
+            ? AnyShapeStyle(.clear)
+            : AnyShapeStyle(.black.opacity(isSelected ? 0.45 : 0.55)))
+        )
         .glassEffect(
           isFocused
             ? .regular.tint(.white)
-            : (isSelected ? .regular.tint(.white.opacity(0.18)) : .regular),
+            : (isSelected ? .regular.tint(.white.opacity(0.22)) : .regular),
           in: shape
         )
         .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: 1))
@@ -2991,10 +3060,10 @@ private struct ChatSettingsGlassStyle: ViewModifier {
                 radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 4 : 0)
     } else {
       tinted
-        .background(shape.fill(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(.ultraThinMaterial)))
+        .background(shape.fill(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(.black.opacity(0.55))))
         .background(
           shape.fill(.white.opacity(
-            isFocused ? 0.0 : (isSelected ? 0.18 : 0.08)
+            isFocused ? 0.0 : (isSelected ? 0.20 : 0.06)
           ))
         )
         .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: 1))

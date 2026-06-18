@@ -26,6 +26,7 @@ enum ChatAppearance {
 
   /// Continuous docked-chat width.
   static let widthRange: ClosedRange<CGFloat> = 340...760
+  static let widthStep: CGFloat = 20
 
   // MARK: - Defaults (a fresh install lands on the "Normal" preset)
 
