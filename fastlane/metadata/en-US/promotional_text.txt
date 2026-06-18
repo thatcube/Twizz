@@ -1,0 +1,1 @@
+Open-source Apple TV client for Twitch with native external emote support.
