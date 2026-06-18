@@ -265,17 +265,6 @@ struct HomeView: View {
         }
 
         Spacer()
-
-        Button("Refresh") {
-          Task {
-            await refreshFollowedChannelsIfNeeded(force: true)
-            await refreshRecommendationsIfNeeded(force: true)
-            await refreshPersonalizedIfNeeded(force: true)
-            requestFocusIfPossible(force: true)
-          }
-        }
-
-        streamCardSettingsMenu
       }
 
       if let errorMessage = follows.errorMessage {
@@ -494,21 +483,6 @@ struct HomeView: View {
       }
       .focusSection()
     }
-  }
-
-  private var streamCardSettingsMenu: some View {
-    Menu {
-      Picker("Card Size", selection: $streamCardSizeRaw) {
-        ForEach(StreamCardSize.allCases) { size in
-          Text("\(size.title) · \(size.subtitle)")
-            .tag(size.rawValue)
-        }
-      }
-      // Future: a "Search" entry point can be added here as another menu item.
-    } label: {
-      Icon(glyph: .dimensions, size: 34)
-    }
-    .accessibilityLabel("View settings")
   }
 
   private func channelRailMetrics(for availableWidth: CGFloat, trailingSafeArea: CGFloat = 0) -> ChannelRailMetrics {
