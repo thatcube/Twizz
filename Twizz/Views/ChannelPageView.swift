@@ -99,7 +99,7 @@ struct ChannelPageView: View {
     .onExitCommand { dismiss() }
     .task(id: target.id) { await loadAll() }
     .fullScreenCover(item: $onDemandItem) { item in
-      OnDemandPlayerView(item: item)
+      OnDemandPlayerView(item: item, channelLogin: profile?.login ?? target.login)
         .environment(\.themePalette, palette)
     }
   }
