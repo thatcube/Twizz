@@ -21,7 +21,7 @@ struct StreamBackdropView: View {
   @State private var videoOpacity = 0.0
   @State private var hasConfiguredPlayer = false
 
-  private let channelFade = Animation.easeInOut(duration: 0.55)
+  private let channelFade = Animation.easeInOut(duration: 0.45)
   private let videoFade = Animation.easeInOut(duration: 0.55)
 
   var body: some View {
@@ -75,7 +75,6 @@ struct StreamBackdropView: View {
       )
     }
     .animation(channelFade, value: activeThumbnailOpacity)
-    .animation(channelFade, value: fallbackThumbnailOpacity)
     .animation(videoFade, value: videoOpacity)
     .allowsHitTesting(false)
     .onAppear {
@@ -133,15 +132,15 @@ struct StreamBackdropView: View {
 
     withAnimation(channelFade) {
       activeThumbnailOpacity = 1
-      fallbackThumbnailOpacity = 0
     }
 
     thumbnailCleanupTask?.cancel()
     thumbnailCleanupTask = Task {
-      try? await Task.sleep(for: .milliseconds(700))
+      try? await Task.sleep(for: .milliseconds(420))
       guard !Task.isCancelled else { return }
       await MainActor.run {
-        guard fallbackThumbnailOpacity == 0 else { return }
+        guard fallbackThumbnailURL != nil else { return }
+        fallbackThumbnailOpacity = 0
         fallbackThumbnailURL = nil
         thumbnailCleanupTask = nil
       }
