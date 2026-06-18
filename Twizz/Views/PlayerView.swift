@@ -562,10 +562,10 @@ struct PlayerView: View {
           onMenuPresented: {
             focusRecoveryTask?.cancel()
             isQualityMenuPresented = true
-            // Native Menu takes over focus. Clearing our app-level focus state
-            // immediately prevents a stale focused shadow from lingering behind
-            // the popup until the next render tick.
-            focus = nil
+            // Keep `focus == .quality` while the menu is open so tvOS keeps the
+            // button visually "lifted" (its focus shadow) behind the popup for
+            // the menu's whole lifetime, and so focus returns to it instantly
+            // on dismiss.
           },
           onMenuDismissed: {
             isQualityMenuPresented = false
@@ -589,7 +589,6 @@ struct PlayerView: View {
         )
         .equatable()
         .focused($focus, equals: .quality)
-        .focusEffectDisabled(isQualityMenuPresented)
         .onMoveCommand { direction in
           switch direction {
           case .left:
