@@ -1387,6 +1387,14 @@ struct PlayerView: View {
         }
         .frame(height: chatComposerRowHeight)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
+
+        if focus == .chatInput {
+          Text("Sends to chat as soon as you finish typing")
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.5))
+            .padding(.leading, 28)
+            .transition(.opacity)
+        }
       } else {
         Button {
           showSignInSheet = true
@@ -1425,6 +1433,7 @@ struct PlayerView: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 12)
+    .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
     .background(
       chatLayoutMode == .glass
         ? AnyShapeStyle(Color.black.opacity(0.22))
@@ -2365,9 +2374,6 @@ private struct ChatKeyboardHostField: UIViewRepresentable {
     field.font = .preferredFont(forTextStyle: .callout)
     field.returnKeyType = .send
     field.enablesReturnKeyAutomatically = true
-    // Shown as the prompt on the tvOS keyboard entry screen so it's clear the
-    // message posts immediately on confirm — there's no separate review step.
-    field.placeholder = "Posts to chat as soon as you press Send"
     field.autocorrectionType = .no
     field.smartQuotesType = .no
     field.smartDashesType = .no
