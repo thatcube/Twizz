@@ -40,19 +40,6 @@ struct HomeView: View {
     StreamCardSize.resolve(streamCardSizeRaw)
   }
 
-  private var focusedStreamBackdropChannel: FollowedChannel? {
-    guard let focusedItemID else { return nil }
-    if focusedItemID.hasPrefix("following-") {
-      let channelID = String(focusedItemID.dropFirst("following-".count))
-      return follows.channels.first(where: { $0.id == channelID })
-    }
-    if focusedItemID.hasPrefix("recommended-") {
-      let channelID = String(focusedItemID.dropFirst("recommended-".count))
-      return recommendations.channels.first(where: { $0.id == channelID })
-    }
-    return nil
-  }
-
   private var targetVisibleCards: CGFloat {
     CGFloat(streamCardSize.visibleCardCount)
   }
@@ -201,22 +188,17 @@ struct HomeView: View {
         trailingSafeArea: proxy.safeAreaInsets.trailing
       )
 
-      ZStack {
-        StreamBackdropView(channel: focusedStreamBackdropChannel)
-          .ignoresSafeArea()
-
-        ScrollView(.vertical, showsIndicators: false) {
-          VStack(alignment: .leading, spacing: 40) {
-            followingSection(rail: rail)
-            recommendedChannelsSection(rail: rail)
-            recommendedCategoriesSection(rail: rail)
-            authBanner
-          }
-          .frame(maxWidth: .infinity, alignment: .topLeading)
-          .padding(.horizontal, AppLayout.horizontalPadding)
-          .padding(.top, 32)
-          .padding(.bottom, 12)
+      ScrollView(.vertical, showsIndicators: false) {
+        VStack(alignment: .leading, spacing: 40) {
+          followingSection(rail: rail)
+          recommendedChannelsSection(rail: rail)
+          recommendedCategoriesSection(rail: rail)
+          authBanner
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(.horizontal, AppLayout.horizontalPadding)
+        .padding(.top, 32)
+        .padding(.bottom, 12)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
