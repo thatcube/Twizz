@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+import UIKit
 
 struct StreamChannelCard: View {
   enum Layout {
@@ -213,29 +214,35 @@ struct StreamChannelCard: View {
     .frame(width: layout.mediaWidth, height: layout.mediaHeight)
     .frame(maxWidth: layout.mediaWidth == nil ? .infinity : nil, alignment: .leading)
     .aspectRatio(layout.mediaWidth == nil ? 16 / 9 : nil, contentMode: .fit)
-    .clipShape(RoundedRectangle(cornerRadius: layout.mediaCornerRadius))
+    .clipShape(RoundedRectangle(cornerRadius: layout.mediaCornerRadius, style: .continuous))
     .overlay {
-      // tvOS composites live video on a hardware overlay plane that ignores
-      // CALayer corner masks, so the video bleeds ~1-2px past the rounded media
-      // boundary. A static thumbnail (a normal layer) clips cleanly, so this
-      // only shows while the live preview plays. A theme-matched hairline drawn
-      // right on the media edge paints over that bleed and reads as a clean,
-      // intentional frame. It fades in with the video so static tiles stay bare.
-      if isShowingLivePreviewSurface {
-        RoundedRectangle(cornerRadius: layout.mediaCornerRadius)
-          .inset(by: -1)
-          .stroke(previewEdgeColor, lineWidth: 2.5)
-          .opacity(livePreviewOpacity)
-      }
+      // A hairline rim on the media edge. It matches the frosted-glass tone of
+      // the card so it blends in, while quietly covering the ~1-2px that tvOS's
+      // hardware video overlay plane bleeds past the rounded corners (that plane
+      // ignores CALayer corner masks, so neither the SwiftUI clip nor rounding
+      // the player layer fully contains it). Always on, so live and thumbnail
+      // tiles share the same clean edge.
+      RoundedRectangle(cornerRadius: layout.mediaCornerRadius, style: .continuous)
+        .inset(by: -0.5)
+        .stroke(mediaEdgeColor, lineWidth: 1.5)
     }
     .animation(.easeOut(duration: 0.22), value: livePreviewOpacity)
   }
 
-  /// Tone of the surface immediately around the media (glass over the app
-  /// background), used for the live-preview edge hairline so it blends with the
-  /// card while covering the hardware video plane's corner bleed.
-  private var previewEdgeColor: Color {
-    palette.backgroundColors.last ?? .black
+  /// Frosted-glass tone of the card surface immediately around the media: the
+  /// theme background nudged toward white to approximate the glass. Used for the
+  /// media edge hairline so it blends with the card while still painting over
+  /// the hardware video plane's corner bleed.
+  private var mediaEdgeColor: Color {
+    let base = UIColor(palette.backgroundColors.last ?? .black)
+    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+    base.getRed(&r, green: &g, blue: &b, alpha: &a)
+    let lift: CGFloat = 0.09
+    return Color(
+      red: Double(r + (1 - r) * lift),
+      green: Double(g + (1 - g) * lift),
+      blue: Double(b + (1 - b) * lift)
+    )
   }
 
   private var railCardWidth: CGFloat? {

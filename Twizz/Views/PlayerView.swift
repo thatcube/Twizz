@@ -83,7 +83,7 @@ struct PreviewVideoSurface: UIViewRepresentable {
   private func apply(to view: PlayerLayerHostView) {
     let layer = view.playerLayer
     layer.cornerRadius = cornerRadius
-    layer.cornerCurve = .circular
+    layer.cornerCurve = .continuous
     layer.masksToBounds = cornerRadius > 0
   }
 }

@@ -35,7 +35,7 @@ struct ChannelPageView: View {
   // Match the rail-card metrics used across the rest of the app (HomeView).
   private let focusHInset: CGFloat = 18
   private let focusVInset: CGFloat = 18
-  private let cardCorner: CGFloat = 22
+  private let cardCorner: CGFloat = 30
   private let mediaCorner: CGFloat = 18
   private let heroCorner: CGFloat = 28
 

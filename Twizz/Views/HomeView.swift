@@ -7,7 +7,7 @@ struct HomeView: View {
   private let peekCardFraction: CGFloat = 0.08
   private let focusHorizontalInset: CGFloat = 18
   private let focusVerticalInset: CGFloat = 18
-  private let cardCornerRadius: CGFloat = 22
+  private let cardCornerRadius: CGFloat = 30
   private let mediaCornerRadius: CGFloat = 18
   private let minMediaWidth: CGFloat = 220
   private let maxMediaWidth: CGFloat = 900
