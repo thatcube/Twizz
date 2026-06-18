@@ -155,8 +155,18 @@ private struct BrowseStreamsView: View {
   private let gridSpacing: CGFloat = 20
   private let gridBottomInset: CGFloat = 12
 
+  private var focusedStreamBackdropChannel: FollowedChannel? {
+    if let focusedStreamID {
+      return service.categoryStreams.first(where: { $0.id == focusedStreamID })
+    }
+    return service.categoryStreams.first
+  }
+
   var body: some View {
     ZStack(alignment: .top) {
+      StreamBackdropView(channel: focusedStreamBackdropChannel)
+        .ignoresSafeArea()
+
       ScrollView(.vertical, showsIndicators: false) {
         VStack(alignment: .leading, spacing: 20) {
           // Header (scrolls with content)
