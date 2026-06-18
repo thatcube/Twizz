@@ -29,6 +29,16 @@ buildServer.json
 Secrets.swift
 *.xcconfig.local
 .env
+.env.fastlane
+
+# App Store Connect API key — never commit the private key
+*.p8
+
+# Fastlane artifacts
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output/
+fastlane/screenshots/**/*.png
 
 # Misc
 *.log

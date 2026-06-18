@@ -1,0 +1,1 @@
+Initial TestFlight build. Native Apple TV Twitch player with 7TV/BTTV/FFZ emotes, combined Twitch + YouTube chat, raids, and Dark/Light/OLED themes.
