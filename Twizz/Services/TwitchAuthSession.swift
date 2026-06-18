@@ -443,6 +443,11 @@ final class TwitchAuthSession {
         return normalized.contains("client_id") && normalized.contains("invalid")
     }
 
+    private func isIntegrityCheckFailureMessage(_ message: String?) -> Bool {
+        guard let normalized = normalizedOAuthMessage(message) else { return false }
+        return normalized.contains("integrity_check") && normalized.contains("fail")
+    }
+
     private func describe(_ error: Error) -> String {
         if let authError = error as? TwitchAuthHTTPError {
             return authError.localizedDescription
@@ -759,6 +764,9 @@ final class TwitchAuthSession {
         // GraphQL returns HTTP 200 even for logical failures, so inspect the body.
         let decoded = try JSONDecoder().decode(GQLFollowResponse.self, from: data)
         if let message = decoded.errors?.compactMap({ $0.message }).first(where: { !$0.isEmpty }) {
+            if isIntegrityCheckFailureMessage(message) {
+                throw FollowActionError.integrityCheckRequired
+            }
             throw FollowActionError.mutationFailed(reason: message)
         }
         let opError =
@@ -766,6 +774,9 @@ final class TwitchAuthSession {
             ? decoded.data?.followUser?.error?.code
             : decoded.data?.unfollowUser?.error?.code
         if let opError, !opError.isEmpty {
+            if isIntegrityCheckFailureMessage(opError) {
+                throw FollowActionError.integrityCheckRequired
+            }
             throw FollowActionError.mutationFailed(reason: opError)
         }
     }
@@ -773,12 +784,15 @@ final class TwitchAuthSession {
 
 enum FollowActionError: LocalizedError {
     case notSignedIn
+    case integrityCheckRequired
     case mutationFailed(reason: String?)
 
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
             return "Sign in to follow channels."
+        case .integrityCheckRequired:
+            return "Twitch blocked follow/unfollow from this app (integrity check required). Use the Twitch app or website to change follows."
         case .mutationFailed(let reason):
             if let reason, !reason.isEmpty {
                 return "Couldn't update follow: \(reason)."
