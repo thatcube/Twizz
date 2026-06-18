@@ -54,14 +54,18 @@ struct HomeView: View {
 
     var id: String { rawValue }
 
-    var systemImage: String {
+    var glyph: Glyph {
       switch self {
-      case .home: return "house"
-      case .browse: return "square.grid.2x2"
-      case .search: return "magnifyingglass"
-      case .settings: return "gearshape"
+      case .home: return .home
+      case .browse: return .layoutGrid
+      case .search: return .search
+      case .settings: return .settings
       }
     }
+
+    /// Asset-catalog name for the vendored Tabler template image, so tab items
+    /// use the same icon library as the rest of the app.
+    var tablerImageName: String { "tb-\(glyph.rawValue)" }
   }
 
   private struct ChannelRailMetrics {
@@ -75,7 +79,7 @@ struct HomeView: View {
       tabContainer { homeTab }
         .tag(SidebarTab.home)
         .tabItem {
-          Label(SidebarTab.home.rawValue, systemImage: SidebarTab.home.systemImage)
+          Label(SidebarTab.home.rawValue, image: SidebarTab.home.tablerImageName)
         }
 
       tabContainer {
@@ -89,7 +93,7 @@ struct HomeView: View {
       }
       .tag(SidebarTab.browse)
       .tabItem {
-        Label(SidebarTab.browse.rawValue, systemImage: SidebarTab.browse.systemImage)
+        Label(SidebarTab.browse.rawValue, image: SidebarTab.browse.tablerImageName)
       }
 
       tabContainer {
@@ -105,7 +109,7 @@ struct HomeView: View {
       }
       .tag(SidebarTab.search)
       .tabItem {
-        Label(SidebarTab.search.rawValue, systemImage: SidebarTab.search.systemImage)
+        Label(SidebarTab.search.rawValue, image: SidebarTab.search.tablerImageName)
       }
 
       tabContainer {
@@ -124,18 +128,11 @@ struct HomeView: View {
       }
       .tag(SidebarTab.settings)
       .tabItem {
-        Label(SidebarTab.settings.rawValue, systemImage: SidebarTab.settings.systemImage)
+        Label(SidebarTab.settings.rawValue, image: SidebarTab.settings.tablerImageName)
       }
     }
-    .tabViewStyle(.sidebarAdaptable)
-    .background(
-      LinearGradient(
-        colors: resolvedPalette.backgroundColors,
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
-    )
+    .tabViewStyle(.automatic)
+    .background(AppBackground(palette: resolvedPalette))
     .environment(\.themePalette, resolvedPalette)
     .preferredColorScheme(themeManager.theme.preferredColorScheme)
     .task {
@@ -201,12 +198,7 @@ struct HomeView: View {
   @ViewBuilder
   private func tabContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
     ZStack {
-      LinearGradient(
-        colors: resolvedPalette.backgroundColors,
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
+      AppBackground(palette: resolvedPalette)
 
       content()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

@@ -62,6 +62,7 @@ private struct BrowseCategoriesView: View {
   let onSelectCategory: (TwitchCategory) -> Void
 
   @FocusState private var focusedID: String?
+  @Namespace private var browseFocusNamespace
 
   private let columns = [
     GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 28)
@@ -101,6 +102,10 @@ private struct BrowseCategoriesView: View {
             .contentShape(RoundedRectangle(cornerRadius: 14))
             .focusable(true)
             .focused($focusedID, equals: category.id)
+            .prefersDefaultFocus(
+              category.id == service.categories.first?.id,
+              in: browseFocusNamespace
+            )
             .focusEffectDisabled()
             .onTapGesture {
               onSelectCategory(category)
@@ -112,26 +117,10 @@ private struct BrowseCategoriesView: View {
         }
         .padding(.vertical, 8)
         .focusSection()
+        .focusScope(browseFocusNamespace)
       }
       .padding(.horizontal, AppLayout.horizontalPadding)
       .padding(.bottom, 12)
-    }
-    .onAppear {
-      guard focusedID == nil, let first = service.categories.first else { return }
-      Task {
-        try? await Task.sleep(for: .milliseconds(150))
-        await MainActor.run { focusedID = first.id }
-      }
-    }
-    .onChange(of: service.categories) { _, categories in
-      guard let first = categories.first else { return }
-      if let focusedID, categories.contains(where: { $0.id == focusedID }) {
-        return
-      }
-      Task {
-        try? await Task.sleep(for: .milliseconds(150))
-        await MainActor.run { focusedID = first.id }
-      }
     }
   }
 }

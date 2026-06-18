@@ -42,6 +42,10 @@ enum Glyph: String {
   case brandSpotify = "brand-spotify"
   case brandBluesky = "brand-bluesky"
   case world
+  case home
+  case layoutGrid = "layout-grid"
+  case search
+  case settings
 }
 
 /// Renders a vendored Tabler icon as a template image so it tints with the
