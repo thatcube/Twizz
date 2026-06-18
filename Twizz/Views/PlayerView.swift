@@ -458,7 +458,15 @@ struct PlayerView: View {
         AudioVisualizerView(
           level: audioLevelMonitor.level,
           avatarURL: channelAvatarURL,
-          palette: palette
+          palette: palette,
+          isReactive: audioLevelMonitor.isReceivingRealAudio,
+          debugInfo: String(
+            format: "%@  lvl %.2f  seg %d  q %d",
+            audioLevelMonitor.isReceivingRealAudio ? "REAL" : "AMBIENT",
+            audioLevelMonitor.level,
+            audioLevelMonitor.decodedSegmentCount,
+            audioLevelMonitor.pendingRealSamples
+          )
         )
         .transition(.opacity)
         .onAppear {

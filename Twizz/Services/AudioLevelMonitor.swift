@@ -20,6 +20,12 @@ final class AudioLevelMonitor {
   /// True while the decoder is actively feeding real loudness values.
   private(set) var isReceivingRealAudio = false
 
+  /// Diagnostics: how many segments have been decoded into real levels, and how
+  /// many real samples are queued for playout. Surfaced by a temporary on-screen
+  /// readout while we tune reactivity.
+  private(set) var decodedSegmentCount = 0
+  var pendingRealSamples: Int { realQueue.count }
+
   private var decoder: AudioOnlyLevelDecoder?
   private var ticker: Timer?
   private var startTime = CACurrentMediaTime()
@@ -32,8 +38,8 @@ final class AudioLevelMonitor {
   private var currentRealTarget: Double = 0
 
   // Fast attack so transients pop; slower decay so the orb eases back down.
-  private let attack = 0.5
-  private let decay = 0.14
+  private let attack = 0.6
+  private let decay = 0.2
   private let realAudioTimeout: CFTimeInterval = 1.0
   private let tickInterval: TimeInterval = 1.0 / 60.0
   // Cap the backlog (~12s) so we never drift far behind the live edge.
@@ -61,6 +67,7 @@ final class AudioLevelMonitor {
     realQueue.removeAll()
     nextPopAt = 0
     lastRealAt = 0
+    decodedSegmentCount = 0
     isReceivingRealAudio = false
   }
 
@@ -75,6 +82,7 @@ final class AudioLevelMonitor {
   /// loudness contour for one segment of audio.
   func enqueueRealLevels(_ contour: [Double], interval: Double) {
     guard !contour.isEmpty else { return }
+    decodedSegmentCount += 1
     let wasIdle = (CACurrentMediaTime() - lastRealAt) > realAudioTimeout
     queueInterval = min(max(interval, 0.02), 0.12)
     realQueue.append(contentsOf: contour)
@@ -118,9 +126,11 @@ final class AudioLevelMonitor {
   }
 
   /// Maps raw RMS into a livelier display range. RMS for typical program audio
-  /// sits low, so we lift and gently compress it.
+  /// sits low, so we drop a small noise floor, then lift and expand what's left
+  /// so quiet passages dip toward the baseline and peaks push the orb hard.
   private func shaped(_ rms: Double) -> Double {
-    let boosted = pow(min(rms * 3.2, 1), 0.7)
+    let floored = max(0, rms - 0.015)
+    let boosted = pow(min(floored * 4.5, 1), 0.6)
     return min(max(boosted, 0), 1)
   }
 
