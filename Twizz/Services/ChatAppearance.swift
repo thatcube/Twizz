@@ -119,14 +119,17 @@ enum ChatAppearancePreset: String, CaseIterable, Identifiable {
   }
 }
 
-/// Selectable typeface for chat text. Maps onto SwiftUI's built-in system font
-/// designs so every option ships with the OS (no bundled font files) and scales
-/// cleanly at any size on tvOS.
+/// Selectable typeface for chat text. Most options map onto SwiftUI's built-in
+/// system font designs (which ship with the OS and scale cleanly at any size on
+/// tvOS); `openDyslexic` is the one exception and resolves to the bundled
+/// OpenDyslexic typeface — a face designed for readers with dyslexia, with
+/// weighted letter bottoms so glyphs are harder to visually flip or rotate.
 enum ChatFontStyle: String, CaseIterable, Identifiable {
   case standard
   case rounded
   case serif
   case monospaced
+  case openDyslexic
 
   var id: String { rawValue }
 
@@ -136,16 +139,39 @@ enum ChatFontStyle: String, CaseIterable, Identifiable {
     case .rounded: return "Rounded"
     case .serif: return "Serif"
     case .monospaced: return "Mono"
+    case .openDyslexic: return "Dyslexic"
     }
   }
 
+  /// The bundled font family name, or `nil` for the system-design options.
+  /// Both the Regular and Bold faces are registered under this family, so a
+  /// `.weight(.bold)` request resolves to the matching face.
+  private var customFontName: String? {
+    switch self {
+    case .openDyslexic: return "OpenDyslexic"
+    default: return nil
+    }
+  }
+
+  /// System font design backing the standard/rounded/serif/mono options.
+  /// `openDyslexic` ships its own face, so this is only a fallback for it.
   var design: Font.Design {
     switch self {
-    case .standard: return .default
+    case .standard, .openDyslexic: return .default
     case .rounded: return .rounded
     case .serif: return .serif
     case .monospaced: return .monospaced
     }
+  }
+
+  /// Resolve the concrete `Font` for chat text at a given size/weight. Custom
+  /// (bundled) families go through `Font.custom` so they scale like the system
+  /// options; everything else uses the matching system design.
+  func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+    if let customFontName {
+      return Font.custom(customFontName, size: size).weight(weight)
+    }
+    return .system(size: size, weight: weight, design: design)
   }
 }
 
