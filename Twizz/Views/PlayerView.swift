@@ -559,6 +559,7 @@ struct PlayerView: View {
           options: qualityOptions,
           selectedOption: preferredQuality,
           buttonLabel: qualityButtonLabel,
+          reservedWidthLabels: qualityButtonLabelCandidates,
           displayLabel: { qualityDisplayLabel($0) },
           onSelect: { selectQuality(at: $0) },
           onMenuPresented: {
@@ -1595,6 +1596,21 @@ struct PlayerView: View {
     return Self.shortQualityName(preferredQuality)
   }
 
+  /// Every label the quality button could ever display for the current stream.
+  /// The button reserves the width of the widest of these so the in-player
+  /// title's available space stays constant as the live label changes (e.g.
+  /// "Auto" -> "Auto (1080p60)"), preventing distracting title font reflow.
+  private var qualityButtonLabelCandidates: [String] {
+    var labels: Set<String> = ["Auto"]
+    let videoVariants = (playback?.qualities ?? []).filter { !$0.isAudioOnly }
+    for quality in videoVariants {
+      let short = Self.shortQualityName(quality.name)
+      labels.insert(short)
+      labels.insert("Auto (\(short))")
+    }
+    return Array(labels)
+  }
+
   /// Drops the "(Source)" suffix so the button reads "1080p60", not
   /// "1080p60 (Source)".
   private static func shortQualityName(_ name: String) -> String {
@@ -2377,6 +2393,7 @@ private struct QualityMenu: View, Equatable {
   let options: [String]
   let selectedOption: String
   let buttonLabel: String
+  let reservedWidthLabels: [String]
   let displayLabel: (String) -> String
   let onSelect: (Int) -> Void
   let onMenuPresented: () -> Void
@@ -2386,6 +2403,7 @@ private struct QualityMenu: View, Equatable {
     lhs.options == rhs.options
       && lhs.selectedOption == rhs.selectedOption
       && lhs.buttonLabel == rhs.buttonLabel
+      && lhs.reservedWidthLabels == rhs.reservedWidthLabels
   }
 
   /// Drives the inline `Picker` selection. Reading derives the current index
@@ -2413,14 +2431,27 @@ private struct QualityMenu: View, Equatable {
       .onAppear(perform: onMenuPresented)
       .onDisappear(perform: onMenuDismissed)
     } label: {
-      Text(buttonLabel)
-        .font(.subheadline)
-        .fontWeight(.semibold)
-        .monospacedDigit()
-        .lineLimit(1)
-        .fixedSize()
-        .accessibilityLabel("Quality, \(buttonLabel)")
+      // Reserve the width of the widest possible quality label (e.g.
+      // "Auto (1080p60)") via hidden copies, then overlay the live label
+      // left-aligned. This keeps the button — and therefore the stream
+      // title's available width — a constant size as the label changes.
+      ZStack(alignment: .leading) {
+        ForEach(reservedWidthLabels, id: \.self) { candidate in
+          qualityLabelText(candidate).hidden()
+        }
+        qualityLabelText(buttonLabel)
+      }
+      .accessibilityLabel("Quality, \(buttonLabel)")
     }
+  }
+
+  private func qualityLabelText(_ text: String) -> some View {
+    Text(text)
+      .font(.subheadline)
+      .fontWeight(.semibold)
+      .monospacedDigit()
+      .lineLimit(1)
+      .fixedSize()
   }
 }
 
