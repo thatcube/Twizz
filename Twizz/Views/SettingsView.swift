@@ -12,17 +12,20 @@ struct SettingsView: View {
   @Bindable var themeManager: ThemeManager
   let auth: TwitchAuthSession
   var onRequestSignIn: () -> Void = {}
+  var onClearWatchHistory: () -> Void = {}
   var onAccountChanged: () -> Void = {}
   var onRepublishTopShelf: () -> Void = {}
 
   @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
+  @State private var showClearHistoryConfirm = false
   @State private var topShelfStatus = TopShelfStore.diagnosticsSummary()
   @FocusState private var focusedTheme: AppTheme?
   @FocusState private var focusedCardSize: StreamCardSize?
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage("showChatByDefault") private var showChatByDefault = true
+  @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedRecommendationsEnabled = true
 
   private let labelColumnWidth: CGFloat = 360
 
@@ -68,6 +71,11 @@ struct SettingsView: View {
       groupDivider
 
       chatRow
+        .padding(.vertical, 20)
+
+      groupDivider
+
+      recommendationsRow
         .padding(.vertical, 20)
     }
     .padding(.horizontal, 28)
@@ -131,6 +139,42 @@ struct SettingsView: View {
         }
         .settingPillStyle(isSelected: showChatByDefault == on)
       }
+    }
+  }
+
+  private var recommendationsRow: some View {
+    settingRow(
+      title: "Recommendations",
+      subtitle:
+        "Suggest live channels similar to the ones you follow and watch. Your watch history stays on this Apple TV and is never shared."
+    ) {
+      ForEach([true, false], id: \.self) { on in
+        Button {
+          personalizedRecommendationsEnabled = on
+        } label: {
+          SettingPill(title: on ? "On" : "Off", isSelected: personalizedRecommendationsEnabled == on)
+        }
+        .settingPillStyle(isSelected: personalizedRecommendationsEnabled == on)
+      }
+
+      Button {
+        showClearHistoryConfirm = true
+      } label: {
+        SettingPill(title: "Clear History", isSelected: false)
+      }
+      .settingPillStyle(isSelected: false)
+    }
+    .confirmationDialog(
+      "Clear watch history?",
+      isPresented: $showClearHistoryConfirm,
+      titleVisibility: .visible
+    ) {
+      Button("Clear History", role: .destructive) {
+        onClearWatchHistory()
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This permanently removes the watch history stored on this device.")
     }
   }
 
