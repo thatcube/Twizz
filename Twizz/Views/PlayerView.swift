@@ -466,7 +466,8 @@ struct PlayerView: View {
           hideTask?.cancel()
         } label: {
           Text(qualityButtonLabel)
-            .font(.headline)
+            .font(.subheadline)
+            .fontWeight(.semibold)
             .monospacedDigit()
             .lineLimit(1)
             .fixedSize()
