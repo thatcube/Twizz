@@ -94,6 +94,10 @@ struct StreamChannelCard: View {
   let isFocused: Bool
   var layout: Layout = .grid()
   var showsGameName: Bool = false
+  /// When provided, a press-and-hold context menu exposes "Watch".
+  var onWatch: ((FollowedChannel) -> Void)? = nil
+  /// When provided, a press-and-hold context menu exposes "Go to Channel".
+  var onGoToChannel: ((FollowedChannel) -> Void)? = nil
 
   @Environment(\.themePalette) private var palette
   @State private var previewPlayer = AVPlayer()
@@ -164,6 +168,11 @@ struct StreamChannelCard: View {
     .onDisappear {
       stopPreviewPlayback(clearCachedURL: true)
     }
+    .channelCardContextMenu(
+      channel: channel,
+      onWatch: onWatch,
+      onGoToChannel: onGoToChannel
+    )
   }
 
   @ViewBuilder
@@ -344,6 +353,38 @@ struct StreamChannelCard: View {
     previewSourceURL = nil
     if clearCachedURL {
       cachedPreviewURL = nil
+    }
+  }
+}
+
+private extension View {
+  /// Attaches the channel card's press-and-hold context menu when at least one
+  /// action is supplied. tvOS surfaces this on a long press of the focused card.
+  @ViewBuilder
+  func channelCardContextMenu(
+    channel: FollowedChannel,
+    onWatch: ((FollowedChannel) -> Void)?,
+    onGoToChannel: ((FollowedChannel) -> Void)?
+  ) -> some View {
+    if onWatch == nil && onGoToChannel == nil {
+      self
+    } else {
+      contextMenu {
+        if let onWatch {
+          Button {
+            onWatch(channel)
+          } label: {
+            Label("Watch", systemImage: "play.fill")
+          }
+        }
+        if let onGoToChannel {
+          Button {
+            onGoToChannel(channel)
+          } label: {
+            Label("Go to Channel", systemImage: "person.crop.circle")
+          }
+        }
+      }
     }
   }
 }

@@ -20,6 +20,8 @@ struct HomeView: View {
   @State private var recommendations = RecommendationsService()
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
+  @State private var channelPageTarget: ChannelPageTarget?
+  @State private var pendingWatchLogin: String?
   @State private var pendingBrowseCategory: TwitchCategory?
   @State private var browsePath: [TwitchCategory] = []
   @State private var firstFocusRequested = false
@@ -78,6 +80,7 @@ struct HomeView: View {
         BrowseView(
           auth: auth,
           selectedChannel: $selectedChannel,
+          channelPageTarget: $channelPageTarget,
           pendingCategory: $pendingBrowseCategory,
           path: $browsePath
         )
@@ -153,6 +156,17 @@ struct HomeView: View {
     .fullScreenCover(item: $selectedChannel) { channel in
       PlayerView(channel: channel.login, auth: auth)
         .environment(\.themePalette, resolvedPalette)
+    }
+    .fullScreenCover(item: $channelPageTarget, onDismiss: { presentPendingWatchIfNeeded() }) { target in
+      ChannelPageView(
+        target: target,
+        onWatch: {
+          pendingWatchLogin = target.login
+          channelPageTarget = nil
+        }
+      )
+      .environment(\.themePalette, resolvedPalette)
+      .preferredColorScheme(themeManager.theme.preferredColorScheme)
     }
     .fullScreenCover(isPresented: $showSignIn) {
       SignInView(auth: auth) {
@@ -251,7 +265,9 @@ struct HomeView: View {
                 cardCornerRadius: cardCornerRadius,
                 mediaCornerRadius: mediaCornerRadius
               ),
-              showsGameName: true
+              showsGameName: true,
+              onWatch: { selectedChannel = $0 },
+              onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
             )
             .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
             .focusable(true)
@@ -314,7 +330,9 @@ struct HomeView: View {
                   cardCornerRadius: cardCornerRadius,
                   mediaCornerRadius: mediaCornerRadius
                 ),
-                showsGameName: true
+                showsGameName: true,
+                onWatch: { selectedChannel = $0 },
+                onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
               )
               .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
               .focusable(true)
@@ -533,6 +551,30 @@ struct HomeView: View {
     )
 
     deepLinkRouter.pendingChannelLogin = nil
+  }
+
+  /// After the channel page is dismissed via its "Watch Live" button, start
+  /// playback for that channel. Runs from the cover's `onDismiss` so the player
+  /// cover presents cleanly after the channel-page cover has fully gone away.
+  private func presentPendingWatchIfNeeded() {
+    guard let login = pendingWatchLogin else { return }
+    pendingWatchLogin = nil
+
+    let match = (follows.channels + recommendations.channels).first {
+      $0.login.caseInsensitiveCompare(login) == .orderedSame
+    }
+
+    selectedChannel = match ?? FollowedChannel(
+      id: login,
+      login: login,
+      displayName: login,
+      title: "",
+      gameName: "",
+      viewerCount: nil,
+      thumbnailURL: nil,
+      profileImageURL: nil,
+      isLive: true
+    )
   }
 
   private func shouldAutoRefreshFollowedChannels() -> Bool {
