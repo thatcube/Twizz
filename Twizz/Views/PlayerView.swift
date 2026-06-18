@@ -544,15 +544,8 @@ struct PlayerView: View {
       Spacer(minLength: 18)
 
       HStack(spacing: 14) {
-        // The visible menu content is kept `.equatable()` so the player's
-        // once-per-second latency churn doesn't re-render (and blink) the open
-        // menu. The focus + navigation modifiers are applied OUTSIDE that
-        // equatable boundary on purpose: `.equatable()` freezes the wrapped
-        // subtree when its inputs are unchanged, and if `.focused` lived inside
-        // it the focus binding would freeze too — so when the menu closed the
-        // focus system had no live binding to restore to and focus only snapped
-        // back on the next unrelated re-render (~1-2s later). Keeping `.focused`
-        // here keeps the binding live so focus returns to the button instantly.
+        // Use a native confirmation dialog with explicit presentation state so
+        // focus handoff is deterministic when opening/closing quality options.
         Button {
           focusRecoveryTask?.cancel()
           lastControlFocus = .quality
@@ -878,12 +871,8 @@ struct PlayerView: View {
       try? await Task.sleep(for: .seconds(controlsAutoHideSeconds))
       guard !Task.isCancelled else { return }
       await MainActor.run {
-        // Don't auto-hide while the quality menu is engaged. When the native
-        // Menu is open, tvOS owns focus and our FocusState reads nil, while
-        // `lastControlFocus` still points at `.quality`. In that case re-arm
-        // instead of hiding so the control bar — and the menu anchored to it —
-        // stay on screen. Normal auto-hide resumes once focus lands on another
-        // control.
+        // Don't auto-hide while the quality picker is engaged. During system
+        // dialog presentation tvOS owns focus and app focus may be nil.
         if focus == .quality || (focus == nil && lastControlFocus == .quality) {
           scheduleHide()
           return
