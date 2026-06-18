@@ -206,11 +206,6 @@ struct PlayerView: View {
   @State private var suppressLowLatencyToggleReload = false
   @State private var consecutiveLoadFailures = 0
   @State private var lastControlFocus: Focusable = .quality
-  /// Set when the user *intentionally* moves focus into the chat pane (e.g.
-  /// pressing right on the chat toggle). Used to tell a deliberate jump into the
-  /// composer apart from tvOS flinging focus there during a fast trackpad swipe,
-  /// so only the accidental case is snapped back to the control row.
-  @State private var chatPaneFocusIntentAt: Date?
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
   @State private var raidBannerDismissTask: Task<Void, Never>?
   /// The outgoing raid currently being followed (with a cancel window).
@@ -540,7 +535,6 @@ struct PlayerView: View {
         // there directly instead of bouncing focus to the chat toggle first.
         switch direction {
         case .right where showChat:
-          chatPaneFocusIntentAt = Date()
           revealControls(preferredFocus: .chatInput)
         default:
           revealControls(preferredFocus: .chatToggle)
@@ -568,23 +562,6 @@ struct PlayerView: View {
       // while controls are visible, immediately restore last valid control.
       guard showControls else {
         return
-      }
-
-      // During fast trackpad swipes across the control row, tvOS can fling focus
-      // onto an adjacent chat-pane element (the composer or the settings button)
-      // even though the user was only navigating the three control buttons.
-      // Unless the jump was deliberate (e.g. pressing right on the chat toggle),
-      // snap focus back to the control the user was on so it never gets stranded
-      // in the pane. This can't happen with chat closed — there's nothing there.
-      if let newFocus, newFocus == .chatInput || newFocus == .chatSettingsButton,
-        isBottomControlButton(lastControlFocus) {
-        let deliberate = chatPaneFocusIntentAt
-          .map { Date().timeIntervalSince($0) < 0.4 } ?? false
-        if !deliberate {
-          focusRecoveryTask?.cancel()
-          focus = lastControlFocus
-          return
-        }
       }
 
       if let newFocus, isControlFocus(newFocus) {
@@ -989,7 +966,6 @@ struct PlayerView: View {
             focus = .quality
           case .right:
             if showChat {
-              chatPaneFocusIntentAt = Date()
               focus = .chatInput
             }
           default:
@@ -1303,18 +1279,6 @@ struct PlayerView: View {
   private func isControlFocus(_ focus: Focusable) -> Bool {
     switch focus {
     case .streamInfo, .quality, .chatToggle, .chatInput:
-      return true
-    default:
-      return false
-    }
-  }
-
-  /// The three buttons in the bottom control row. Distinct from `isControlFocus`,
-  /// which also counts `.chatInput`, because we use this to detect focus leaking
-  /// out of the row into the chat pane during fast navigation.
-  private func isBottomControlButton(_ focus: Focusable) -> Bool {
-    switch focus {
-    case .streamInfo, .quality, .chatToggle:
       return true
     default:
       return false
