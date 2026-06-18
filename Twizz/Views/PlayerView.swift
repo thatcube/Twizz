@@ -704,6 +704,24 @@ struct PlayerView: View {
     channelDisplayName.isEmpty ? activeChannel : channelDisplayName
   }
 
+  /// Horizontal shift applied to the offline empty-state content so it stays
+  /// visually centered in the *uncovered* area. In overlay/glass chat modes the
+  /// video (and this empty state) spans the full screen while the chat pane
+  /// floats over the right edge, so without this the content reads as
+  /// off-center. Shift left by half the width the chat occupies. The chat width
+  /// is user-customizable, so this tracks `chatWidth`.
+  private var offlineContentHorizontalOffset: CGFloat {
+    guard showChat, chatLayoutMode.isOverlay else { return 0 }
+    switch chatLayoutMode {
+    case .glass:
+      return -(chatWidth + GlassChatPaneStyle.edgeInset) / 2
+    case .overlay:
+      return -chatWidth / 2
+    case .side:
+      return 0
+    }
+  }
+
   private var offlineState: some View {
     ZStack {
       // Opaque backdrop so the frozen last frame never bleeds through.
@@ -761,6 +779,8 @@ struct PlayerView: View {
       }
       .frame(maxWidth: 760)
       .padding(48)
+      .offset(x: offlineContentHorizontalOffset)
+      .animation(.easeOut(duration: 0.18), value: offlineContentHorizontalOffset)
     }
     .transition(.opacity)
   }
