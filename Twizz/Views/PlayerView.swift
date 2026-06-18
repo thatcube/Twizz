@@ -90,6 +90,7 @@ struct PlayerView: View {
   @State private var channelDisplayName: String = ""
   @State private var channelAvatarURL: URL?
   @State private var chatDraft: String = ""
+  @State private var chatInputActivationToken: Int = 0
   @State private var isSendingChat = false
   @State private var chatSendError: String?
   /// When chat sync is active, a sent message is held until it appears in the
@@ -1311,33 +1312,46 @@ struct PlayerView: View {
 
       if auth.isAuthenticated {
         HStack(spacing: 16) {
-          TextField("Send a message", text: $chatDraft)
-            .textFieldStyle(.plain)
-            .font(.callout)
-            .foregroundStyle(.white)
-            .tint(.white)
-            .lineLimit(1)
-            .submitLabel(.send)
-            .onSubmit(submitChatMessage)
+          Button {
+            chatInputActivationToken &+= 1
+          } label: {
+            ZStack(alignment: .leading) {
+              ChatKeyboardHostField(
+                text: $chatDraft,
+                activationToken: chatInputActivationToken,
+                onSubmit: submitChatMessage
+              )
+              .allowsHitTesting(false)
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+              Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
+                .font(.callout)
+                .foregroundStyle(.white.opacity(chatDraft.isEmpty ? 0.5 : 1.0))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity)
             .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
             .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
-            .focused($focus, equals: .chatInput)
-            .focusEffectDisabled()
-            .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
-            .onMoveCommand { direction in
-              switch direction {
-              case .left:
-                revealControls(preferredFocus: .chatToggle)
-              case .up:
-                focus = .chatSettingsButton
-              case .right:
-                if hasChatDraft { focus = .chatSend }
-              default:
-                break
-              }
+          }
+          .buttonStyle(ChatInputButtonStyle())
+          .focusEffectDisabled()
+          .focused($focus, equals: .chatInput)
+          .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+          .onMoveCommand { direction in
+            switch direction {
+            case .left:
+              revealControls(preferredFocus: .chatToggle)
+            case .up:
+              focus = .chatSettingsButton
+            case .right:
+              if hasChatDraft { focus = .chatSend }
+            default:
+              break
             }
+          }
 
           if hasChatDraft {
             Button {
@@ -2306,6 +2320,79 @@ private struct ChatGlassFieldStyle: ViewModifier {
         .background(.ultraThinMaterial, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.5 : 0.10), lineWidth: isFocused ? 1.5 : 0.75))
         .scaleEffect(isFocused ? 1.02 : 1.0)
+    }
+  }
+}
+
+/// Hosts the tvOS keyboard for the chat composer. The visible capsule and draft
+/// text are drawn in SwiftUI; this `UITextField` stays visually clear so only
+/// the Liquid Glass capsule shows. It deliberately keeps a normal (non‑zero)
+/// alpha — tvOS treats near‑invisible views as hidden and instantly resigns
+/// their first responder, which is why the previous version's keyboard vanished
+/// the moment it appeared. Becoming first responder is also deferred off the
+/// SwiftUI update pass so it isn't torn down by the in‑flight view update.
+private struct ChatKeyboardHostField: UIViewRepresentable {
+  @Binding var text: String
+  var activationToken: Int = 0
+  var onSubmit: () -> Void = {}
+
+  func makeUIView(context: Context) -> UITextField {
+    let field = UITextField()
+    field.delegate = context.coordinator
+    field.borderStyle = .none
+    field.backgroundColor = .clear
+    field.textColor = .clear
+    field.tintColor = .clear
+    field.font = .preferredFont(forTextStyle: .callout)
+    field.returnKeyType = .send
+    field.enablesReturnKeyAutomatically = true
+    field.autocorrectionType = .no
+    field.smartQuotesType = .no
+    field.smartDashesType = .no
+    field.addTarget(
+      context.coordinator,
+      action: #selector(Coordinator.editingChanged(_:)),
+      for: .editingChanged
+    )
+    return field
+  }
+
+  func updateUIView(_ uiView: UITextField, context: Context) {
+    context.coordinator.parent = self
+    if uiView.text != text {
+      uiView.text = text
+    }
+
+    if context.coordinator.lastActivationToken != activationToken {
+      context.coordinator.lastActivationToken = activationToken
+      DispatchQueue.main.async {
+        if !uiView.isFirstResponder {
+          uiView.becomeFirstResponder()
+        }
+      }
+    }
+  }
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(self, lastActivationToken: activationToken)
+  }
+
+  final class Coordinator: NSObject, UITextFieldDelegate {
+    var parent: ChatKeyboardHostField
+    var lastActivationToken: Int
+
+    init(_ parent: ChatKeyboardHostField, lastActivationToken: Int) {
+      self.parent = parent
+      self.lastActivationToken = lastActivationToken
+    }
+
+    @objc func editingChanged(_ field: UITextField) {
+      parent.text = field.text ?? ""
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+      parent.onSubmit()
+      return false
     }
   }
 }
