@@ -5,6 +5,7 @@ import SwiftUI
 struct BrowseView: View {
   let auth: TwitchAuthSession
   @Binding var selectedChannel: FollowedChannel?
+  @Binding var channelPageTarget: ChannelPageTarget?
   @Binding var pendingCategory: TwitchCategory?
   @Binding var path: [TwitchCategory]
 
@@ -35,7 +36,8 @@ struct BrowseView: View {
         BrowseStreamsView(
           category: category,
           service: service,
-          selectedChannel: $selectedChannel
+          selectedChannel: $selectedChannel,
+          channelPageTarget: $channelPageTarget
         )
         .task(id: category.id) {
           await service.loadStreams(for: category)
@@ -140,6 +142,7 @@ private struct BrowseStreamsView: View {
   let category: TwitchCategory
   let service: BrowseService
   @Binding var selectedChannel: FollowedChannel?
+  @Binding var channelPageTarget: ChannelPageTarget?
 
   @Environment(\.dismiss) private var dismiss
   @FocusState private var focusedStreamID: String?
@@ -223,7 +226,9 @@ private struct BrowseStreamsView: View {
                 let isFocused = focusedStreamID == channel.id
                 StreamChannelCard(
                   channel: channel,
-                  isFocused: isFocused
+                  isFocused: isFocused,
+                  onWatch: { selectedChannel = $0 },
+                  onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 16))
                 .focusable(true)

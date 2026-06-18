@@ -93,6 +93,10 @@ struct PlayerView: View {
   @State private var streamTitle: String = ""
   @State private var channelDisplayName: String = ""
   @State private var channelAvatarURL: URL?
+  @State private var channelPageTarget: ChannelPageTarget?
+  /// When the user picks a "More like this" channel from the channel page, we
+  /// stash its login and switch to it once the page cover finishes dismissing.
+  @State private var pendingSwitchLogin: String?
   @State private var chatDraft: String = ""
   @State private var chatInputActivationToken: Int = 0
   @State private var isSendingChat = false
@@ -280,6 +284,21 @@ struct PlayerView: View {
   var body: some View {
     ZStack {
       palette.playerBackdrop.ignoresSafeArea()
+        // Attached to the backdrop (a child) rather than the root ZStack so it
+        // doesn't collide with the sign-in `.fullScreenCover` below. Two
+        // presentation modifiers on the *same* view conflict on tvOS and only
+        // one fires, which previously left the avatar button doing nothing.
+        .fullScreenCover(item: $channelPageTarget, onDismiss: { resumeAfterChannelPage() }) { target in
+          ChannelPageView(
+            target: target,
+            showsHeaderWatch: false,
+            onWatchChannel: { channel in
+              pendingSwitchLogin = channel.login
+              channelPageTarget = nil
+            }
+          )
+          .environment(\.themePalette, palette)
+        }
 
       if chatLayoutMode.isOverlay {
         videoColumn
@@ -531,7 +550,7 @@ struct PlayerView: View {
     HStack(alignment: .top, spacing: 24) {
       HStack(alignment: .top, spacing: 12) {
         Button {
-          scheduleHide()
+          presentChannelPage()
         } label: {
           Group {
             if let channelAvatarURL {
@@ -938,6 +957,43 @@ struct PlayerView: View {
         }
         hideControls()
       }
+    }
+  }
+
+  // MARK: - Channel page
+
+  /// Opens the full-screen channel page for the active channel. The live stream
+  /// is paused while the page is up, and its latency monitor + watchdog are
+  /// suspended so the non-advancing playhead isn't mistaken for a stall.
+  private func presentChannelPage() {
+    hideTask?.cancel()
+    focusRecoveryTask?.cancel()
+    stopPlaybackWatchdog()
+    stopLatencyMonitor()
+    player.pause()
+    channelPageTarget = ChannelPageTarget(
+      login: activeChannel,
+      displayName: channelDisplayName.isEmpty ? activeChannel : channelDisplayName,
+      profileImageURL: channelAvatarURL
+    )
+  }
+
+  /// Resumes live playback once the channel page is dismissed — or switches to a
+  /// different channel if the user picked one from the page's "More like this".
+  private func resumeAfterChannelPage() {
+    if let login = pendingSwitchLogin {
+      pendingSwitchLogin = nil
+      followRaid(login)
+      return
+    }
+    startPlayback()
+    startLatencyMonitor()
+    startPlaybackWatchdog()
+    if showControls {
+      focus = .streamInfo
+      scheduleHide()
+    } else {
+      focus = .video
     }
   }
 

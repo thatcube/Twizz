@@ -158,6 +158,120 @@ struct PlaybackService {
         )
     }
 
+    // MARK: - On-demand (clips + VODs)
+
+    /// Resolves a clip slug to a directly-playable MP4 URL (highest quality),
+    /// signed with the clip's anonymous playback access token.
+    static func clipSourceURL(slug: String) async throws -> URL {
+        let query = """
+            query ClipPlayback($slug: ID!) {
+              clip(slug: $slug) {
+                playbackAccessToken(params: {platform: "web", playerBackend: "mediaplayer", playerType: "site"}) {
+                  signature value
+                }
+                videoQualities { quality frameRate sourceURL }
+              }
+            }
+            """
+
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
+        req.httpMethod = "POST"
+        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(
+            withJSONObject: ["query": query, "variables": ["slug": slug]]
+        )
+
+        let (data, response) = try await networkSession.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else { throw PlaybackError.http(status) }
+
+        guard
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let dataObj = json["data"] as? [String: Any],
+            let clip = dataObj["clip"] as? [String: Any],
+            let token = clip["playbackAccessToken"] as? [String: Any],
+            let signature = token["signature"] as? String,
+            let value = token["value"] as? String,
+            let qualities = clip["videoQualities"] as? [[String: Any]]
+        else { throw PlaybackError.badResponse }
+
+        // Qualities arrive ordered best -> worst; take the first valid source.
+        guard let best = qualities.first(where: { ($0["sourceURL"] as? String)?.isEmpty == false }),
+              let source = best["sourceURL"] as? String,
+              var comps = URLComponents(string: source)
+        else { throw PlaybackError.offline }
+
+        var items = comps.queryItems ?? []
+        items.append(URLQueryItem(name: "sig", value: signature))
+        items.append(URLQueryItem(name: "token", value: value))
+        comps.queryItems = items
+        guard let url = comps.url else { throw PlaybackError.badResponse }
+        return url
+    }
+
+    /// Resolves a VOD id to a seekable HLS master-playlist URL, signed with the
+    /// VOD's anonymous playback access token (the `isVod` path of the same
+    /// PlaybackAccessToken operation used for live streams).
+    static func vodMasterURL(id: String) async throws -> URL {
+        let token = try await fetchVodAccessToken(vodID: id)
+        var comps = URLComponents(string: "https://usher.ttvnw.net/vod/\(id).m3u8")!
+        comps.queryItems = [
+            URLQueryItem(name: "platform", value: "web"),
+            URLQueryItem(name: "p", value: String(Int.random(in: 0..<999999))),
+            URLQueryItem(name: "allow_source", value: "true"),
+            URLQueryItem(name: "allow_audio_only", value: "true"),
+            URLQueryItem(name: "playlist_include_framerate", value: "true"),
+            URLQueryItem(name: "supported_codecs", value: "h264"),
+            URLQueryItem(name: "sig", value: token.signature),
+            URLQueryItem(name: "token", value: token.value),
+        ]
+        let usher = comps.url!
+        try await validatePlaylist(usher)
+        return usher
+    }
+
+    private static func fetchVodAccessToken(vodID: String) async throws -> Token {
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
+        req.httpMethod = "POST"
+        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "operationName": "PlaybackAccessToken",
+            "extensions": ["persistedQuery": ["version": 1, "sha256Hash": accessTokenHash]],
+            "variables": [
+                "isLive": false,
+                "login": "",
+                "isVod": true,
+                "vodID": vodID,
+                "playerType": "embed",
+                "platform": "site",
+            ],
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await networkSession.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else { throw PlaybackError.http(status) }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw PlaybackError.badResponse
+        }
+        if let errors = json["errors"] as? [[String: Any]] {
+            let msg = (errors.first?["message"] as? String ?? "").lowercased()
+            throw msg.contains("integrity") ? PlaybackError.integrityRequired : PlaybackError.badResponse
+        }
+        guard let dataObj = json["data"] as? [String: Any],
+              let tokenObj = dataObj["videoPlaybackAccessToken"] as? [String: Any],
+              let value = tokenObj["value"] as? String,
+              let signature = tokenObj["signature"] as? String
+        else { throw PlaybackError.offline }
+        return Token(value: value, signature: signature)
+    }
+
     private static func fetchAccessToken(channel: String) async throws -> Token {
         var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
