@@ -1432,7 +1432,7 @@ struct PlayerView: View {
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Appearance")
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatAppearancePreset.allCases.enumerated()), id: \.element) { index, preset in
             settingsPill(
               title: preset.title,
@@ -1464,7 +1464,7 @@ struct PlayerView: View {
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Chat Position")
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatLayoutMode.allCases.enumerated()), id: \.element) { index, mode in
             settingsPill(
               title: mode.title,
@@ -1701,11 +1701,12 @@ struct PlayerView: View {
       VStack(alignment: .leading, spacing: 10) {
         settingsSectionHeader("Typeface")
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatFontStyle.allCases.enumerated()), id: \.element) { index, style in
             settingsPill(
               title: style.title,
               isSelected: style == chatFontStyle,
+              fontDesign: style.design,
               focusTag: .chatFontOption(index)
             ) {
               chatFontStyleRaw = style.rawValue
@@ -1761,6 +1762,7 @@ struct PlayerView: View {
     title: String,
     isSelected: Bool,
     icon: Glyph? = nil,
+    fontDesign: Font.Design? = nil,
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
@@ -1772,6 +1774,7 @@ struct PlayerView: View {
 
         Text(title)
           .font(.subheadline.weight(isSelected ? .semibold : .regular))
+          .fontDesign(fontDesign)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
 
