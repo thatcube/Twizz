@@ -102,6 +102,16 @@ final class ChatService {
   private var chatSyncDelaySeconds: Double = 0
   /// Minimum delay for sync to actually hold messages; below this it's a no-op.
   private let chatSyncMinDelaySeconds: Double = 0.75
+  /// On a fresh connect the effective sync delay eases from 0 up to the full
+  /// `chatSyncDelaySeconds` over this window, so live Twitch + YouTube messages
+  /// surface almost immediately at the start and gradually settle into sync.
+  private let chatSyncWarmupSeconds: Double = 30
+  /// Wall-clock anchor for the warm-up ramp, set on each fresh `connect`.
+  private var syncWarmupStart: Date?
+  /// Hard ceiling on how many already-behind-the-playhead backlog messages we
+  /// dump immediately on connect, so the panel seeds with recent context
+  /// instead of a wall of history.
+  private let maxImmediateBacklogMessages = 8
 
   private struct PendingChatMessage {
     let message: ChatMessage
@@ -178,6 +188,7 @@ final class ChatService {
     youtubeSeenMessageIDs.removeAll()
     youtubeSeenMessageOrder.removeAll()
     youtubeStatusMessage = nil
+    syncWarmupStart = Date()
 
     let task = URLSession(configuration: .default).webSocketTask(with: endpoint)
     socket = task
@@ -218,6 +229,7 @@ final class ChatService {
     syncDrainTask = nil
     syncBuffer.removeAll()
     pendingSyncMessageCount = 0
+    syncWarmupStart = nil
     emoteURLs.removeAll()
     badgeURLs.removeAll()
     youtubeSeenMessageIDs.removeAll()
@@ -410,8 +422,9 @@ final class ChatService {
         let clampedDelay = max(youtubePollMinDelayMs, delay)
 
         if isFirstPoll {
-          // On first load, show all messages immediately so they appear as
-          // pre-existing history rather than a sudden flood of activity.
+          // First load: enqueue normally. The playhead + warm-up rule shows
+          // recent backlog right away (capped) and eases live messages in,
+          // so the panel fills instantly instead of waiting out the full delay.
           if !freshMessages.isEmpty { enqueue(freshMessages) }
           isFirstPoll = false
           try? await Task.sleep(for: .milliseconds(Int(clampedDelay)))
@@ -968,6 +981,18 @@ final class ChatService {
     return trimmed
   }
 
+  /// Sync delay actually applied right now. Eases from 0 up to the full
+  /// `chatSyncDelaySeconds` over `chatSyncWarmupSeconds` after a fresh connect,
+  /// so live messages from both platforms surface almost immediately at the
+  /// start and gradually settle into video-sync.
+  private func effectiveSyncDelay(now: Date) -> Double {
+    guard chatSyncEnabled else { return 0 }
+    let full = chatSyncDelaySeconds
+    guard let start = syncWarmupStart, chatSyncWarmupSeconds > 0 else { return full }
+    let progress = min(max(now.timeIntervalSince(start) / chatSyncWarmupSeconds, 0), 1)
+    return full * progress
+  }
+
   private func enqueue(_ incoming: [ChatMessage]) {
     let sorted = incoming.sorted { lhs, rhs in
       if lhs.timestamp == rhs.timestamp {
@@ -976,15 +1001,59 @@ final class ChatService {
       return lhs.timestamp < rhs.timestamp
     }
 
-    if chatSyncEnabled, chatSyncDelaySeconds >= chatSyncMinDelaySeconds {
-      let releaseAt = Date().addingTimeInterval(chatSyncDelaySeconds)
-      for message in sorted {
+    guard chatSyncEnabled, chatSyncDelaySeconds >= chatSyncMinDelaySeconds else {
+      appendVisible(sorted)
+      return
+    }
+
+    let now = Date()
+    let delay = effectiveSyncDelay(now: now)
+    // The synced playhead at full delay; anything older is true scrollback.
+    let fullPlayhead = now.addingTimeInterval(-chatSyncDelaySeconds)
+
+    var immediate: [ChatMessage] = []
+    var backlog: [ChatMessage] = []
+    for message in sorted {
+      let releaseAt = message.timestamp.addingTimeInterval(delay)
+      if releaseAt > now {
         syncBuffer.append(PendingChatMessage(message: message, releaseAt: releaseAt))
+      } else if message.timestamp < fullPlayhead {
+        // Behind the synced playhead: old scrollback, subject to the cap.
+        backlog.append(message)
+      } else {
+        // In-window or live but releasable now (e.g. during warm-up): always show.
+        immediate.append(message)
+      }
+    }
+
+    // Cap the scrollback dump to the most recent few so the panel seeds with
+    // recent context instead of a wall of history.
+    if backlog.count > maxImmediateBacklogMessages {
+      backlog.removeFirst(backlog.count - maxImmediateBacklogMessages)
+    }
+
+    let visibleNow = (backlog + immediate).sorted { lhs, rhs in
+      if lhs.timestamp == rhs.timestamp {
+        return lhs.id.uuidString < rhs.id.uuidString
+      }
+      return lhs.timestamp < rhs.timestamp
+    }
+    appendVisible(visibleNow)
+
+    if !syncBuffer.isEmpty {
+      // Keep release order correct even when immediate + delayed messages
+      // interleave across enqueue calls.
+      syncBuffer.sort { lhs, rhs in
+        if lhs.releaseAt == rhs.releaseAt {
+          if lhs.message.timestamp == rhs.message.timestamp {
+            return lhs.message.id.uuidString < rhs.message.id.uuidString
+          }
+          return lhs.message.timestamp < rhs.message.timestamp
+        }
+        return lhs.releaseAt < rhs.releaseAt
       }
       pendingSyncMessageCount = syncBuffer.count
       startSyncDrainIfNeeded()
-    } else {
-      appendVisible(sorted)
     }
   }
 
