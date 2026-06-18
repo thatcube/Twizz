@@ -1329,22 +1329,36 @@ struct PlayerView: View {
       resolvedQualityName = nil
       return
     }
-    guard let playback,
-      let size = player.currentItem?.presentationSize,
-      size.width > 0, size.height > 0
-    else {
-      return
-    }
+    guard let playback else { return }
 
-    let height = Int(size.height.rounded())
-    let candidates: [(Int, String)] = playback.qualities.compactMap { quality in
+    let videoVariants = playback.qualities.filter { !$0.isAudioOnly }
+    // Named variants that advertise a parseable resolution, e.g. "720p60".
+    let namedCandidates: [(Int, String)] = videoVariants.compactMap { quality in
       guard let resolution = Self.verticalResolution(from: quality.name) else { return nil }
       return (resolution, Self.shortQualityName(quality.name))
     }
-    guard let best = candidates.min(by: { abs($0.0 - height) < abs($1.0 - height) }) else {
+
+    // Preferred path: match the live adaptive resolution to the nearest named
+    // variant so we keep its exact label (including frame rate).
+    if let size = player.currentItem?.presentationSize, size.height > 0 {
+      let height = Int(size.height.rounded())
+      if let best = namedCandidates.min(by: { abs($0.0 - height) < abs($1.0 - height) }) {
+        resolvedQualityName = best.1
+        return
+      }
+      // Variants don't expose a parseable resolution (e.g. transcoding
+      // disabled, source named "chunked"): derive the label from the decoded
+      // frame height directly so it still shows something accurate.
+      resolvedQualityName = "\(height)p"
       return
     }
-    resolvedQualityName = best.1
+
+    // Presentation size not yet known. If the stream offers a single video
+    // rendition, Auto is effectively that rendition — show it rather than
+    // leaving the label stuck on a bare "Auto".
+    if videoVariants.count == 1 {
+      resolvedQualityName = Self.shortQualityName(videoVariants[0].name)
+    }
   }
 
   private func selectQuality(at index: Int) {
