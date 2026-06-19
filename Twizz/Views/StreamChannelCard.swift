@@ -234,6 +234,10 @@ struct StreamChannelCard: View {
           Text("\(viewerCount) watching")
             .font(.caption2)
             .foregroundStyle(Color.white.opacity(0.92))
+        } else if !channel.isLive {
+          Text("Offline")
+            .font(.caption2)
+            .foregroundStyle(Color.white.opacity(0.92))
         }
       }
       .padding(12)
