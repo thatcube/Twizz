@@ -329,16 +329,17 @@ struct PlayerView: View {
   /// focus is trapped on the composer, so we drive an accelerating repeat
   /// ourselves while the finger stays pressed/down on the pad.
   @State private var chatHoldTask: Task<Void, Never>?
-  /// Delay after the initial press before auto-repeat kicks in (key-repeat feel).
-  private let chatHoldInitialDelay: Double = 0.25
-  /// Repeat interval at the start of a hold, shrinking toward the minimum.
-  private let chatHoldStartInterval: Double = 0.26
-  /// Fastest repeat interval the hold accelerates to.
-  private let chatHoldMinInterval: Double = 0.06
-  /// Each repeat multiplies the interval by this, accelerating the hold.
-  private let chatHoldAccel: Double = 0.82
-  /// When the hold watcher last auto-repeated, used to swallow the single
-  /// discrete move event the click also emits on release.
+  /// Delay after click-down before the continuous hold-scroll engages, so a quick
+  /// tap stays a single discrete step.
+  private let chatHoldInitialDelay: Double = 0.2
+  /// Continuous hold-scroll speed (messages per 60Hz frame) at engage time.
+  private let chatHoldStartVelocity: Double = 0.18
+  /// Top speed the hold accelerates to (messages per frame).
+  private let chatHoldMaxVelocity: Double = 1.4
+  /// Per-frame multiplier that ramps the hold speed up (acceleration).
+  private let chatHoldVelocityAccel: Double = 1.035
+  /// When the hold last scrolled, used to swallow the single discrete move event
+  /// the click also emits on release.
   @State private var lastHoldRepeatAt = Date.distantPast
   /// When the composer last became focused, used to ignore a stray up-swipe that
   /// rides in on a diagonal move from the chat-toggle button (accidental pause).
@@ -1794,59 +1795,52 @@ struct PlayerView: View {
     return true
   }
 
-  /// Auto-repeat a press while the touch surface is physically *held* clicked.
-  /// tvOS gives no press-down or key-repeat event for a directional click here —
-  /// the discrete move only arrives on release — so we watch the GameController
-  /// click button (`clickPressed`) plus the finger's up/down zone and step on an
-  /// accelerating interval until the click is released. Requires the trackpad
-  /// monitor.
+  /// Continuously auto-scroll while the touch surface is physically *held*
+  /// clicked. tvOS gives no press-down/key-repeat event for a directional click
+  /// here — only a single move on release — and the live finger position is
+  /// unreliable once clicked, so we key off the reliable click button plus the
+  /// direction latched at click-down. Scrolls via the same continuous index model
+  /// as a swipe (un-animated, accelerating) so a hold feels fluid, not steppy.
   private func startChatHoldWatcher() {
     guard trackpad.hasController, chatHoldTask == nil else { return }
     chatHoldTask = Task { @MainActor in
       var pressStart: Date?
-      var repeating = false
-      var interval = chatHoldStartInterval
-      var nextRepeatAt = Date.distantFuture
+      var active = false
+      var velocity = 0.0
       while !Task.isCancelled {
         try? await Task.sleep(for: .milliseconds(16))
         if Task.isCancelled { break }
         guard isChatScrolling else { break }
 
-        let y = Double(trackpad.verticalValue)
-        let up = y > chatScrollTouchEpsilon
-        let down = y < -chatScrollTouchEpsilon
-        let held = trackpad.clickPressed && (up || down)
-
-        // Only a released (or off-zone) click resets the hold. Crucially, a brief
-        // swipe-settle as the finger lands must NOT reset it, or the initial
-        // delay restarts every time and the first hold never repeats.
+        let dir = trackpad.clickLatchedDirection
+        let held = trackpad.clickPressed && dir != 0
         guard held else {
           pressStart = nil
-          repeating = false
-          interval = chatHoldStartInterval
-          nextRepeatAt = Date.distantFuture
+          active = false
+          velocity = 0
           continue
         }
 
         let now = Date()
         if pressStart == nil {
           pressStart = now
-          repeating = false
-          interval = chatHoldStartInterval
+          active = false
+          velocity = 0
         }
-        if !repeating, now.timeIntervalSince(pressStart!) >= chatHoldInitialDelay {
-          repeating = true
-          nextRepeatAt = now
+        // Let an active swipe own the scroll; pause the hold without resetting.
+        if Date().timeIntervalSince(lastGestureScrollAt) < 0.12 { continue }
+        if !active {
+          guard now.timeIntervalSince(pressStart!) >= chatHoldInitialDelay else {
+            continue
+          }
+          active = true
+          velocity = chatHoldStartVelocity
         }
-        // Pause (don't reset) repeats while a swipe is actively driving so the two
-        // input paths never double up.
-        let swiping = Date().timeIntervalSince(lastGestureScrollAt) < 0.12
-        if repeating, !swiping, now >= nextRepeatAt {
-          stepChatScroll(up: up)
-          lastHoldRepeatAt = now
-          nextRepeatAt = now.addingTimeInterval(interval)
-          interval = max(chatHoldMinInterval, interval * chatHoldAccel)
-        }
+        // Up (dir +1) scrolls toward older messages, i.e. a negative index delta.
+        let delta = dir > 0 ? -velocity : velocity
+        lastHoldRepeatAt = now
+        if !applyScrollDelta(delta) { break }  // reached the live bottom
+        velocity = min(chatHoldMaxVelocity, velocity * chatHoldVelocityAccel)
       }
       chatHoldTask = nil
     }
@@ -5075,6 +5069,11 @@ final class RemoteTrackpadMonitor {
   /// directional press from a mere finger rest.
   private(set) var dpadUpPressed = false
   private(set) var dpadDownPressed = false
+  /// Direction (+1 up / -1 down / 0 none) captured at the instant of a click,
+  /// while the finger position is still trustworthy. The live dpad/`y` reading
+  /// flickers once the surface is clicked, so a held repeat keys off this latch
+  /// plus `clickPressed` rather than the live position.
+  private(set) var clickLatchedDirection = 0
   private var observers: [NSObjectProtocol] = []
 
   func start() {
@@ -5095,6 +5094,7 @@ final class RemoteTrackpadMonitor {
         self?.clickPressed = false
         self?.dpadUpPressed = false
         self?.dpadDownPressed = false
+        self?.clickLatchedDirection = 0
       })
   }
 
@@ -5106,6 +5106,7 @@ final class RemoteTrackpadMonitor {
     clickPressed = false
     dpadUpPressed = false
     dpadDownPressed = false
+    clickLatchedDirection = 0
   }
 
   private func configure(_ controller: GCController) {
@@ -5122,7 +5123,20 @@ final class RemoteTrackpadMonitor {
     // the finger over the up/down zone) is how we detect a held directional
     // press for auto-repeat.
     micro.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
-      self?.clickPressed = pressed
+      guard let self else { return }
+      self.clickPressed = pressed
+      if pressed {
+        // Latch direction now, while the finger position is still reliable.
+        if self.dpadUpPressed || self.verticalValue > 0.2 {
+          self.clickLatchedDirection = 1
+        } else if self.dpadDownPressed || self.verticalValue < -0.2 {
+          self.clickLatchedDirection = -1
+        } else {
+          self.clickLatchedDirection = 0
+        }
+      } else {
+        self.clickLatchedDirection = 0
+      }
     }
     micro.dpad.up.pressedChangedHandler = { [weak self] _, _, pressed in
       self?.dpadUpPressed = pressed
