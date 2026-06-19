@@ -3189,9 +3189,14 @@ struct PlayerView: View {
     }
 
     outgoingRaidFollowTask?.cancel()
+    // A channel ends its stream the instant it raids, so the offline empty state
+    // can flash in during the brief window before this event arrives (the source
+    // HLS hits #EXT-X-ENDLIST). Clear it so the raid banner — not "OFFLINE" — is
+    // what the viewer sees.
+    isOffline = false
     withAnimation {
       outgoingRaid = raid
-      outgoingRaidSecondsRemaining = 6
+      outgoingRaidSecondsRemaining = 10
     }
     focus = .raidFollowCancel
 
@@ -3211,6 +3216,11 @@ struct PlayerView: View {
   private func cancelOutgoingRaid() {
     clearOutgoingRaidState()
     focus = .video
+    // Choosing to stay put after a raid usually means the source has already
+    // ended its stream. Re-check immediately (bypassing the probe cooldown) so
+    // the offline empty state surfaces instead of a frozen last frame.
+    lastOfflineProbeAt = .distantPast
+    probeOfflineIfStreamEnded()
   }
 
   /// Debug-only: inject a simulated outgoing raid so the auto-follow flow can be
@@ -4408,7 +4418,17 @@ struct PlayerView: View {
   /// Switches the player into the clean "offline / stream ended" empty state.
   /// Tears down the live machinery and drops the current item so the frozen last
   /// frame is replaced by the empty-state backdrop.
+  /// True while an outgoing raid is pending or its auto-follow countdown is
+  /// running. A channel ends its stream the moment it raids, so the offline
+  /// empty state must never pre-empt the raid banner during this window.
+  private var isFollowingOutgoingRaid: Bool {
+    outgoingRaid != nil || eventSub.pendingOutgoingRaid != nil
+  }
+
   private func presentOfflineState() {
+    // Never flash "OFFLINE" while a raid is in flight — the raid banner and its
+    // auto-follow take precedence over the offline empty state.
+    guard !isFollowingOutgoingRaid else { return }
     stopPlaybackWatchdog()
     stopLatencyMonitor()
     audioLevelMonitor.stop()
