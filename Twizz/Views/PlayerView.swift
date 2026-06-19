@@ -1268,6 +1268,15 @@ struct PlayerView: View {
           }
           .TwizzControlButtonStyle()
           .focused($focus, equals: .offlineTryAgain)
+          .onMoveCommand { direction in
+            // Chat sits to the right of the offline buttons. Make the hop into
+            // it deterministic so it doesn't depend on focus-engine geometry
+            // (the composer is anchored to the bottom of the pane, well below
+            // these centered buttons).
+            if direction == .right, showChat {
+              focus = chatFocusAnchor
+            }
+          }
         }
         .padding(.top, 8)
       }
@@ -1656,11 +1665,12 @@ struct PlayerView: View {
   /// Left-press target when leaving the chat composer. While the channel is
   /// offline the bottom controls (and `.chatToggle`) aren't rendered — the
   /// offline empty state is shown instead — so revealing controls would focus a
-  /// target that doesn't exist and trap focus on the composer. Jump straight to
-  /// the offline state's primary button in that case.
+  /// target that doesn't exist and trap focus on the composer. Return to the
+  /// offline state's "Try Again" button, which is the control adjacent to the
+  /// chat pane, so a subsequent right-press hops straight back into chat.
   func exitChatComposerLeft() {
     if isOffline {
-      focus = .offlineViewChannel
+      focus = .offlineTryAgain
     } else {
       revealControls(preferredFocus: .chatToggle)
     }
