@@ -757,7 +757,7 @@ private struct FocusableTile<Content: View>: View {
       .focused($isFocused)
       .onTapGesture(perform: onSelect)
       .scaleEffect(isFocused ? focusedScale : 1)
-      .animation(.easeOut(duration: 0.14), value: isFocused)
+      .animation(AppLayout.focusScaleAnimation, value: isFocused)
       .zIndex(isFocused ? 2 : 0)
   }
 }
