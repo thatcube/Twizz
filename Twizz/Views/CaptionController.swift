@@ -37,6 +37,10 @@ final class CaptionController {
     /// Sendable, so it must only ever be called here on the MainActor.
     private var playerClock: (() -> Date?)?
     private var playheadTimer: Timer?
+    /// Clears stale captions when the speaker goes quiet, so the last phrase
+    /// doesn't linger on screen indefinitely.
+    private var idleTimer: Timer?
+    private let idleTimeout: TimeInterval = 4.0
     /// Identity of the currently-running configuration, so repeated `sync` calls
     /// with unchanged inputs don't tear down and restart the engine.
     private var activeKey: String?
@@ -112,6 +116,8 @@ final class CaptionController {
         startTask = nil
         playheadTimer?.invalidate()
         playheadTimer = nil
+        idleTimer?.invalidate()
+        idleTimer = nil
         isActive = false
         if #available(tvOS 26.0, *), let engine = engine as? LiveCaptionEngine {
             Task { await engine.stop() }
@@ -145,9 +151,29 @@ final class CaptionController {
             }
             volatileLine = ""
         }
+        scheduleIdleClear()
+    }
+
+    /// Restart the idle countdown on every recognized update; if no new caption
+    /// arrives within `idleTimeout`, fade the lingering text away.
+    private func scheduleIdleClear() {
+        idleTimer?.invalidate()
+        let timer = Timer(timeInterval: idleTimeout, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.clearDisplayed() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        idleTimer = timer
+    }
+
+    /// Clear only the on-screen caption text (keeps the engine running).
+    private func clearDisplayed() {
+        finalizedLines.removeAll()
+        volatileLine = ""
     }
 
     private func clearText() {
+        idleTimer?.invalidate()
+        idleTimer = nil
         finalizedLines.removeAll()
         volatileLine = ""
         failed = false
@@ -175,11 +201,11 @@ struct CaptionOverlayView: View {
                   .font(.system(.title2, weight: .semibold))
                   .multilineTextAlignment(.center)
                   .foregroundStyle(.white)
-                  .lineLimit(2)
-                  // Keep the most recent words visible; drop older ones off the
-                  // front rather than hiding what was just said.
+                  .lineLimit(1)
+                  // Single, fixed-height line that always shows the most recent
+                  // words (older ones scroll off the front) — avoids the jank of
+                  // the slab growing to two lines and snapping back to one.
                   .truncationMode(.head)
-                  .fixedSize(horizontal: false, vertical: true)
                   .padding(.horizontal, 28)
                   .padding(.vertical, 14)
                   .background(captionBackground)
