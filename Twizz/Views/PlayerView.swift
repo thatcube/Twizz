@@ -330,7 +330,7 @@ struct PlayerView: View {
   /// ourselves while the finger stays pressed/down on the pad.
   @State private var chatHoldTask: Task<Void, Never>?
   /// Delay after the initial press before auto-repeat kicks in (key-repeat feel).
-  private let chatHoldInitialDelay: Double = 0.35
+  private let chatHoldInitialDelay: Double = 0.25
   /// Repeat interval at the start of a hold, shrinking toward the minimum.
   private let chatHoldStartInterval: Double = 0.26
   /// Fastest repeat interval the hold accelerates to.
@@ -1801,10 +1801,11 @@ struct PlayerView: View {
         let up = y > chatScrollTouchEpsilon
         let down = y < -chatScrollTouchEpsilon
         let held = trackpad.clickPressed && (up || down)
-        // A swipe is actively driving — let the gesture loop own it.
-        let swiping = Date().timeIntervalSince(lastGestureScrollAt) < 0.12
 
-        guard held, !swiping else {
+        // Only a released (or off-zone) click resets the hold. Crucially, a brief
+        // swipe-settle as the finger lands must NOT reset it, or the initial
+        // delay restarts every time and the first hold never repeats.
+        guard held else {
           pressStart = nil
           repeating = false
           interval = chatHoldStartInterval
@@ -1822,7 +1823,10 @@ struct PlayerView: View {
           repeating = true
           nextRepeatAt = now
         }
-        if repeating, now >= nextRepeatAt {
+        // Pause (don't reset) repeats while a swipe is actively driving so the two
+        // input paths never double up.
+        let swiping = Date().timeIntervalSince(lastGestureScrollAt) < 0.12
+        if repeating, !swiping, now >= nextRepeatAt {
           stepChatScroll(up: up)
           lastHoldRepeatAt = now
           nextRepeatAt = now.addingTimeInterval(interval)
@@ -1860,6 +1864,8 @@ struct PlayerView: View {
 
     if up {
       let target = max(0, currentIndex - chatScrollStep)
+      // Already at the top — don't re-send the same target (wasted scroll work).
+      guard target != currentIndex else { return }
       chatScrollAnchorID = msgs[target].id
       trackpadScrollIndex = Double(target)
       lastSentScrollIndex = target
