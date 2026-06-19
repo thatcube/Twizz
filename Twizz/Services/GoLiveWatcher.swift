@@ -121,6 +121,8 @@ final class GoLiveWatcher {
           clientID: clientID, accessToken: token,
           query: [URLQueryItem(name: "login", value: "monstercat")]))?.values.first
       }
+      // Decode the avatar before presenting so it animates in with the toast.
+      await ImageMemoryCache.shared.prewarm(profileURL)
       self.enqueue(
         GoLiveEvent(
           login: "monstercat", displayName: "Monstercat", gameName: "Music",
@@ -192,6 +194,8 @@ final class GoLiveWatcher {
       )
     }
 
+    // Decode avatars before presenting so they animate in with each toast.
+    for event in events { await ImageMemoryCache.shared.prewarm(event.profileImageURL) }
     for event in events { enqueue(event) }
   }
 
