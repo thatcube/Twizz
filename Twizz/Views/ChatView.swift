@@ -31,6 +31,9 @@ struct ChatView: View {
   /// the ScrollView's identity so it is rebuilt fresh on entry, which is the
   /// only way tvOS reliably grants it focus.
   var scrollGeneration: Int = 0
+  /// When non-nil, chat is in the lightweight "soft pause" read mode and this is
+  /// the seconds remaining before it auto-resumes. Drives the countdown pill.
+  var softPauseRemaining: Int? = nil
   @Environment(\.themePalette) private var palette
   @State private var pendingScrollWork: DispatchWorkItem?
 
@@ -115,6 +118,8 @@ struct ChatView: View {
           pausedPill
         }
       }
+      .animation(.easeInOut(duration: 0.2), value: autoScroll)
+      .animation(.easeInOut(duration: 0.2), value: softPauseRemaining)
       .overlay {
         if messages.isEmpty {
           Text(isConnected ? "Waiting for messages…" : "Connecting to chat…")
@@ -125,14 +130,16 @@ struct ChatView: View {
     }
   }
 
-  /// Shown while the list is focused and auto-scroll is paused, so the viewer
-  /// knows they're scrolling history and how to get back to live.
+  /// Shown while the list is frozen — either the soft-pause read mode (with a
+  /// countdown) or the full scrollable pause — so the viewer knows chat is held
+  /// and how to get back to live.
   private var pausedPill: some View {
     HStack(spacing: 7) {
       Image(systemName: "pause.fill")
         .font(.caption2.weight(.bold))
-      Text("Paused · Scroll or press Back")
+      Text(pillText)
         .font(.caption.weight(.semibold))
+        .contentTransition(.numericText())
     }
     .lineLimit(1)
     .fixedSize()
@@ -143,6 +150,13 @@ struct ChatView: View {
     .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
     .padding(.bottom, 12)
     .transition(.move(edge: .bottom).combined(with: .opacity))
+  }
+
+  private var pillText: String {
+    if let remaining = softPauseRemaining {
+      return "Chat paused · \(remaining)s"
+    }
+    return "Paused · Scroll or press Back"
   }
 
   private func line(for message: ChatMessage) -> some View {

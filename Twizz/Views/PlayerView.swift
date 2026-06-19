@@ -215,6 +215,12 @@ struct PlayerView: View {
   /// a programmatic re-focus of a reused one (which dumped focus on the control
   /// bar the second time around).
   @State private var chatScrollGeneration = 0
+  /// Non-nil while chat is "soft paused" (Twitch-style): the list is frozen so
+  /// the viewer can read, with a countdown that auto-resumes. Pressing Up again
+  /// promotes it to the full, scrollable pause (`.chatScroll`).
+  @State private var chatSoftPauseRemaining: Int?
+  @State private var softPauseTask: Task<Void, Never>?
+  private let softPauseSeconds = 10
   /// Last directional press, captured so the chat-scroll focus trap can tell a
   /// downward exit (drop to the composer) from a sideways/upward escape (snap
   /// back into the list).
@@ -521,6 +527,7 @@ struct PlayerView: View {
       focusRecoveryTask?.cancel()
       chatSyncSendClearTask?.cancel()
       outgoingRaidFollowTask?.cancel()
+      softPauseTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
       audioLevelMonitor.stop()
@@ -557,7 +564,7 @@ struct PlayerView: View {
         case .right where showChat:
           revealControls(preferredFocus: .chatInput)
         case .up where showChat:
-          enterChatScroll()
+          handleChatUpPress()
         default:
           revealControls(preferredFocus: .chatToggle)
         }
@@ -1345,13 +1352,49 @@ struct PlayerView: View {
     } else {
       chatReplayStartMessageID = nil
       showChatSettings = false
+      cancelSoftPause()
     }
   }
 
   /// Move focus into the chat scroller. Clears the cached move direction so a
   /// programmatic entry (or a momentary focus-engine bounce right after) can't
   /// be mistaken for a downward exit by the focus trap.
+  /// Up press while chat is open. First press soft-pauses (read mode with a
+  /// countdown); a second press while paused promotes to the scrollable pause.
+  private func handleChatUpPress() {
+    if chatSoftPauseRemaining != nil {
+      enterChatScroll()
+    } else {
+      startSoftPause()
+    }
+  }
+
+  /// Freeze chat for `softPauseSeconds`, counting down then auto-resuming.
+  /// Focus is left untouched — this is a lightweight "let me read" pause.
+  private func startSoftPause() {
+    softPauseTask?.cancel()
+    chatSoftPauseRemaining = softPauseSeconds
+    softPauseTask = Task {
+      var remaining = softPauseSeconds
+      while remaining > 0 {
+        try? await Task.sleep(for: .seconds(1))
+        if Task.isCancelled { return }
+        remaining -= 1
+        await MainActor.run {
+          chatSoftPauseRemaining = remaining > 0 ? remaining : nil
+        }
+      }
+    }
+  }
+
+  private func cancelSoftPause() {
+    softPauseTask?.cancel()
+    softPauseTask = nil
+    chatSoftPauseRemaining = nil
+  }
+
   private func enterChatScroll() {
+    cancelSoftPause()
     lastMoveDirection = nil
     if !showControls {
       showControls = true
@@ -1429,9 +1472,10 @@ struct PlayerView: View {
         badgeURLs: chat.badgeURLs,
         useGlassBackground: isGlass,
         useLighterOverlayBackground: useLighterOverlayBackground,
-        autoScroll: focus != .chatScroll,
+        autoScroll: focus != .chatScroll && chatSoftPauseRemaining == nil,
         focusBinding: $focus,
-        scrollGeneration: chatScrollGeneration
+        scrollGeneration: chatScrollGeneration,
+        softPauseRemaining: chatSoftPauseRemaining
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -2170,7 +2214,7 @@ struct PlayerView: View {
             case .left:
               revealControls(preferredFocus: .chatToggle)
             case .up:
-              enterChatScroll()
+              handleChatUpPress()
             case .right:
               if hasChatDraft { focus = .chatSend }
             default:
@@ -2234,7 +2278,7 @@ struct PlayerView: View {
           case .left:
             revealControls(preferredFocus: .chatToggle)
           case .up:
-            enterChatScroll()
+            handleChatUpPress()
           default:
             break
           }
