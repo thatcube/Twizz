@@ -29,6 +29,9 @@ struct RichChatLineView: View {
     }
 
     private var bodyColor: Color {
+        // Twitch tints the whole /me line in the sender's color. That color is
+        // already contrast-adjusted for the chat surface upstream (ChatView), so
+        // reusing it keeps the action styling while staying legible.
         if message.isAction { return nameColor }
         return bodyColorOverride ?? .white
     }
@@ -130,20 +133,15 @@ struct RichChatLineView: View {
     }
 
     private func badgeView(url: URL) -> some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let image):
-                image
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: badgeSize, height: badgeSize)
-            case .empty:
-                Color.clear.frame(width: badgeSize, height: badgeSize)
-            case .failure:
-                Color.clear.frame(width: badgeSize, height: badgeSize)
-            @unknown default:
-                Color.clear.frame(width: badgeSize, height: badgeSize)
-            }
+        // WebImage (SDWebImage) keeps a decoded in-memory cache, so a badge that
+        // repeats across nearly every chat line isn't re-fetched and re-decoded
+        // each time a line scrolls into view the way SwiftUI's AsyncImage would.
+        WebImage(url: url) { image in
+            image
+                .resizable()
+                .scaledToFit()
+        } placeholder: {
+            Color.clear
         }
         .frame(width: badgeSize, height: badgeSize)
     }
@@ -162,6 +160,41 @@ struct RichChatLineView: View {
     }
 
     private var segments: [Segment] {
+        // Tokenizing the message (split, punctuation scan, emote matching, and the
+        // length-sorted scoped-emote scan) is pure work that depends only on the
+        // message's immutable text/scoped emotes plus the global emote set. In a
+        // LazyVStack every line that scrolls into view re-evaluates `body`, so
+        // without caching this re-tokenizes on every scroll tick — the dominant
+        // chat scroll cost on the Apple TV's CPU. Cache by message id (+ global
+        // emote count so newly-loaded globals still resolve). body runs on the
+        // main thread, so the static store needs no locking.
+        let key = SegmentCacheKey(id: message.id, globalEmoteCount: globalEmoteURLs.count)
+        if let cached = Self.segmentCache[key] {
+            return cached
+        }
+        let computed = computeSegments()
+        Self.segmentCache[key] = computed
+        Self.segmentCacheOrder.append(key)
+        if Self.segmentCacheOrder.count > Self.segmentCacheLimit {
+            let overflow = Self.segmentCacheOrder.count - Self.segmentCacheLimit
+            for evicted in Self.segmentCacheOrder.prefix(overflow) {
+                Self.segmentCache.removeValue(forKey: evicted)
+            }
+            Self.segmentCacheOrder.removeFirst(overflow)
+        }
+        return computed
+    }
+
+    private struct SegmentCacheKey: Hashable {
+        let id: UUID
+        let globalEmoteCount: Int
+    }
+
+    private static var segmentCache: [SegmentCacheKey: [Segment]] = [:]
+    private static var segmentCacheOrder: [SegmentCacheKey] = []
+    private static let segmentCacheLimit = 3000
+
+    private func computeSegments() -> [Segment] {
         // Keep ':' out of punctuation so tokens like :eyes: or :_raeKEK:
         // survive tokenization and can match YouTube emote shortcuts.
         let punctuation = CharacterSet(charactersIn: "()[]{}<>.,!?;\"'`")
@@ -315,15 +348,27 @@ struct ChatFlowLayout: Layout {
     var itemSpacing: CGFloat = 0
     var rowSpacing: CGFloat = 0
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    // Measuring every subview is the per-line layout cost. SwiftUI runs
+    // sizeThatFits then placeSubviews in the same pass, so measure once in
+    // sizeThatFits, stash the sizes in the cache, and reuse them when placing
+    // instead of re-measuring every subview a second time. placeSubviews
+    // re-measures only if the cache is missing/stale (e.g. an emote finished
+    // loading and changed its intrinsic size), which keeps wrapping correct.
+    func makeCache(subviews: Subviews) -> [CGSize] { [] }
+
+    func updateCache(_ cache: inout [CGSize], subviews: Subviews) {
+        cache.removeAll(keepingCapacity: true)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout [CGSize]) -> CGSize {
         let maxWidth = proposal.width ?? .greatestFiniteMagnitude
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        cache = sizes
         var x: CGFloat = 0
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
 
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-
+        for size in sizes {
             if x > 0 && x + size.width > maxWidth {
                 x = 0
                 y += rowHeight + rowSpacing
@@ -337,18 +382,20 @@ struct ChatFlowLayout: Layout {
         return CGSize(width: maxWidth.isFinite ? maxWidth : x, height: y + rowHeight)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout [CGSize]) {
         // Group subviews into rows first so each row's height is known before we
         // place its items. Items are then centered on the row's vertical midline
         // instead of pinned to the top — keeping emotes, badges and the YouTube
         // glyph aligned with the text even when a typeface (e.g. OpenDyslexic) or
         // a very large size gives the text line box extra height below the glyphs.
+        let sizes = cache.count == subviews.count ? cache : subviews.map { $0.sizeThatFits(.unspecified) }
         var rows: [[(subview: LayoutSubview, size: CGSize)]] = []
         var currentRow: [(subview: LayoutSubview, size: CGSize)] = []
         var x: CGFloat = 0
 
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+        for index in subviews.indices {
+            let subview = subviews[index]
+            let size = sizes[index]
 
             if x > 0 && x + size.width > bounds.width {
                 rows.append(currentRow)
