@@ -858,7 +858,11 @@ extension PlayerView {
       let gap = liveEdgeLatencySeconds, gap > policy.catchUpThresholdSeconds,
       let buffer = bufferAheadSeconds(player.currentItem),
       buffer > policy.catchUpHealthyBufferSeconds {
-      return policy.catchUpRate
+      // Proportional catch-up: the further past the target edge gap we are, the
+      // faster we chase (capped). Eases back toward 1.0 as we approach the target.
+      let excess = Float(gap - policy.catchUpThresholdSeconds)
+      let rate = 1.0 + policy.catchUpRampPerSecond * excess
+      return min(policy.maxCatchUpRate, rate)
     }
 
     return 1.0
