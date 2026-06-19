@@ -196,6 +196,15 @@ extension PlayerView {
         .frame(maxWidth: .infinity, alignment: .leading)
 
         settingsPill(
+          title: showLatencyBadge ? "Latency Readout On" : "Latency Readout Off",
+          isSelected: showLatencyBadge,
+          focusTag: .chatLatencyToggle
+        ) {
+          showLatencyBadge.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        settingsPill(
           title: showLatencyDiagnostics ? "Diagnostics Overlay On" : "Diagnostics Overlay Off",
           isSelected: showLatencyDiagnostics,
           focusTag: .chatDiagnosticsToggle

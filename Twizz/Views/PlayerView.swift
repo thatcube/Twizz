@@ -183,6 +183,10 @@ struct PlayerView: View {
   /// Live viewer count badge in the top-left HUD. On by default — a glanceable,
   /// non-diagnostic stat most viewers want while watching.
   @AppStorage("showViewerCount") var showViewerCount = true
+  /// Latency readout in the top-left HUD chip. Off by default and independent of
+  /// the full Diagnostics Overlay, so viewers who just want the latency number
+  /// can enable it without the developer event log.
+  @AppStorage("showLatencyBadge") var showLatencyBadge = false
 
   @State var chat = ChatService()
   /// Drives chat replay when in VOD mode (reveals comments up to the playhead).
@@ -598,6 +602,7 @@ struct PlayerView: View {
     case chatLowLatencyToggle
     case chatRewindToggle
     case chatViewerCountToggle
+    case chatLatencyToggle
     case chatDiagnosticsToggle
     case youtubeMergeToggle
     case youtubeMergeURL
@@ -1141,7 +1146,7 @@ struct PlayerView: View {
               PlayerInfoBadge(
                 latency: latencyReadout,
                 hermes: hermes,
-                showLatency: showLatencyDiagnostics,
+                showLatency: showLatencyBadge,
                 showViewerCount: showViewerCount
               )
             }
@@ -1836,6 +1841,7 @@ struct PlayerView: View {
       .chatLowLatencyToggle,
       .chatRewindToggle,
       .chatViewerCountToggle,
+      .chatLatencyToggle,
       .chatDiagnosticsToggle,
       .simulateRaidButton,
       .simulateOfflineButton,
@@ -2999,7 +3005,6 @@ private struct PlayerInfoBadge: View {
   private static let viewerTint = Color(red: 0.74, green: 0.20, blue: 0.16)
 
   var body: some View {
-    let shape = Capsule(style: .continuous)
     let viewers = showViewerCount ? hermes.viewerCount : nil
 
     return Group {
@@ -3038,15 +3043,37 @@ private struct PlayerInfoBadge: View {
             }
           }
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, 14)
+        .padding(.trailing, 18)
         .padding(.vertical, 9)
-        // Frosted material rather than focusable Liquid Glass: this is a passive
-        // HUD readout, so it should read as an info chip, not a pressable control.
-        .background(.ultraThinMaterial, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
-        .clipShape(shape)
+        .modifier(HUDChipGlassStyle())
         .animation(.easeInOut(duration: 0.25), value: viewers)
       }
+    }
+  }
+}
+
+/// Shared frosted Liquid-Glass treatment for the player's small passive HUD chips
+/// (viewer/latency readout, sleep countdown). Matches the interactive-moment
+/// banner, chat pane, and settings panel: a real `.glassEffect(.regular)` over a
+/// subtle black scrim on tvOS 26+, with an `.ultraThinMaterial` fallback, plus
+/// the standard white hairline. Keeps every chip reading at the same darkness
+/// instead of the lighter bare-material look they had before.
+private struct HUDChipGlassStyle: ViewModifier {
+  func body(content: Content) -> some View {
+    let shape = Capsule(style: .continuous)
+    if #available(tvOS 26.0, *) {
+      content
+        .background(Color.black.opacity(0.22), in: shape)
+        .glassEffect(.regular, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+        .clipShape(shape)
+    } else {
+      content
+        .background(.ultraThinMaterial, in: shape)
+        .background(Color.black.opacity(0.22), in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+        .clipShape(shape)
     }
   }
 }
@@ -3360,8 +3387,7 @@ private struct SleepCountdownBadge: View {
   }
 
   var body: some View {
-    let shape = Capsule(style: .continuous)
-    return HStack(spacing: 8) {
+    HStack(spacing: 8) {
       Image(systemName: "moon.zzz.fill")
         .font(.caption)
         .foregroundStyle(.white)
@@ -3374,9 +3400,7 @@ private struct SleepCountdownBadge: View {
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 9)
-    .background(.ultraThinMaterial, in: shape)
-    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
-    .clipShape(shape)
+    .modifier(HUDChipGlassStyle())
   }
 }
 
