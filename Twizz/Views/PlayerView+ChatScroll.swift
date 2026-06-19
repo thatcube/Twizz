@@ -44,8 +44,11 @@ extension PlayerView {
     }
   }
 
-  /// Down press while chat is open. Scrolls toward newer messages, resuming live
-  /// once it reaches the bottom; from a plain soft pause it resumes immediately.
+  /// Down press while chat is open. A deliberate down press is the "I'm done
+  /// reading, take me back" gesture, so it exits the freeze and snaps to the live
+  /// feed immediately — both from a plain soft pause and from active scroll. A
+  /// continuous down *swipe* still scrolls toward newer messages via the gesture
+  /// loop, which rejoins live as it nears the bottom.
   func handleChatDownPress() {
     if isChatScrolling {
       if trackpad.hasController, Date().timeIntervalSince(lastGestureScrollAt) < 0.12 {
@@ -54,7 +57,7 @@ extension PlayerView {
       if trackpad.hasController, Date().timeIntervalSince(lastHoldRepeatAt) < 0.3 {
         return
       }
-      stepChatScroll(up: false)
+      resumeChatLive()
     } else if chatSoftPauseRemaining != nil {
       resumeChatLive()
     }
@@ -167,7 +170,10 @@ extension PlayerView {
     guard !msgs.isEmpty else { return false }
     let lastIndex = Double(msgs.count - 1)
     let idx = trackpadScrollIndex + delta
-    if idx >= lastIndex {
+    // Treat "almost at the live bottom" as the bottom so a quick down-swipe that
+    // coasts to a stop a fraction of a message short still rejoins the live feed
+    // instead of stranding the chat frozen just above it.
+    if idx >= lastIndex - 0.5 {
       resumeChatLive()
       return false
     }
