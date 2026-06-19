@@ -32,7 +32,7 @@ struct ChannelSignals {
 /// Fetches a channel's on-demand content (clips + VODs) and the signals that power
 /// the recommendation engine, all from the anonymous Twitch GQL endpoint.
 struct ChannelContentService {
-  static let clientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+  static let clientID = TwitchConfig.webPublicClientID
   static let endpoint = URL(string: "https://gql.twitch.tv/gql")!
 
   static let session: URLSession = {
@@ -191,7 +191,7 @@ struct ChannelContentService {
     req.httpMethod = "POST"
     req.setValue(clientID, forHTTPHeaderField: "Client-ID")
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
     req.httpBody = try JSONSerialization.data(withJSONObject: ["query": query, "variables": variables])
 
     let (data, response) = try await session.data(for: req)

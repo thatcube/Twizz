@@ -189,8 +189,8 @@ final class SearchService {
         var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("kimne78kx3ncx6brgo4mv6wki5h1ko", forHTTPHeaderField: "Client-Id")
-        req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+        req.setValue(TwitchConfig.webPublicClientID, forHTTPHeaderField: "Client-Id")
+        req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
 
         let payload: [String: Any] = ["query": query, "variables": variables]
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)

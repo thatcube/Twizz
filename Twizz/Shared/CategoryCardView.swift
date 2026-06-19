@@ -18,7 +18,7 @@ struct CategoryCardView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      AsyncImage(url: category.boxArtURL) { img in
+      CachedAsyncImage(url: category.boxArtURL) { img in
         img.resizable().scaledToFill()
       } placeholder: {
         Color.primary.opacity(0.08)

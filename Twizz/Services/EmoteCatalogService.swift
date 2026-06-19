@@ -3,7 +3,7 @@ import Foundation
 actor EmoteCatalogService {
     static let shared = EmoteCatalogService()
 
-    private let clientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+    private let clientID = TwitchConfig.webPublicClientID
     private let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
     private var cache: [String: [String: URL]] = [:]

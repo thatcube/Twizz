@@ -7,7 +7,7 @@ final class FollowedChannelsService {
   private static let disallowedClientIDs: Set<String> = [
     // Twitch web public client. Device flow consent appears as "Twilight"
     // and followed-channel APIs can fail unexpectedly.
-    "kimne78kx3ncx6brgo4mv6wki5h1ko"
+    TwitchConfig.webPublicClientID
   ]
 
   private(set) var channels: [FollowedChannel] = []
@@ -167,7 +167,7 @@ final class FollowedChannelsService {
       req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
       req.setValue(clientID, forHTTPHeaderField: "Client-Id")
       req.setValue("application/json", forHTTPHeaderField: "Accept")
-      req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+      req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
 
       let (data, status) = try await performHelixRequest(req)
       guard (200...299).contains(status) else {
@@ -290,7 +290,7 @@ final class FollowedChannelsService {
     req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     req.setValue(clientID, forHTTPHeaderField: "Client-Id")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
 
     let (data, status) = try await performHelixRequest(req)
     guard (200...299).contains(status) else {
@@ -318,7 +318,7 @@ final class FollowedChannelsService {
     req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     req.setValue(clientID, forHTTPHeaderField: "Client-Id")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
 
     let (data, status) = try await performHelixRequest(req)
     guard (200...299).contains(status) else {
@@ -342,7 +342,7 @@ final class FollowedChannelsService {
     req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     req.setValue(clientID, forHTTPHeaderField: "Client-Id")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
 
     let (data, status) = try await performHelixRequest(req)
     guard (200...299).contains(status) else {
@@ -368,7 +368,7 @@ final class FollowedChannelsService {
     req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     req.setValue(clientID, forHTTPHeaderField: "Client-Id")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
 
     let (data, status) = try await performHelixRequest(req)
     guard (200...299).contains(status) else {
@@ -393,7 +393,7 @@ final class FollowedChannelsService {
     req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     req.setValue(clientID, forHTTPHeaderField: "Client-Id")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
 
     let (data, status) = try await performHelixRequest(req)
     guard (200...299).contains(status) else {
@@ -517,7 +517,7 @@ final class FollowedChannelsService {
     var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    req.setValue("kimne78kx3ncx6brgo4mv6wki5h1ko", forHTTPHeaderField: "Client-Id")
+    req.setValue(TwitchConfig.webPublicClientID, forHTTPHeaderField: "Client-Id")
 
     let payload: [String: Any] = [
       "query": query,

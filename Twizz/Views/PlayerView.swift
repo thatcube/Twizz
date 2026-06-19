@@ -1283,7 +1283,7 @@ struct PlayerView: View {
   var offlineAvatar: some View {
     Group {
       if let channelAvatarURL {
-        AsyncImage(url: channelAvatarURL) { image in
+        CachedAsyncImage(url: channelAvatarURL) { image in
           image.resizable().scaledToFill()
         } placeholder: {
           offlineAvatarPlaceholder
@@ -1316,7 +1316,7 @@ struct PlayerView: View {
         } label: {
           Group {
             if let channelAvatarURL {
-              AsyncImage(url: channelAvatarURL) { image in
+              CachedAsyncImage(url: channelAvatarURL) { image in
                 image
                   .resizable()
                   .scaledToFill()
