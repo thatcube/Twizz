@@ -641,6 +641,64 @@ extension PlayerView {
 
       captionsSettingsRow
         .focusSection()
+
+      if CaptionController.isSupported, captionsEnabled {
+        captionsAppearanceSection
+        captionsTimingSection
+      }
+    }
+  }
+
+  /// Text size, on-screen position, background slab, and outline controls.
+  var captionsAppearanceSection: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      settingsSectionHeader("Appearance")
+
+      settingsStepperRow(.captionFontSize)
+      settingsStepperRow(.captionPosition)
+
+      Text("Background")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.white.opacity(0.7))
+        .padding(.top, 4)
+
+      HStack(spacing: 8) {
+        ForEach(Array(CaptionBackgroundStyle.allCases.enumerated()), id: \.element) { index, style in
+          settingsPill(
+            title: style.label,
+            isSelected: CaptionBackgroundStyle.from(captionsBackgroundStyleRaw) == style,
+            focusTag: .chatCaptionsBackgroundOption(index)
+          ) {
+            captionsBackgroundStyleRaw = style.rawValue
+          }
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .focusSection()
+
+      settingsPill(
+        title: captionsOutline ? "Outline On" : "Outline Off",
+        isSelected: captionsOutline,
+        focusTag: .chatCaptionsOutlineToggle
+      ) {
+        captionsOutline.toggle()
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .focusSection()
+    }
+  }
+
+  /// Fine-tune how far ahead of the video the captions appear.
+  var captionsTimingSection: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      settingsSectionHeader("Timing")
+
+      settingsStepperRow(.captionTiming)
+
+      Text("Nudge captions earlier (+) or later (–) to line them up with the speech. On-device recognition adds a short, unavoidable delay.")
+        .font(.caption2)
+        .foregroundStyle(.white.opacity(0.6))
+        .fixedSize(horizontal: false, vertical: true)
     }
   }
 
@@ -789,7 +847,7 @@ extension PlayerView {
         adjustChatStepper(field, by: -1)
       }
 
-      Text("\(Int(config.value.rounded()))")
+      Text(chatStepperDisplay(field, value: config.value))
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(.white)
         .frame(minWidth: 44)
@@ -882,6 +940,30 @@ extension PlayerView {
       )
     case .width:
       return ("Width", ChatAppearance.widthRange, ChatAppearance.widthStep, chatWidth)
+    case .captionFontSize:
+      return ("Text Size", 0.7...1.6, 0.1, CGFloat(captionsFontScale))
+    case .captionPosition:
+      return ("Position", 0.0...1.0, 0.1, CGFloat(captionsVerticalPosition))
+    case .captionTiming:
+      return ("Timing", -0.5...1.0, 0.1, CGFloat(captionsTimingOffset))
+    }
+  }
+
+  /// Formats a stepper's current value for display. Most chat fields are plain
+  /// integers; caption fields use percent / position / signed-seconds labels.
+  func chatStepperDisplay(_ field: ChatStepperField, value: CGFloat) -> String {
+    switch field {
+    case .captionFontSize:
+      return "\(Int((value * 100).rounded()))%"
+    case .captionPosition:
+      if value <= 0.001 { return "Bottom" }
+      if value >= 0.999 { return "Top" }
+      return "\(Int((value * 100).rounded()))%"
+    case .captionTiming:
+      if abs(value) < 0.001 { return "0.0s" }
+      return String(format: "%+.1fs", Double(value))
+    default:
+      return "\(Int(value.rounded()))"
     }
   }
 
@@ -906,6 +988,12 @@ extension PlayerView {
       chatMessageSpacingValue = Double(next)
     case .width:
       chatWidthValue = Double(next)
+    case .captionFontSize:
+      captionsFontScale = Double(next)
+    case .captionPosition:
+      captionsVerticalPosition = Double(next)
+    case .captionTiming:
+      captionsTimingOffset = Double(next)
     }
   }
 
