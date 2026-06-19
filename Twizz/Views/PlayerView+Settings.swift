@@ -7,7 +7,7 @@ extension PlayerView {
   /// The focus target for the first control on whichever settings page is shown.
   var firstChatSettingsFocus: Focusable {
     switch chatSettingsPage {
-    case .appearance, .playback, .events:
+    case .appearance, .playback, .events, .captions:
       return .chatAdvancedBack
     case .main:
       let index =
@@ -36,6 +36,8 @@ extension PlayerView {
           playbackSettingsContent
         case .events:
           eventsSettingsContent
+        case .captions:
+          captionsSettingsContent
         }
       }
       .padding(.vertical, 18)
@@ -140,6 +142,15 @@ extension PlayerView {
       .focusSection()
 
       settingsDisclosureRow(
+        title: "Captions (beta)",
+        detail: captionsSettingsSummary,
+        focusTag: .chatCaptionsButton
+      ) {
+        openSubpage(.captions)
+      }
+      .focusSection()
+
+      settingsDisclosureRow(
         title: "Playback & Diagnostics",
         detail: preferredQuality == "Auto" ? livePlaybackProfile.pickerLabel : nil,
         focusTag: .chatMoreButton
@@ -214,8 +225,6 @@ extension PlayerView {
           showLatencyDiagnostics.toggle()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-
-        captionsSettingsRow
 
         if showLatencyDiagnostics {
           // Advanced kill-switch: prefetch promotion (the low-latency proxy) is
@@ -615,11 +624,26 @@ extension PlayerView {
 
   // MARK: Settings controls
 
-  /// "Captions (beta)" — on-device live caption generation. Shown as a toggle on
-  /// capable hardware (tvOS 26+); on older OSes it degrades to a disabled
-  /// explanatory row rather than vanishing silently, so the capability is
-  /// discoverable. Live-only (the audio side-channel it rides doesn't exist for
-  /// VOD), which the caption text notes.
+  /// Summary shown on the main-page "Captions (beta)" drill-in row.
+  var captionsSettingsSummary: String {
+    guard CaptionController.isSupported else { return "Unavailable" }
+    return captionsEnabled ? "On" : "Off"
+  }
+
+  /// Captions sub-page: the on/off toggle plus an explanation. On-device live
+  /// captions are gated to capable hardware (tvOS 26+); on older OSes this
+  /// degrades to a disabled explanatory body rather than vanishing silently, so
+  /// the capability stays discoverable. Live-only (the audio side-channel it
+  /// rides doesn't exist for VOD), which the caption text notes.
+  var captionsSettingsContent: some View {
+    VStack(alignment: .leading, spacing: 30) {
+      subpageHeader("Captions (beta)")
+
+      captionsSettingsRow
+        .focusSection()
+    }
+  }
+
   @ViewBuilder
   var captionsSettingsRow: some View {
     if CaptionController.isSupported {
@@ -914,6 +938,7 @@ extension PlayerView {
     switch chatSettingsPage {
     case .playback: returnFocus = .chatMoreButton
     case .events: returnFocus = .chatEventsButton
+    case .captions: returnFocus = .chatCaptionsButton
     default: returnFocus = .chatAdvancedButton
     }
     chatSettingsPage = .main

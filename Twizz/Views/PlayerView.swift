@@ -777,6 +777,8 @@ struct PlayerView: View {
     case chatPresetOption(Int)
     case chatAdvancedButton
     case chatMoreButton
+    /// Main-page drill-in row that opens the Captions sub-page.
+    case chatCaptionsButton
     case chatWidthOption(Int)
     case chatLayoutOption(Int)
     case chatSyncToggle
@@ -818,6 +820,8 @@ struct PlayerView: View {
     case playback
     /// Per-event visibility toggles (raids, hype trains, polls, etc.).
     case events
+    /// On-device live captions ("Captions (beta)").
+    case captions
   }
 
   /// The granular dimensions adjusted by the Advanced page steppers.
@@ -2123,6 +2127,7 @@ struct PlayerView: View {
       .chatViewerCountToggle,
       .chatLatencyToggle,
       .chatDiagnosticsToggle,
+      .chatCaptionsButton,
       .chatCaptionsToggle,
       .chatEventsButton,
       .chatRaidEventToggle,
