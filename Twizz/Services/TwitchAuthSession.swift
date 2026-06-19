@@ -7,9 +7,9 @@ final class TwitchAuthSession {
     private static let disallowedClientIDs: Set<String> = [
         // Twitch web public client. Using this shows "Twilight" on consent
         // and may not reliably authorize Helix followed-channel endpoints.
-        "kimne78kx3ncx6brgo4mv6wki5h1ko"
+        TwitchConfig.webPublicClientID
     ]
-    private static let twitchGraphQLPublicClientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+    private static let twitchGraphQLPublicClientID = TwitchConfig.webPublicClientID
 
     private(set) var isAuthenticated = false
     private(set) var userID: String?

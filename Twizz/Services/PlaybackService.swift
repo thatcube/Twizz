@@ -56,7 +56,7 @@ enum StreamLiveStatus {
 }
 
 struct PlaybackService {
-    private static let clientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+    private static let clientID = TwitchConfig.webPublicClientID
     private static let accessTokenHash = "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9"
     private static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     private static let previewURLCache = PreviewURLCache()

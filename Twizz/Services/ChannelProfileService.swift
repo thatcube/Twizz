@@ -4,7 +4,7 @@ import Foundation
 /// anonymous Twitch GQL endpoint and public web client-id the rest of the app
 /// relies on, so all data is public and no auth is required.
 struct ChannelProfileService {
-  private static let clientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+  private static let clientID = TwitchConfig.webPublicClientID
 
   private static let session: URLSession = {
     let config = URLSessionConfiguration.default
@@ -52,7 +52,7 @@ struct ChannelProfileService {
     req.httpMethod = "POST"
     req.setValue(clientID, forHTTPHeaderField: "Client-ID")
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
     req.httpBody = try? JSONSerialization.data(
       withJSONObject: ["query": query, "variables": ["login": normalized]]
     )

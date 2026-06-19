@@ -20,7 +20,7 @@ final class GoLiveWatcher {
   /// Public client ids we refuse to use (mirrors `FollowedChannelsService`); the
   /// Twitch web client can't reliably authorize followed-channel endpoints.
   private static let disallowedClientIDs: Set<String> = [
-    "kimne78kx3ncx6brgo4mv6wki5h1ko"
+    TwitchConfig.webPublicClientID
   ]
 
   /// How often we re-poll followed streams. ~60s keeps "the moment it starts"
@@ -218,7 +218,7 @@ final class GoLiveWatcher {
     req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     req.setValue(clientID, forHTTPHeaderField: "Client-Id")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
 
     let (data, response) = try await URLSession.shared.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -254,7 +254,7 @@ final class GoLiveWatcher {
     req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     req.setValue(clientID, forHTTPHeaderField: "Client-Id")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
 
     let (data, response) = try await URLSession.shared.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1

@@ -115,7 +115,7 @@ struct StreamChannelCard: View {
       media
 
       HStack(alignment: .top, spacing: 10) {
-        AsyncImage(url: channel.profileImageURL) { image in
+        CachedAsyncImage(url: channel.profileImageURL) { image in
           image.resizable().scaledToFill()
         } placeholder: {
           Circle()

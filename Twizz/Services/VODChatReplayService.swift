@@ -56,7 +56,7 @@ final class VODChatReplayService {
   /// window at the new offset rather than paging through the gap.
   private let forwardSeekResetGap: Double = 90
 
-  private let clientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+  private let clientID = TwitchConfig.webPublicClientID
   private let userAgent =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 
