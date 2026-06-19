@@ -29,7 +29,7 @@ final class GoLiveWatcher {
 
   /// How long a toast stays up before it auto-dismisses, unless the viewer
   /// focuses its button (which pauses the countdown).
-  private static let toastSeconds = 10
+  private static let toastSeconds = 15
 
   /// The toast currently on screen, or `nil` when nothing is showing.
   private(set) var pending: GoLiveEvent?
