@@ -97,8 +97,40 @@ struct PreviewVideoSurface: UIViewRepresentable {
 /// VOD/scrubbing-oriented and unsuited to a live, side-by-side chat layout.
 /// Controls auto-hide and are revealed by pressing the remote.
 struct PlayerView: View {
+  /// Identifies an on-demand broadcast (VOD) so the same player can replay a past
+  /// stream — full-duration seek + synchronized chat replay — instead of a live
+  /// stream. `nil` (the default) means this is the live channel player.
+  struct VODContext: Equatable {
+    let id: String
+    let title: String
+  }
+
   let channel: String
   var auth: TwitchAuthSession
+  /// When set, the player runs in VOD mode: it plays the recorded broadcast,
+  /// drives `replay` for chat, exposes a full-duration seek bar + playback speed,
+  /// and gates off all live-only machinery (latency, low-latency proxy, EventSub,
+  /// adaptive quality, IRC chat, watchdog).
+  var vod: VODContext? = nil
+
+  /// True while playing a recorded broadcast rather than a live stream.
+  private var isVOD: Bool { vod != nil }
+
+  /// VODs always expose the transport bar (seek is essential); live exposes it
+  /// only when the user has Stream Rewind enabled.
+  private var rewindAvailable: Bool { isVOD || streamRewindEnabled }
+
+  /// The focus target that "holds" chat while the viewer scrolls it. Live keeps
+  /// focus on the composer (tvOS can't reliably focus a ScrollView); VODs have no
+  /// composer, so a dedicated invisible scroller target stands in.
+  private var chatFocusAnchor: Focusable { isVOD ? .chatScroller : .chatInput }
+
+  /// Keep the seek bar and the chat scroller mutually non-neighboring so a
+  /// sideways swipe can never escape from one into the other.
+  private var scrubberFocusable: Bool {
+    if isVOD { return focus != .chatScroller }
+    return focus != .chatInput && focus != .chatSend
+  }
 
   /// The currently-active channel, which can change if the user follows a raid.
   @State private var activeChannel: String = ""
@@ -139,6 +171,11 @@ struct PlayerView: View {
   @AppStorage("showLatencyDiagnostics") private var showLatencyDiagnostics = false
 
   @State private var chat = ChatService()
+  /// Drives chat replay when in VOD mode (reveals comments up to the playhead).
+  @State private var replay = VODChatReplayService()
+  /// Periodic player time observer used in VOD mode to sync chat replay + the
+  /// seek readout to the playhead.
+  @State private var vodTimeObserver: Any?
   /// Detects *outgoing* raids (the watched channel raiding away) via EventSub.
   @State private var eventSub = EventSubService()
   @State private var player = AVPlayer()
@@ -515,6 +552,10 @@ struct PlayerView: View {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case offlineViewChannel, offlineTryAgain
     case chatSend
+    /// VOD-only: invisible target inside the chat pane that holds focus while the
+    /// viewer pauses/scrolls chat replay (reached by pressing right off the
+    /// collapse-chat button).
+    case chatScroller
     case raidFollowCancel
     case sleepKeepWatching, sleepResume
     case simulateRaidButton
@@ -612,6 +653,7 @@ struct PlayerView: View {
   }
 
   private var visibleChatMessages: [ChatMessage] {
+    if isVOD { return replay.messages }
     guard let startID = chatReplayStartMessageID else { return chat.messages }
     guard let startIndex = chat.messages.firstIndex(where: { $0.id == startID }) else {
       return chat.messages
@@ -752,14 +794,18 @@ struct PlayerView: View {
     }
     .task {
       if activeChannel.isEmpty { activeChannel = channel }
-      configurePlayerForLive()
-      resetDiagnostics()
-      applyExperimentalYouTubeSettings()
-      chat.connect(to: activeChannel)
-      eventSub.start(forChannel: activeChannel, auth: auth)
-      async let metadataTask: Void = refreshChannelMetadata()
-      await load()
-      _ = await metadataTask
+      if isVOD {
+        await startVOD()
+      } else {
+        configurePlayerForLive()
+        resetDiagnostics()
+        applyExperimentalYouTubeSettings()
+        chat.connect(to: activeChannel)
+        eventSub.start(forChannel: activeChannel, auth: auth)
+        async let metadataTask: Void = refreshChannelMetadata()
+        await load()
+        _ = await metadataTask
+      }
       focus = .video
     }
     .onAppear {
@@ -803,6 +849,8 @@ struct PlayerView: View {
       stopLatencyMonitor()
       stopScrubInput()
       audioLevelMonitor.stop()
+      removeVODTimeObserver()
+      replay.stop()
       player.pause()
       chat.disconnect()
       eventSub.stop()
@@ -846,7 +894,7 @@ struct PlayerView: View {
         // the chrome is hidden (scrolling doesn't depend on focus).
         switch direction {
         case .right where showChat:
-          revealControls(preferredFocus: .chatInput)
+          revealControls(preferredFocus: chatFocusAnchor)
         case .up where showChat:
           handleChatUpPress()
         case .down where showChat && (isChatScrolling || chatSoftPauseRemaining != nil):
@@ -872,6 +920,17 @@ struct PlayerView: View {
       if newFocus == .chatInput, oldFocus != .chatInput {
         chatInputFocusedAt = Date()
       }
+      // VOD: moving focus into the chat scroller (right off the collapse button)
+      // immediately surfaces the paused indicator, and leaving it resumes the
+      // replay's auto-scroll — so chat pause/scroll is driven purely by focus.
+      if isVOD {
+        if newFocus == .chatScroller, oldFocus != .chatScroller {
+          chatInputFocusedAt = Date()
+          if !isChatScrolling, chatSoftPauseRemaining == nil { startSoftPause() }
+        } else if oldFocus == .chatScroller, newFocus != .chatScroller {
+          if isChatScrolling || chatSoftPauseRemaining != nil { resumeChatLive() }
+        }
+      }
       // Keep the swipe target stable while chat is held.
       if isChatScrolling {
         // Active scroll traps focus on the composer so a stray diagonal swipe
@@ -879,13 +938,13 @@ struct PlayerView: View {
         // exception is `.video`, which is the page-level handler that drives
         // scrolling while the chrome is hidden. Exit is via Back or scrolling
         // back to the bottom.
-        if let newFocus, newFocus != .chatInput, newFocus != .video {
-          focus = .chatInput
+        if let newFocus, newFocus != chatFocusAnchor, newFocus != .video {
+          focus = chatFocusAnchor
         }
       } else if chatSoftPauseRemaining != nil {
         // Lightweight read pause: navigating away to a real control resumes live
         // so the frozen state can't get stranded.
-        if let newFocus, newFocus != .chatInput, isControlFocus(newFocus) {
+        if let newFocus, newFocus != chatFocusAnchor, isControlFocus(newFocus) {
           resumeChatLive()
         }
       }
@@ -963,6 +1022,7 @@ struct PlayerView: View {
       await refreshYouTubeAutoTarget()
     }
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
+      guard !isVOD else { return }
       if suppressLowLatencyToggleReload {
         suppressLowLatencyToggleReload = false
         return
@@ -972,6 +1032,7 @@ struct PlayerView: View {
       Task { await load(reason: "lowLatencyToggle", resetMetadata: false) }
     }
     .onChange(of: streamRewindEnabled) { _, _ in
+      guard !isVOD else { return }
       // Toggling Stream Rewind changes whether the proxy retains history (and,
       // when low-latency is off, whether the proxy is attached at all), so
       // rebuild the pipeline from a clean DVR state.
@@ -1038,7 +1099,9 @@ struct PlayerView: View {
       {
         VStack {
           HStack {
-            LatencyBadge(readout: latencyReadout)
+            if !isVOD {
+              LatencyBadge(readout: latencyReadout)
+            }
             Spacer()
             if let remaining = sleepRemainingSeconds {
               SleepCountdownBadge(text: SleepCountdownBadge.format(seconds: remaining))
@@ -1073,7 +1136,7 @@ struct PlayerView: View {
       }
 
       if isLoading {
-        ProgressView("Loading \(activeChannel)…")
+        ProgressView(isVOD ? "Loading broadcast…" : "Loading \(activeChannel)…")
           .font(.title3)
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       }
@@ -1096,7 +1159,7 @@ struct PlayerView: View {
       }
     }
     .onPlayPauseCommand {
-      guard streamRewindEnabled, errorMessage == nil, !isOffline, !isLoading else { return }
+      guard rewindAvailable, errorMessage == nil, !isOffline, !isLoading else { return }
       toggleRewindPlayPause()
     }
   }
@@ -1252,11 +1315,11 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .right:
-            focus = .quality
+            focus = isVOD ? .chatSettingsButton : .quality
           case .left:
             focus = .streamInfo
           case .down:
-            if streamRewindEnabled { focus = .rewindScrubber }
+            if rewindAvailable { focus = .rewindScrubber }
           default:
             break
           }
@@ -1288,6 +1351,8 @@ struct PlayerView: View {
         // focus system had no live binding to restore to and focus only snapped
         // back on the next unrelated re-render (~1-2s later). Keeping `.focused`
         // here keeps the binding live so focus returns to the button instantly.
+        // Quality / adaptive bitrate is live-only; VODs play a fixed recording.
+        if !isVOD {
         QualityMenu(
           options: qualityOptions,
           selectedOption: preferredQuality,
@@ -1341,10 +1406,11 @@ struct PlayerView: View {
           case .right:
             focus = .chatSettingsButton
           case .down:
-            if streamRewindEnabled { focus = .rewindScrubber }
+            if rewindAvailable { focus = .rewindScrubber }
           default:
             break
           }
+        }
         }
 
         Button {
@@ -1357,11 +1423,11 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            focus = .quality
+            focus = isVOD ? .streamInfo : .quality
           case .right:
             focus = .chatToggle
           case .down:
-            if streamRewindEnabled { focus = .rewindScrubber }
+            if rewindAvailable { focus = .rewindScrubber }
           default:
             break
           }
@@ -1384,10 +1450,10 @@ struct PlayerView: View {
             focus = .chatSettingsButton
           case .right:
             if showChat {
-              focus = .chatInput
+              focus = chatFocusAnchor
             }
           case .down:
-            if streamRewindEnabled { focus = .rewindScrubber }
+            if rewindAvailable { focus = .rewindScrubber }
           default:
             break
           }
@@ -1416,7 +1482,7 @@ struct PlayerView: View {
     // the row or drop it entirely — which never happens with chat closed.
     .focusSection()
 
-      if streamRewindEnabled {
+      if rewindAvailable {
         Button {
           toggleRewindPlayPause()
         } label: {
@@ -1429,7 +1495,7 @@ struct PlayerView: View {
         // button instead). Combined with the composer doing the reverse, the
         // engine never treats the two as neighbors — no sideways escape, no
         // focus flash, no after-the-fact reverts.
-        .focusable(focus != .chatInput && focus != .chatSend)
+        .focusable(scrubberFocusable)
         .focused($focus, equals: .rewindScrubber)
         .onMoveCommand { direction in
           // Left/right step the timeline. Up is intentionally left to the focus
@@ -1715,8 +1781,10 @@ struct PlayerView: View {
   private func presentChannelPage() {
     hideTask?.cancel()
     focusRecoveryTask?.cancel()
-    stopPlaybackWatchdog()
-    stopLatencyMonitor()
+    if !isVOD {
+      stopPlaybackWatchdog()
+      stopLatencyMonitor()
+    }
     player.pause()
     channelPageTarget = ChannelPageTarget(
       login: activeChannel,
@@ -1739,9 +1807,13 @@ struct PlayerView: View {
       focus = .offlineViewChannel
       return
     }
-    startPlayback()
-    startLatencyMonitor()
-    startPlaybackWatchdog()
+    if isVOD {
+      player.play()
+    } else {
+      startPlayback()
+      startLatencyMonitor()
+      startPlaybackWatchdog()
+    }
     if showControls {
       focus = .streamInfo
       scheduleHide()
@@ -2109,7 +2181,8 @@ struct PlayerView: View {
       // (several per second on busy channels) re-executes the whole PlayerView
       // body and flashes the focused Quality menu while it's open.
       ChatMessagesColumn(
-        chat: chat,
+        chat: isVOD ? nil : chat,
+        replay: isVOD ? replay : nil,
         channel: channel,
         replayStartMessageID: chatReplayStartMessageID,
         textSize: chatTextSize,
@@ -2128,8 +2201,32 @@ struct PlayerView: View {
         scrollTarget: chatScrollTarget
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .overlay {
+        // VOD chat is read-only: there's no composer to send from. Instead an
+        // invisible focusable sits over the message list. Pressing right off the
+        // collapse-chat button lands here (surfacing the paused indicator); from
+        // here up/down scroll the replay and left returns to the controls.
+        if isVOD {
+          Color.clear
+            .contentShape(Rectangle())
+            .focusable(showChat && focus != .rewindScrubber)
+            .focused($focus, equals: .chatScroller)
+            .onMoveCommand { direction in
+              switch direction {
+              case .up: handleChatUpPress()
+              case .down: handleChatDownPress()
+              case .left:
+                resumeChatLive()
+                revealControls(preferredFocus: .chatToggle)
+              default: break
+              }
+            }
+        }
+      }
 
-      chatComposerBar
+      if !isVOD {
+        chatComposerBar
+      }
     }
     .frame(width: chatWidth)
     .modifier(GlassChatPaneStyle(enabled: isGlass))
@@ -2180,7 +2277,7 @@ struct PlayerView: View {
   /// 18pt spacing) or it overlaps the seek bar and the buttons beneath it.
   private var chatSettingsBottomClearance: CGFloat {
     let base = controlsBottomPadding + 104
-    return streamRewindEnabled ? base + scrubBarClusterHeight : base
+    return rewindAvailable ? base + scrubBarClusterHeight : base
   }
   /// Approximate on-screen height the rewind scrub bar adds beneath the control
   /// row: the bar's own height (~68pt) plus the control VStack's 18pt spacing.
@@ -3995,6 +4092,57 @@ struct PlayerView: View {
     player.automaticallyWaitsToMinimizeStalling = true
   }
 
+  // MARK: - VOD playback
+
+  /// Loads the recorded broadcast, starts chat replay, and installs the playhead
+  /// observer that keeps both the replay and the seek readout in sync. All the
+  /// live machinery (latency, proxy, EventSub, quality, watchdog) stays off.
+  private func startVOD() async {
+    guard let vod else { return }
+    isLoading = true
+    errorMessage = nil
+    isOffline = false
+    streamTitle = vod.title
+    player.automaticallyWaitsToMinimizeStalling = true
+    replay.start(vodID: vod.id, channelLogin: channel.isEmpty ? nil : channel)
+
+    async let metadataTask: Void = refreshChannelMetadata()
+    do {
+      let url = try await PlaybackService.vodMasterURL(id: vod.id)
+      let asset = AVURLAsset(
+        url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders])
+      currentSourceURL = url
+      player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+      installVODTimeObserver()
+      startPlayback()
+      isLoading = false
+    } catch {
+      errorMessage = "Couldn't load this broadcast."
+      isLoading = false
+    }
+    _ = await metadataTask
+  }
+
+  private func installVODTimeObserver() {
+    removeVODTimeObserver()
+    let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+    vodTimeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
+      MainActor.assumeIsolated {
+        let seconds = time.seconds
+        guard seconds.isFinite else { return }
+        replay.update(toOffset: seconds)
+        updateRewindReadout()
+      }
+    }
+  }
+
+  private func removeVODTimeObserver() {
+    if let vodTimeObserver {
+      player.removeTimeObserver(vodTimeObserver)
+    }
+    vodTimeObserver = nil
+  }
+
   private func startPlayback() {
     didRequestPlayback = true
     player.playImmediately(atRate: 1.0)
@@ -4247,6 +4395,30 @@ struct PlayerView: View {
   /// Mirrors the player's real seekable window into the observed `rewindReadout`
   /// so only the transport bar leaf re-renders (not the whole player) per tick.
   private func updateRewindReadout() {
+    if isVOD {
+      guard let window = currentSeekWindow() else {
+        rewindReadout.isVOD = true
+        rewindReadout.elapsedSeconds = 0
+        rewindReadout.totalSeconds = 0
+        rewindReadout.update(
+          positionFraction: 0, behindLiveSeconds: 0, windowSeconds: 0,
+          isPaused: isUserPaused, isAtLiveEdge: false)
+        return
+      }
+      let span = max(window.end - window.start, 0.001)
+      let position = scrubTargetSeconds.map { min(max($0, window.start), window.end) } ?? window.now
+      let elapsed = position - window.start
+      rewindReadout.isVOD = true
+      rewindReadout.elapsedSeconds = elapsed
+      rewindReadout.totalSeconds = span
+      rewindReadout.update(
+        positionFraction: elapsed / span,
+        behindLiveSeconds: max(span - elapsed, 0),
+        windowSeconds: span,
+        isPaused: isUserPaused,
+        isAtLiveEdge: false)
+      return
+    }
     guard streamRewindEnabled, let window = currentSeekWindow() else {
       rewindReadout.update(
         positionFraction: 1, behindLiveSeconds: 0, windowSeconds: 0,
@@ -4289,10 +4461,10 @@ struct PlayerView: View {
   /// each press triggering a full rebuffer hiccup.
   private func rewindStep(_ delta: Double) {
     guard let window = currentSeekWindow() else { return }
-    let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
+    let liveCap = isVOD ? window.end : max(window.end - targetLiveEdgeSeconds, window.start)
     let base = scrubTargetSeconds ?? window.now
     let target = min(max(base + delta, window.start), liveCap)
-    pinnedToLive = target >= liveCap - 0.5
+    if !isVOD { pinnedToLive = target >= liveCap - 0.5 }
     scrubTargetSeconds = target
     updateRewindReadout()
     throttledScrubSeek(to: target)
@@ -4304,12 +4476,12 @@ struct PlayerView: View {
   private func toggleRewindPlayPause() {
     if isUserPaused {
       isUserPaused = false
-      if let window = currentSeekWindow() {
+      if !isVOD, let window = currentSeekWindow() {
         pinnedToLive = isNearLiveEdge(window.now, in: window)
       }
       player.play()
     } else {
-      pinnedToLive = false
+      if !isVOD { pinnedToLive = false }
       isUserPaused = true
       player.pause()
     }
@@ -4324,7 +4496,7 @@ struct PlayerView: View {
   /// actually moves (not where it rests) and reports per-frame displacement plus a
   /// momentum tail on release, which we translate into a smooth scrub.
   private func startScrubInput() {
-    guard streamRewindEnabled else { return }
+    guard rewindAvailable else { return }
     scrubInput.onScrubBegan = { [self] in
       beginScrub()
     }
@@ -4376,10 +4548,10 @@ struct PlayerView: View {
     guard let window = currentSeekWindow() else { return }
     let span = max(window.end - window.start, 0.001)
     let deltaSeconds = deltaUnits * (span / scrubFullWindowTravelUnits)
-    let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
+    let liveCap = isVOD ? window.end : max(window.end - targetLiveEdgeSeconds, window.start)
     let base = scrubTargetSeconds ?? window.now
     let target = min(max(base + deltaSeconds, window.start), liveCap)
-    pinnedToLive = target >= liveCap - 0.5
+    if !isVOD { pinnedToLive = target >= liveCap - 0.5 }
     scrubTargetSeconds = target
     updateRewindReadout()
     throttledScrubSeek(to: target)
@@ -4646,7 +4818,9 @@ struct PlayerView: View {
     }
     channelDisplayName = metadata.displayName
     channelAvatarURL = metadata.profileImageURL
-    streamTitle = metadata.title
+    // VOD mode keeps the broadcast's own title; only the live player adopts the
+    // channel's current stream title here.
+    if !isVOD { streamTitle = metadata.title }
   }
 
   private func setIdleTimer(disabled: Bool) {
@@ -4763,7 +4937,10 @@ private struct ChatGlassFieldStyle: ViewModifier {
 /// message re-executed the whole body and flashed the open Quality menu's focus
 /// many times a second on busy channels.
 private struct ChatMessagesColumn: View {
-  let chat: ChatService
+  /// Live IRC source (live player). Mutually exclusive with `replay`.
+  var chat: ChatService? = nil
+  /// VOD chat-replay source. Mutually exclusive with `chat`.
+  var replay: VODChatReplayService? = nil
   let channel: String
   let replayStartMessageID: ChatMessage.ID?
   let textSize: CGFloat
@@ -4782,12 +4959,18 @@ private struct ChatMessagesColumn: View {
   let scrollTarget: ChatScrollTarget?
 
   private var visibleMessages: [ChatMessage] {
+    if let replay { return replay.messages }
+    guard let chat else { return [] }
     guard let startID = replayStartMessageID else { return chat.messages }
     guard let startIndex = chat.messages.firstIndex(where: { $0.id == startID }) else {
       return chat.messages
     }
     return Array(chat.messages[startIndex...])
   }
+
+  private var isConnected: Bool { replay?.isReady ?? chat?.isConnected ?? false }
+  private var emoteURLs: [String: URL] { replay?.emoteURLs ?? chat?.emoteURLs ?? [:] }
+  private var badgeURLs: [String: URL] { replay?.badgeURLs ?? chat?.badgeURLs ?? [:] }
 
   var body: some View {
     ChatView(
@@ -4801,9 +4984,9 @@ private struct ChatMessagesColumn: View {
       animatedEmotes: animatedEmotes,
       fontStyle: fontStyle,
       showBadges: showBadges,
-      isConnected: chat.isConnected,
-      emoteURLs: chat.emoteURLs,
-      badgeURLs: chat.badgeURLs,
+      isConnected: isConnected,
+      emoteURLs: emoteURLs,
+      badgeURLs: badgeURLs,
       useGlassBackground: useGlassBackground,
       useLighterOverlayBackground: useLighterOverlayBackground,
       autoScroll: autoScroll,
@@ -5255,6 +5438,11 @@ private final class RewindReadout {
   var windowSeconds: Double = 0
   var isPaused: Bool = false
   var isAtLiveEdge: Bool = true
+  /// VOD mode: show elapsed/total time and a neutral (non-live) track instead of
+  /// the LIVE edge + "behind live" readout.
+  var isVOD: Bool = false
+  var elapsedSeconds: Double = 0
+  var totalSeconds: Double = 0
 
   func update(
     positionFraction pf: Double,
@@ -5284,6 +5472,9 @@ private struct RewindScrubBar: View {
   let isFocused: Bool
 
   private func behindLabel() -> String {
+    if readout.isVOD {
+      return "\(Self.clock(readout.elapsedSeconds)) / \(Self.clock(readout.totalSeconds))"
+    }
     if readout.isAtLiveEdge { return "LIVE" }
     let total = Int(readout.behindLiveSeconds.rounded())
     let m = total / 60
@@ -5291,11 +5482,21 @@ private struct RewindScrubBar: View {
     return String(format: "-%d:%02d", m, s)
   }
 
+  /// Formats a number of seconds as M:SS, or H:MM:SS for hour-plus durations.
+  private static func clock(_ seconds: Double) -> String {
+    let total = Int(max(seconds, 0).rounded())
+    let h = total / 3600
+    let m = (total % 3600) / 60
+    let s = total % 60
+    if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+    return String(format: "%d:%02d", m, s)
+  }
+
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
     let trackHeight: CGFloat = 6
     let orbSize: CGFloat = isFocused ? 30 : 16
-    let fillColor = readout.isAtLiveEdge ? Color.red : Color.white
+    let fillColor = (readout.isAtLiveEdge && !readout.isVOD) ? Color.red : Color.white
 
     return HStack(spacing: 18) {
       GeometryReader { geo in
