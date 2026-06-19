@@ -209,6 +209,12 @@ struct PlayerView: View {
   /// True only for the moment the user deliberately leaves the chat scroller via
   /// the Back button, so the focus trap lets that one transition through.
   @State private var isExitingChatScroll = false
+  /// Bumped each time the viewer enters the chat scroller. Used as the chat
+  /// ScrollView's `.id` so it is rebuilt fresh on every entry — tvOS only
+  /// reliably grants focus to a newly created ScrollView, and silently refuses
+  /// a programmatic re-focus of a reused one (which dumped focus on the control
+  /// bar the second time around).
+  @State private var chatScrollGeneration = 0
   /// Last directional press, captured so the chat-scroll focus trap can tell a
   /// downward exit (drop to the composer) from a sideways/upward escape (snap
   /// back into the list).
@@ -1350,6 +1356,9 @@ struct PlayerView: View {
     if !showControls {
       showControls = true
     }
+    // Rebuild the chat ScrollView so tvOS reliably hands it focus (a reused one
+    // refuses programmatic re-focus and bounces to the control bar).
+    chatScrollGeneration += 1
     focus = .chatScroll
     scheduleHide()
   }
@@ -1421,7 +1430,8 @@ struct PlayerView: View {
         useGlassBackground: isGlass,
         useLighterOverlayBackground: useLighterOverlayBackground,
         autoScroll: focus != .chatScroll,
-        focusBinding: $focus
+        focusBinding: $focus,
+        scrollGeneration: chatScrollGeneration
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 

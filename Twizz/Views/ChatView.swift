@@ -27,6 +27,10 @@ struct ChatView: View {
   /// system (`.chatScroll`) instead of relying on tvOS's implicit overflow
   /// focus, which leaked focus into chat unpredictably.
   var focusBinding: FocusState<PlayerView.Focusable?>.Binding
+  /// Bumped by the player each time the viewer (re-)enters the scroller. Used as
+  /// the ScrollView's identity so it is rebuilt fresh on entry, which is the
+  /// only way tvOS reliably grants it focus.
+  var scrollGeneration: Int = 0
   @Environment(\.themePalette) private var palette
   @State private var pendingScrollWork: DispatchWorkItem?
 
@@ -73,6 +77,15 @@ struct ChatView: View {
       }
       .scrollIndicators(.hidden)
       .focused(focusBinding, equals: .chatScroll)
+      .id(scrollGeneration)
+      .onChange(of: scrollGeneration) { _, _ in
+        // The rebuilt list starts at the top; drop it to the newest message
+        // immediately so entry looks continuous and the viewer scrolls up.
+        guard let last = messages.last else { return }
+        DispatchQueue.main.async {
+          proxy.scrollTo(last.id, anchor: .bottom)
+        }
+      }
       .onChange(of: messages.count) {
         guard autoScroll else { return }
         guard let last = messages.last else { return }
@@ -118,7 +131,7 @@ struct ChatView: View {
     HStack(spacing: 7) {
       Image(systemName: "pause.fill")
         .font(.caption2.weight(.bold))
-      Text("Scrolling · Back to resume")
+      Text("Paused · Scroll or press Back")
         .font(.caption.weight(.semibold))
     }
     .lineLimit(1)
