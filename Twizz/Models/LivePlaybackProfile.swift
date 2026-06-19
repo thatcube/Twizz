@@ -47,13 +47,17 @@ struct LivePlaybackPolicy: Equatable {
   /// `AVPlayerItem.preferredForwardBufferDuration`. Shallower = closer to live but
   /// less jitter headroom; deeper = more stable, slightly more latency.
   var preferredForwardBufferDuration: Double
-  /// Whether to nudge `player.rate` slightly above 1.0 to drift back toward the
-  /// edge when behind (imperceptible; never used to reduce quality).
+  /// Whether to nudge `player.rate` above 1.0 to drift back toward the edge when
+  /// behind (imperceptible; never used to reduce quality).
   var enablesGentleCatchUp: Bool
-  /// The catch-up rate to apply while engaged (e.g. 1.04 = 4% faster).
-  var catchUpRate: Float
-  /// Engage catch-up only once the live-edge gap exceeds this many seconds.
+  /// Catch-up target: the live-edge gap (seconds) to chase *down to*. Catch-up
+  /// engages only while the edge gap exceeds this, and eases off as it approaches.
   var catchUpThresholdSeconds: Double
+  /// Ceiling on the catch-up rate (e.g. 1.08 = at most 8% faster).
+  var maxCatchUpRate: Float
+  /// Proportional gain: extra rate per second of edge gap beyond the target. The
+  /// further behind the edge, the faster it catches up — up to `maxCatchUpRate`.
+  var catchUpRampPerSecond: Float
   /// Anti-stall floor: the slowest the player may run while easing the rate down
   /// to ride out a draining buffer. `1.0` disables the slow-down arm entirely.
   var minPlaybackRate: Float
@@ -76,8 +80,9 @@ struct LivePlaybackPolicy: Equatable {
       return LivePlaybackPolicy(
         preferredForwardBufferDuration: 8,
         enablesGentleCatchUp: false,
-        catchUpRate: 1.0,
         catchUpThresholdSeconds: .greatestFiniteMagnitude,
+        maxCatchUpRate: 1.0,
+        catchUpRampPerSecond: 0,
         minPlaybackRate: 1.0,
         slowdownBufferFloorSeconds: 0,
         catchUpHealthyBufferSeconds: .greatestFiniteMagnitude
@@ -89,10 +94,14 @@ struct LivePlaybackPolicy: Equatable {
       return LivePlaybackPolicy(
         preferredForwardBufferDuration: 4,
         enablesGentleCatchUp: true,
-        catchUpRate: 1.04,
-        catchUpThresholdSeconds: 8,
+        // Actively chase the live edge down to ~4s, scaling speed up to 1.08× the
+        // further behind we are — this is what makes it a *low-latency* profile.
+        catchUpThresholdSeconds: 4,
+        maxCatchUpRate: 1.08,
+        catchUpRampPerSecond: 0.02,
         // Ease down toward 0.90× as the buffer drains under 1.5s so a transient
-        // dip is absorbed by playing slightly slow instead of a hard stall.
+        // dip is absorbed by playing slightly slow instead of a hard stall. The
+        // slow-down arm is evaluated first, so it always overrides catch-up.
         minPlaybackRate: 0.90,
         slowdownBufferFloorSeconds: 1.5,
         // Catch up once the buffer clears the slow-down floor (small dead-band
@@ -103,8 +112,9 @@ struct LivePlaybackPolicy: Equatable {
       return LivePlaybackPolicy(
         preferredForwardBufferDuration: 8,
         enablesGentleCatchUp: false,
-        catchUpRate: 1.0,
         catchUpThresholdSeconds: .greatestFiniteMagnitude,
+        maxCatchUpRate: 1.0,
+        catchUpRampPerSecond: 0,
         minPlaybackRate: 1.0,
         slowdownBufferFloorSeconds: 0,
         catchUpHealthyBufferSeconds: .greatestFiniteMagnitude

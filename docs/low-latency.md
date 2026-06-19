@@ -49,7 +49,9 @@ concrete tuning lives in `Twizz/Models/LivePlaybackProfile.swift`:
   forward buffer drains under ~1.5s it eases the rate down toward **0.90×**
   (anti-stall: playing slightly slow lets the buffer refill so a transient dip is
   absorbed instead of a hard stall); once the buffer clears ~2.5s *and* the edge
-  gap exceeds ~8s it nudges up to **1.04×** to drift back toward live. ABR is
+  gap exceeds the **~4s target** it nudges the rate up **proportionally** — the
+  further behind the edge, the faster it chases, capped at **1.08×** — and eases
+  back toward 1.0× as it closes on the target. ABR is
   also free to drop resolution to avoid a stall; degraded quality is acceptable,
   stutter is not.
 - **Auto · High Quality** — deeper forward buffer (~8s) so ABR has the runway to
@@ -109,7 +111,7 @@ of stalling, and the slow-down rides out short buffer dips.
   connection, it rebuffers instead of stepping down — so "Auto" is the safe
   choice when a pin is unstable.
 - **Playback speed never affects resolution.** Adaptive-rate changes (~0.90×–
-  1.04×) cannot blur the picture; blur is always an ABR/rendition issue.
+  1.08×) cannot blur the picture; blur is always an ABR/rendition issue.
 
 ### The latency readout
 - There are two different "latency" numbers, and they mean different things:
@@ -207,7 +209,7 @@ visible.
 
 How jumps are detected: each second we compare actual playhead advance against
 wall-clock × rate. Unexplained forward movement ≥ 2.0s is logged as a forward
-jump; backward movement ≥ 1.0s as a back jump. Normal catch-up (≤1.05x) stays
+jump; backward movement ≥ 1.0s as a back jump. Normal catch-up (≤1.08x) stays
 well under these thresholds.
 
 ### When reporting a freeze or jump

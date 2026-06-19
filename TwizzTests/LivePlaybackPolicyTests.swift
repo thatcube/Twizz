@@ -22,8 +22,9 @@ final class LivePlaybackPolicyTests: XCTestCase {
     let policy = LivePlaybackPolicy.live(profile: .lowerLatency, isPinned: false)
     XCTAssertEqual(policy.preferredForwardBufferDuration, 4)
     XCTAssertTrue(policy.enablesGentleCatchUp)
-    XCTAssertEqual(policy.catchUpRate, 1.04, accuracy: 0.0001)
-    XCTAssertEqual(policy.catchUpThresholdSeconds, 8)
+    XCTAssertEqual(policy.catchUpThresholdSeconds, 4)
+    XCTAssertEqual(policy.maxCatchUpRate, 1.08, accuracy: 0.0001)
+    XCTAssertGreaterThan(policy.catchUpRampPerSecond, 0)
   }
 
   func testLowerLatencyEnablesAntiStallSlowdown() {
@@ -38,12 +39,14 @@ final class LivePlaybackPolicyTests: XCTestCase {
     XCTAssertFalse(policy.enablesGentleCatchUp)
     // minPlaybackRate of 1.0 disables the anti-stall slow-down arm.
     XCTAssertEqual(policy.minPlaybackRate, 1.0, accuracy: 0.0001)
+    XCTAssertEqual(policy.maxCatchUpRate, 1.0, accuracy: 0.0001)
   }
 
   func testPinnedRenditionDisablesRateGames() {
     for profile in LivePlaybackProfile.allCases {
       let policy = LivePlaybackPolicy.live(profile: profile, isPinned: true)
       XCTAssertEqual(policy.minPlaybackRate, 1.0, accuracy: 0.0001)
+      XCTAssertEqual(policy.maxCatchUpRate, 1.0, accuracy: 0.0001)
     }
   }
 
@@ -51,7 +54,7 @@ final class LivePlaybackPolicyTests: XCTestCase {
     let policy = LivePlaybackPolicy.live(profile: .higherQuality, isPinned: false)
     XCTAssertEqual(policy.preferredForwardBufferDuration, 8)
     XCTAssertFalse(policy.enablesGentleCatchUp)
-    XCTAssertEqual(policy.catchUpRate, 1.0, accuracy: 0.0001)
+    XCTAssertEqual(policy.maxCatchUpRate, 1.0, accuracy: 0.0001)
   }
 
   func testPinnedRenditionIgnoresProfileAndNeverCatchesUp() {
