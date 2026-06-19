@@ -210,7 +210,12 @@ struct ChannelPageView: View {
     }
     .padding(24)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: false, palette: palette)
+    .twizzLiquidGlassCard(
+      cornerRadius: heroCorner,
+      isFocused: false,
+      palette: palette,
+      nativeGlass: false
+    )
     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heroHeight = $0 }
     .padding(.horizontal, AppLayout.horizontalPadding)
   }
@@ -341,7 +346,12 @@ struct ChannelPageView: View {
       }
       .padding(18)
       .frame(maxWidth: .infinity)
-      .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: isFocused, palette: palette)
+      .twizzLiquidGlassCard(
+        cornerRadius: heroCorner,
+        isFocused: isFocused,
+        palette: palette,
+        nativeGlass: false
+      )
       .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 22, y: 12)
     }
     .padding(.horizontal, AppLayout.horizontalPadding)
@@ -373,7 +383,12 @@ struct ChannelPageView: View {
     }
     .padding(18)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: false, palette: palette)
+    .twizzLiquidGlassCard(
+      cornerRadius: heroCorner,
+      isFocused: false,
+      palette: palette,
+      nativeGlass: false
+    )
     .padding(.horizontal, AppLayout.horizontalPadding)
   }
 
@@ -511,7 +526,8 @@ struct ChannelPageView: View {
                     cardCornerRadius: cardCorner,
                     mediaCornerRadius: mediaCorner
                   ),
-                  showsGameName: true
+                  showsGameName: true,
+                  usesNativeGlass: false
                 )
                 .accessibilityAddTraits(.isButton)
               }

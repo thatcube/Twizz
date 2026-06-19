@@ -47,7 +47,8 @@ struct MediaContentCard: View {
       cornerRadius: cardCornerRadius,
       isFocused: isFocused,
       palette: palette,
-      glassWhenUnfocused: false
+      glassWhenUnfocused: false,
+      nativeGlass: false
     )
     .shadow(color: Color.black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
   }
