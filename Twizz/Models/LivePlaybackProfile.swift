@@ -92,21 +92,27 @@ struct LivePlaybackPolicy: Equatable {
     switch profile {
     case .lowerLatency:
       return LivePlaybackPolicy(
-        preferredForwardBufferDuration: 4,
+        // Shallow forward buffer: sit close to the edge and, critically, resume
+        // quickly after a dip instead of waiting to refill a deep buffer (that
+        // deep-refill wait is what caused the long "waiting toMinimizeStalls"
+        // freezes). The anti-stall slow-down covers transient dips instead.
+        preferredForwardBufferDuration: 3,
         enablesGentleCatchUp: true,
-        // Actively chase the live edge down to ~4s, scaling speed up to 1.08× the
-        // further behind we are — this is what makes it a *low-latency* profile.
-        catchUpThresholdSeconds: 4,
-        maxCatchUpRate: 1.08,
-        catchUpRampPerSecond: 0.02,
+        // Actively chase the live edge down to ~2s — *tighter* than the 3.5s seek
+        // landing point — so catch-up always has slack to work with and visibly
+        // drives the rate. This is what makes it a true low-latency profile.
+        catchUpThresholdSeconds: 2,
+        maxCatchUpRate: 1.12,
+        catchUpRampPerSecond: 0.04,
         // Ease down toward 0.90× as the buffer drains under 1.5s so a transient
         // dip is absorbed by playing slightly slow instead of a hard stall. The
         // slow-down arm is evaluated first, so it always overrides catch-up.
         minPlaybackRate: 0.90,
         slowdownBufferFloorSeconds: 1.5,
-        // Catch up once the buffer clears the slow-down floor (small dead-band
-        // above it to avoid flapping between the two arms).
-        catchUpHealthyBufferSeconds: 2.5
+        // Catch up once the buffer clears 2.0s (a 0.5s dead-band above the
+        // slow-down floor so the two arms settle at ~2s edge gap instead of
+        // flapping). Equilibrium = ~2s from the edge with a safe buffer.
+        catchUpHealthyBufferSeconds: 2.0
       )
     case .higherQuality:
       return LivePlaybackPolicy(

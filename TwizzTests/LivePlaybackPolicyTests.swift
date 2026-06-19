@@ -20,10 +20,10 @@ final class LivePlaybackPolicyTests: XCTestCase {
 
   func testLowerLatencyPolicyIsShallowAndCatchesUp() {
     let policy = LivePlaybackPolicy.live(profile: .lowerLatency, isPinned: false)
-    XCTAssertEqual(policy.preferredForwardBufferDuration, 4)
+    XCTAssertEqual(policy.preferredForwardBufferDuration, 3)
     XCTAssertTrue(policy.enablesGentleCatchUp)
-    XCTAssertEqual(policy.catchUpThresholdSeconds, 4)
-    XCTAssertEqual(policy.maxCatchUpRate, 1.08, accuracy: 0.0001)
+    XCTAssertEqual(policy.catchUpThresholdSeconds, 2)
+    XCTAssertEqual(policy.maxCatchUpRate, 1.12, accuracy: 0.0001)
     XCTAssertGreaterThan(policy.catchUpRampPerSecond, 0)
   }
 
@@ -31,7 +31,20 @@ final class LivePlaybackPolicyTests: XCTestCase {
     let policy = LivePlaybackPolicy.live(profile: .lowerLatency, isPinned: false)
     XCTAssertEqual(policy.minPlaybackRate, 0.90, accuracy: 0.0001)
     XCTAssertEqual(policy.slowdownBufferFloorSeconds, 1.5)
-    XCTAssertEqual(policy.catchUpHealthyBufferSeconds, 2.5)
+    XCTAssertEqual(policy.catchUpHealthyBufferSeconds, 2.0)
+  }
+
+  func testLowerLatencyCatchUpTargetIsTighterThanSeekLanding() {
+    // Catch-up must chase tighter than the live-edge seek landing point,
+    // otherwise we always start inside the target and the rate never engages.
+    let policy = LivePlaybackPolicy.live(profile: .lowerLatency, isPinned: false)
+    XCTAssertLessThan(policy.catchUpThresholdSeconds, 3.5)
+  }
+
+  func testLowerLatencyCatchUpHealthyBufferClearsSlowdownFloor() {
+    // The two rate arms need a dead-band between them so they don't flap.
+    let policy = LivePlaybackPolicy.live(profile: .lowerLatency, isPinned: false)
+    XCTAssertGreaterThan(policy.catchUpHealthyBufferSeconds, policy.slowdownBufferFloorSeconds)
   }
 
   func testHigherQualityDisablesRateGames() {

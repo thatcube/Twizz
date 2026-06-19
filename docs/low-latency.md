@@ -41,17 +41,20 @@ Both Auto rows stay on the adaptive master (ABR active) and keep prefetch
 promotion on; they differ only in how they trade quality for latency. The
 concrete tuning lives in `Twizz/Models/LivePlaybackProfile.swift`:
 
-- **Auto · Low Latency** (default) — shallow forward buffer (~4s) to sit near
-  the edge, plus a **bidirectional adaptive playback-rate controller** (see
+- **Auto · Low Latency** (default) — shallow forward buffer (~3s) to sit near
+  the edge (and resume fast after a dip rather than waiting to refill a deep
+  buffer), plus a **bidirectional adaptive playback-rate controller** (see
   `desiredLivePlaybackRate`) that runs on its own **sub-second loop**
   (`rateControlIntervalSeconds`, ~4 Hz) — far faster than the 1 Hz latency
   monitor — so it can react to a draining buffer before it empties. As the
   forward buffer drains under ~1.5s it eases the rate down toward **0.90×**
   (anti-stall: playing slightly slow lets the buffer refill so a transient dip is
-  absorbed instead of a hard stall); once the buffer clears ~2.5s *and* the edge
-  gap exceeds the **~4s target** it nudges the rate up **proportionally** — the
-  further behind the edge, the faster it chases, capped at **1.08×** — and eases
-  back toward 1.0× as it closes on the target. ABR is
+  absorbed instead of a hard stall); once the buffer clears ~2.0s *and* the edge
+  gap exceeds the **~2s target** — deliberately *tighter* than the 3.5s seek
+  landing point so catch-up always has slack to chase — it nudges the rate up
+  **proportionally** (the further behind the edge, the faster it chases, capped
+  at **1.12×**) and eases back toward 1.0× as it closes on the target. The two
+  arms settle at an equilibrium of ~2s from the edge with a safe buffer. ABR is
   also free to drop resolution to avoid a stall; degraded quality is acceptable,
   stutter is not.
 - **Auto · High Quality** — deeper forward buffer (~8s) so ABR has the runway to
@@ -111,7 +114,7 @@ of stalling, and the slow-down rides out short buffer dips.
   connection, it rebuffers instead of stepping down — so "Auto" is the safe
   choice when a pin is unstable.
 - **Playback speed never affects resolution.** Adaptive-rate changes (~0.90×–
-  1.08×) cannot blur the picture; blur is always an ABR/rendition issue.
+  1.12×) cannot blur the picture; blur is always an ABR/rendition issue.
 
 ### The latency readout
 - There are two different "latency" numbers, and they mean different things:
@@ -209,7 +212,7 @@ visible.
 
 How jumps are detected: each second we compare actual playhead advance against
 wall-clock × rate. Unexplained forward movement ≥ 2.0s is logged as a forward
-jump; backward movement ≥ 1.0s as a back jump. Normal catch-up (≤1.08x) stays
+jump; backward movement ≥ 1.0s as a back jump. Normal catch-up (≤1.12x) stays
 well under these thresholds.
 
 ### When reporting a freeze or jump
