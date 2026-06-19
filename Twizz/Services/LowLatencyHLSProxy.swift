@@ -258,7 +258,7 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     /// - **Prefetch promotion** (`promotePrefetch`): each
     ///   `#EXT-X-TWITCH-PREFETCH:<url>` is turned into a real `#EXTINF` segment at
     ///   the live tail so AVPlayer fetches it (the low-latency win). Duration is
-    ///   taken from the most recent regular `#EXTINF` (falling back to
+    ///   the average of the real `#EXTINF` segments (falling back to
     ///   `#EXT-X-TARGETDURATION`, then 2s) — Streamlink's heuristic.
     /// - **DVR retention** (`retainHistory`): every real segment ever seen for
     ///   this media playlist is retained (deduplicated by URL) and re-emitted, so
@@ -428,6 +428,32 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     private func isSegmentStart(_ trimmed: String) -> Bool {
         if trimmed.hasPrefix(Self.discontinuitySequenceTag) { return false }
         return Self.segmentStartTags.contains { trimmed.hasPrefix($0) }
+    }
+
+    // MARK: - Test seams
+
+    /// Synchronously rewrites a master playlist on the delegate queue. Test-only
+    /// entry point so the private rewrite path can be exercised deterministically.
+    func rewriteMasterPlaylistForTesting(_ text: String) -> String {
+        delegateQueue.sync { String(decoding: rewriteMasterPlaylist(text), as: UTF8.self) }
+    }
+
+    /// Synchronously sets the behavior flags and rewrites a media playlist on the
+    /// delegate queue, matching production threading so unit tests are
+    /// deterministic. Test-only entry point.
+    func rewriteMediaPlaylistForTesting(
+        _ text: String,
+        sourceURL: URL,
+        promotePrefetch: Bool,
+        retainHistory: Bool,
+        windowSeconds: Double = 1800
+    ) -> String {
+        delegateQueue.sync {
+            self.promotePrefetch = promotePrefetch
+            self.retainHistory = retainHistory
+            self.dvrWindowSeconds = windowSeconds
+            return String(decoding: rewriteMediaPlaylist(text, sourceURL: sourceURL), as: UTF8.self)
+        }
     }
 
     /// Rewrites the `#EXT-X-MEDIA-SEQUENCE` / `#EXT-X-DISCONTINUITY-SEQUENCE`
