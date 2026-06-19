@@ -398,22 +398,96 @@ struct ChatView: View {
     return false
   }
 
-  /// Wraps an ordinary chat line in the gold mention treatment: a tinted strip
-  /// that bleeds to the panel edges with a leading accent bar — structurally the
-  /// same affordance as the first-message highlight, just a different accent.
+  /// Wraps an ordinary chat line in the gold mention treatment using the shared
+  /// rounded highlight card.
   private func mentionHighlight<Content: View>(around line: Content) -> some View {
-    let barWidth: CGFloat = 4
+    highlightCard(accent: mentionAccent) { line }
+  }
 
-    return line
-      .padding(.vertical, verticalPadding)
-      .padding(.horizontal, horizontalPadding)
-      .background(alignment: .leading) {
+  // MARK: - Shared highlight card
+
+  /// Corner radius for the rounded highlight card. tvOS leans on rounded cards,
+  /// so a soft corner reads more native than a hard edge-to-edge band.
+  private var highlightCornerRadius: CGFloat { 14 }
+
+  /// Shared container for every highlighted line (mention, subscription,
+  /// watch-streak, first message). Gives a rounded, gradient-tinted card with a
+  /// rounded leading accent bar and a hairline accent stroke. In the translucent
+  /// overlay modes it floats over a thin material for depth; on the solid side
+  /// panel the gradient tint alone keeps it flat and legible. The card always
+  /// fills the available width so it never stops short of the panel edge.
+  @ViewBuilder
+  private func highlightCard<Content: View>(
+    accent: Color,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    let barWidth: CGFloat = 4
+    let corner = highlightCornerRadius
+    let usesMaterial = !isSideLayout && !glassDisabled
+    // Keep the card a touch inside the list edge so it still reads as a rounded
+    // card, while the remaining left margin (`margin`) is exactly enough to land
+    // the message text back on the same keyline as the surrounding chat lines —
+    // the accent bar floats in that margin, left of the text, like Twitch.
+    let cardInset: CGFloat = 6
+    let margin = max(barWidth + 8, horizontalPadding - cardInset)
+
+    content()
+      .padding(.vertical, max(verticalPadding - 2, 3))
+      .padding(.horizontal, margin)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background {
         ZStack(alignment: .leading) {
-          mentionAccent.opacity(isSideLayout ? 0.12 : 0.20)
-          mentionAccent.frame(width: barWidth)
+          if usesMaterial {
+            Rectangle().fill(.ultraThinMaterial)
+          }
+          LinearGradient(
+            colors: [
+              accent.opacity(isSideLayout ? 0.20 : 0.30),
+              accent.opacity(isSideLayout ? 0.05 : 0.09),
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+          )
+          GeometryReader { geo in
+            Capsule(style: .continuous)
+              .fill(accent)
+              // ~70% of the card height so it grows with the card and stops just
+              // shy of the rounded corners, centered in the left margin.
+              .frame(width: barWidth, height: geo.size.height * 0.7)
+              .position(x: margin / 2, y: geo.size.height / 2)
+          }
         }
       }
-      .padding(.horizontal, -horizontalPadding)
+      .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: corner, style: .continuous)
+          .strokeBorder(accent.opacity(isSideLayout ? 0.22 : 0.32), lineWidth: 1)
+      }
+      // Bleed back out so the text inside lands on the normal chat keyline while
+      // the card keeps a small inset from the panel edge.
+      .padding(.horizontal, -margin)
+  }
+
+  /// Small rounded "chip" used for highlight labels (e.g. FIRST MESSAGE) — a
+  /// compact tinted capsule.
+  private func highlightChip(
+    _ text: String,
+    accent: Color,
+    readable: Color,
+    fontSize: CGFloat,
+    weight: Font.Weight = .heavy,
+    tracking: CGFloat = 0.6
+  ) -> some View {
+    Text(text)
+      .font(.system(size: fontSize, weight: weight))
+      .tracking(tracking)
+      .fixedSize(horizontal: false, vertical: true)
+      .foregroundStyle(readable)
+      .padding(.horizontal, 7)
+      .padding(.vertical, 2)
+      .background(
+        Capsule(style: .continuous).fill(accent.opacity(isSideLayout ? 0.18 : 0.26))
+      )
   }
 
   // MARK: - Subscription highlight
@@ -446,10 +520,10 @@ struct ChatView: View {
     watchStreakAccent.chatReadable(onSurface: chatSurfaceColor)
   }
 
-  /// Wraps a highlighted USERNOTICE (subscription or watch-streak) in a tinted
-  /// strip that bleeds to the panel edges, a left accent bar, a leading glyph and
-  /// the ready-made `system-msg` text, and — when the viewer attached a comment —
-  /// their normal chat line beneath it.
+  /// Wraps a highlighted USERNOTICE (subscription or watch-streak) in the shared
+  /// rounded highlight card: a glyph in a filled accent circle, the ready-made
+  /// `system-msg` text, and — when the viewer attached a comment — their normal
+  /// chat line beneath it.
   private func eventNoticeHighlight<IconContent: View, Content: View>(
     systemMessage: String,
     accent: Color,
@@ -458,33 +532,27 @@ struct ChatView: View {
     @ViewBuilder icon: () -> IconContent,
     line: Content
   ) -> some View {
-    let barWidth: CGFloat = 4
+    let badgeSize = max(20, textSize * 0.95)
 
-    return VStack(alignment: .leading, spacing: 4) {
-      HStack(alignment: .firstTextBaseline, spacing: 6) {
-        icon()
-        Text(systemMessage)
-          .font(fontStyle.font(size: textSize, weight: .semibold))
-          .tracking(letterSpacing)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      .foregroundStyle(readableAccent)
+    return highlightCard(accent: accent) {
+      VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          icon()
+            .foregroundStyle(.white)
+            .frame(width: badgeSize, height: badgeSize)
+            .background(Circle().fill(accent))
+          Text(systemMessage)
+            .font(fontStyle.font(size: textSize, weight: .semibold))
+            .tracking(letterSpacing)
+            .foregroundStyle(readableAccent)
+            .fixedSize(horizontal: false, vertical: true)
+        }
 
-      if showUserLine {
-        line
+        if showUserLine {
+          line
+        }
       }
     }
-    .padding(.vertical, verticalPadding)
-    .padding(.horizontal, horizontalPadding)
-    .background(alignment: .leading) {
-      ZStack(alignment: .leading) {
-        accent.opacity(isSideLayout ? 0.12 : 0.20)
-        accent.frame(width: barWidth)
-      }
-    }
-    // Bleed the tinted strip out past the list's horizontal inset so it spans
-    // the full width of the chat panel, matching the first-message treatment.
-    .padding(.horizontal, -horizontalPadding)
   }
 
   // MARK: - First-message highlight
@@ -494,32 +562,24 @@ struct ChatView: View {
     Color(twitchHex: "#A970FF") ?? .purple
   }
 
-  /// Wraps a chat line in the highlighted "first message" treatment: a tinted
-  /// strip that bleeds to the panel edges, a left accent bar, and a small
-  /// "FIRST MESSAGE" label above the text — mirroring Twitch's affordance.
+  /// Wraps a chat line in the highlighted "first message" treatment: the shared
+  /// rounded card with a small "FIRST MESSAGE" pill above the text — mirroring
+  /// Twitch's affordance in a more tvOS-native form.
   private func firstMessageHighlight<Content: View>(around line: Content) -> some View {
-    let barWidth: CGFloat = 4
     let labelSize = max(11, textSize * 0.44)
 
-    return VStack(alignment: .leading, spacing: 4) {
-      Text("FIRST MESSAGE")
-        .font(.system(size: labelSize, weight: .heavy))
-        .tracking(0.6)
-        .foregroundStyle(readableFirstMessageAccent)
+    return highlightCard(accent: firstMessageAccent) {
+      VStack(alignment: .leading, spacing: 3) {
+        highlightChip(
+          "FIRST MESSAGE",
+          accent: firstMessageAccent,
+          readable: readableFirstMessageAccent,
+          fontSize: labelSize
+        )
         .frame(maxWidth: .infinity, alignment: .trailing)
-      line
-    }
-    .padding(.vertical, verticalPadding)
-    .padding(.horizontal, horizontalPadding)
-    .background(alignment: .leading) {
-      ZStack(alignment: .leading) {
-        firstMessageAccent.opacity(isSideLayout ? 0.12 : 0.20)
-        firstMessageAccent.frame(width: barWidth)
+        line
       }
     }
-    // Bleed the tinted strip out past the list's horizontal inset so it spans
-    // the full width of the chat panel like the reference design.
-    .padding(.horizontal, -horizontalPadding)
   }
 
 
