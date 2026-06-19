@@ -153,17 +153,12 @@ struct SettingsView: View {
       subtitle: "Only show streams in this language."
     ) {
       Menu {
-        ForEach(StreamLanguagePreference.options, id: \.value) { option in
-          Button {
-            streamLanguage = option.value
-          } label: {
-            if streamLanguage == option.value {
-              Label(option.name, systemImage: "checkmark")
-            } else {
-              Text(option.name)
-            }
+        Picker("Stream Language", selection: $streamLanguage) {
+          ForEach(StreamLanguagePreference.options, id: \.value) { option in
+            Text(option.name).tag(option.value)
           }
         }
+        .pickerStyle(.inline)
       } label: {
         SettingPill(title: StreamLanguagePreference.displayName(streamLanguage), isSelected: false, showsMenuIndicator: true)
       }
@@ -510,7 +505,7 @@ private struct SettingPill: View {
       }
 
       if showsMenuIndicator {
-        Icon(glyph: .selector, size: 26)
+        Icon(glyph: .selector, size: 40)
       } else {
         Icon(glyph: .check, size: 26)
           .opacity(isSelected ? 1 : 0)
