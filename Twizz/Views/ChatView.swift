@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// A scroll instruction for the chat list. The nonce ensures repeated scrolls to
+/// the same message still register as a change through `onChange`.
+struct ChatScrollTarget: Equatable {
+  var id: ChatMessage.ID
+  var anchor: UnitPoint
+  var nonce: Int
+}
+
 /// A read-only chat panel that auto-scrolls to the newest message.
 /// Designed as a translucent overlay on top of the video player.
 struct ChatView: View {
@@ -23,17 +31,13 @@ struct ChatView: View {
   /// When false, the list stops pinning to the newest message so the viewer can
   /// scroll back through history without the view yanking to the bottom.
   var autoScroll: Bool = true
-  /// Shared player focus, so the scroll view participates in the page's focus
-  /// system (`.chatScroll`) instead of relying on tvOS's implicit overflow
-  /// focus, which leaked focus into chat unpredictably.
-  var focusBinding: FocusState<PlayerView.Focusable?>.Binding
-  /// Bumped by the player each time the viewer (re-)enters the scroller. Used as
-  /// the ScrollView's identity so it is rebuilt fresh on entry, which is the
-  /// only way tvOS reliably grants it focus.
-  var scrollGeneration: Int = 0
   /// When non-nil, chat is in the lightweight "soft pause" read mode and this is
   /// the seconds remaining before it auto-resumes. Drives the countdown pill.
   var softPauseRemaining: Int? = nil
+  /// A scroll instruction from the player (manual scroll mode). Changing its
+  /// nonce scrolls the list to the given message; the player keeps focus on the
+  /// composer because tvOS won't reliably keep focus on the chat ScrollView.
+  var scrollTarget: ChatScrollTarget? = nil
   @Environment(\.themePalette) private var palette
   @State private var pendingScrollWork: DispatchWorkItem?
 
@@ -79,14 +83,12 @@ struct ChatView: View {
         .padding(.vertical, verticalPadding)
       }
       .scrollIndicators(.hidden)
-      .focused(focusBinding, equals: .chatScroll)
-      .id(scrollGeneration)
-      .onChange(of: scrollGeneration) { _, _ in
-        // The rebuilt list starts at the top; drop it to the newest message
-        // immediately so entry looks continuous and the viewer scrolls up.
-        guard let last = messages.last else { return }
-        DispatchQueue.main.async {
-          proxy.scrollTo(last.id, anchor: .bottom)
+      .onChange(of: scrollTarget) { _, target in
+        // Manual scroll: jump to the requested message with a short animation.
+        guard let target else { return }
+        pendingScrollWork?.cancel()
+        withAnimation(.easeOut(duration: 0.14)) {
+          proxy.scrollTo(target.id, anchor: target.anchor)
         }
       }
       .onChange(of: messages.count) {

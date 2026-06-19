@@ -206,25 +206,28 @@ struct PlayerView: View {
   @State private var suppressLowLatencyToggleReload = false
   @State private var consecutiveLoadFailures = 0
   @State private var lastControlFocus: Focusable = .quality
-  /// True only for the moment the user deliberately leaves the chat scroller via
-  /// the Back button, so the focus trap lets that one transition through.
-  @State private var isExitingChatScroll = false
-  /// Bumped each time the viewer enters the chat scroller. Used as the chat
-  /// ScrollView's `.id` so it is rebuilt fresh on every entry — tvOS only
-  /// reliably grants focus to a newly created ScrollView, and silently refuses
-  /// a programmatic re-focus of a reused one (which dumped focus on the control
-  /// bar the second time around).
-  @State private var chatScrollGeneration = 0
   /// Non-nil while chat is "soft paused" (Twitch-style): the list is frozen so
-  /// the viewer can read, with a countdown that auto-resumes. Pressing Up again
-  /// promotes it to the full, scrollable pause (`.chatScroll`).
+  /// the viewer can read, with a countdown that auto-resumes. A second Up press
+  /// promotes it to manual scroll mode.
   @State private var chatSoftPauseRemaining: Int?
   @State private var softPauseTask: Task<Void, Never>?
   private let softPauseSeconds = 10
-  /// Last directional press, captured so the chat-scroll focus trap can tell a
-  /// downward exit (drop to the composer) from a sideways/upward escape (snap
-  /// back into the list).
-  @State private var lastMoveDirection: MoveCommandDirection?
+  /// True once the viewer has promoted the pause into manual scroll mode. Focus
+  /// stays on the composer; up/down swipes drive `chatScrollTarget` directly,
+  /// because tvOS will not reliably hand (and keep) focus on the chat ScrollView.
+  @State private var isChatScrolling = false
+  /// The message currently pinned near the top of the viewport while scrolling,
+  /// tracked by id so incoming messages don't shift our place.
+  @State private var chatScrollAnchorID: ChatMessage.ID?
+  /// Latest scroll instruction handed to ChatView. The nonce makes repeated
+  /// scrolls to the same id still register as a change.
+  @State private var chatScrollTarget: ChatScrollTarget?
+  @State private var chatScrollNonce = 0
+  /// Messages to advance per up/down swipe while scrolling.
+  private let chatScrollStep = 3
+  /// When the composer last became focused, used to ignore a stray up-swipe that
+  /// rides in on a diagonal move from the chat-toggle button (accidental pause).
+  @State private var chatInputFocusedAt = Date.distantPast
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
   @State private var raidBannerDismissTask: Task<Void, Never>?
   /// The outgoing raid currently being followed (with a cancel window).
@@ -304,8 +307,6 @@ struct PlayerView: View {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case offlineViewChannel, offlineTryAgain
     case chatSend
-    /// The scrollable chat message list. Focusing it pauses auto-scroll.
-    case chatScroll
     case raidFollowCancel
     case simulateRaidButton
     case simulateOfflineButton
@@ -537,8 +538,8 @@ struct PlayerView: View {
       setIdleTimer(disabled: false)
     }
     .onExitCommand {
-      if focus == .chatScroll {
-        exitChatScroll()
+      if isChatScrolling || chatSoftPauseRemaining != nil {
+        resumeChatLive()
       } else if showChatSettings {
         if chatSettingsPage != .main {
           closeSubpage()
@@ -553,18 +554,19 @@ struct PlayerView: View {
       }
     }
     .onMoveCommand { direction in
-      lastMoveDirection = direction
       if !showControls {
         // Directional movement should immediately surface controls. Pressing
         // right with chat open means the user wants the composer, so land
         // there directly instead of bouncing focus to the chat toggle first.
-        // Pressing up with chat open means the user wants to scroll history, so
-        // enter the scroller directly instead of landing on the control bar.
+        // Up/down with chat open drive the soft-pause / scroll flow even while
+        // the chrome is hidden (scrolling doesn't depend on focus).
         switch direction {
         case .right where showChat:
           revealControls(preferredFocus: .chatInput)
         case .up where showChat:
           handleChatUpPress()
+        case .down where showChat && (isChatScrolling || chatSoftPauseRemaining != nil):
+          handleChatDownPress()
         default:
           revealControls(preferredFocus: .chatToggle)
         }
@@ -573,23 +575,16 @@ struct PlayerView: View {
       }
     }
     .onChange(of: focus) { oldFocus, newFocus in
-      // Trap focus inside the chat scroller. While reading history, tvOS tries to
-      // hand focus to an adjacent control on left/right or when the list can't
-      // scroll any further — which kept ejecting the viewer mid-scroll. Keep
-      // focus on the list unless they deliberately left with Back.
-      if oldFocus == .chatScroll, newFocus != .chatScroll, showChat {
-        if isExitingChatScroll {
-          isExitingChatScroll = false
-        } else if lastMoveDirection == .down {
-          // Pressing down out of the list means "I'm done scrolling" — drop to
-          // the composer and resume live instead of leaking to a control.
-          lastMoveDirection = nil
-          focus = .chatInput
-          scheduleHide()
-          return
-        } else {
-          focus = .chatScroll
-          return
+      // Track when the composer becomes focused so an up-swipe that rides in on
+      // a diagonal move from the chat-toggle button can't accidentally pause.
+      if newFocus == .chatInput, oldFocus != .chatInput {
+        chatInputFocusedAt = Date()
+      }
+      // If chat is frozen (soft pause or scroll) and the viewer navigates away
+      // to a real control, resume live so the frozen state can't get stranded.
+      if isChatScrolling || chatSoftPauseRemaining != nil {
+        if let newFocus, newFocus != .chatInput, isControlFocus(newFocus) {
+          resumeChatLive()
         }
       }
 
@@ -1286,8 +1281,9 @@ struct PlayerView: View {
           return
         }
         // Keep the controls (and the chat composer beneath them) on screen while
-        // the viewer is scrolling chat history, and never yank focus to the video.
-        if focus == .chatScroll {
+        // chat is frozen for reading or scrolling, so focus stays on the composer
+        // and up/down swipes keep driving the scroll instead of hiding the chrome.
+        if isChatScrolling || chatSoftPauseRemaining != nil {
           scheduleHide()
           return
         }
@@ -1356,16 +1352,31 @@ struct PlayerView: View {
     }
   }
 
-  /// Move focus into the chat scroller. Clears the cached move direction so a
-  /// programmatic entry (or a momentary focus-engine bounce right after) can't
-  /// be mistaken for a downward exit by the focus trap.
   /// Up press while chat is open. First press soft-pauses (read mode with a
-  /// countdown); a second press while paused promotes to the scrollable pause.
+  /// countdown). A second press promotes to manual scroll mode and scrolls up;
+  /// further up presses keep scrolling toward older messages.
   private func handleChatUpPress() {
-    if chatSoftPauseRemaining != nil {
-      enterChatScroll()
+    if isChatScrolling {
+      stepChatScroll(up: true)
+    } else if chatSoftPauseRemaining != nil {
+      beginChatScrolling()
+      stepChatScroll(up: true)
     } else {
+      // Ignore an up-swipe that arrives right as focus lands on the composer —
+      // that's a diagonal move off the chat-toggle button, not a deliberate
+      // pause.
+      guard Date().timeIntervalSince(chatInputFocusedAt) > 0.3 else { return }
       startSoftPause()
+    }
+  }
+
+  /// Down press while chat is open. Scrolls toward newer messages, resuming live
+  /// once it reaches the bottom; from a plain soft pause it resumes immediately.
+  private func handleChatDownPress() {
+    if isChatScrolling {
+      stepChatScroll(up: false)
+    } else if chatSoftPauseRemaining != nil {
+      resumeChatLive()
     }
   }
 
@@ -1393,25 +1404,53 @@ struct PlayerView: View {
     chatSoftPauseRemaining = nil
   }
 
-  private func enterChatScroll() {
+  /// Promote a soft pause into manual scroll mode, anchored at the newest message.
+  private func beginChatScrolling() {
     cancelSoftPause()
-    lastMoveDirection = nil
-    if !showControls {
-      showControls = true
-    }
-    // Rebuild the chat ScrollView so tvOS reliably hands it focus (a reused one
-    // refuses programmatic re-focus and bounces to the control bar).
-    chatScrollGeneration += 1
-    focus = .chatScroll
+    isChatScrolling = true
+    chatScrollAnchorID = visibleChatMessages.last?.id
     scheduleHide()
   }
 
-  /// Leave the chat scroller (Back button): resume live auto-scroll and drop the
-  /// viewer back on the composer. The flag lets the focus trap pass this one
-  /// transition through instead of yanking focus back into the list.
-  private func exitChatScroll() {
-    isExitingChatScroll = true
-    focus = .chatInput
+  /// Advance the scroll anchor by `chatScrollStep` messages and tell ChatView to
+  /// scroll there. Scrolling past the newest message resumes the live feed.
+  private func stepChatScroll(up: Bool) {
+    let msgs = visibleChatMessages
+    guard !msgs.isEmpty else { return }
+    let lastIndex = msgs.count - 1
+    let currentIndex: Int = {
+      if let id = chatScrollAnchorID, let i = msgs.firstIndex(where: { $0.id == id }) {
+        return i
+      }
+      return lastIndex
+    }()
+
+    if up {
+      let target = max(0, currentIndex - chatScrollStep)
+      chatScrollAnchorID = msgs[target].id
+      sendChatScroll(to: msgs[target].id)
+    } else {
+      let target = currentIndex + chatScrollStep
+      if target >= lastIndex {
+        resumeChatLive()
+      } else {
+        chatScrollAnchorID = msgs[target].id
+        sendChatScroll(to: msgs[target].id)
+      }
+    }
+    scheduleHide()
+  }
+
+  private func sendChatScroll(to id: ChatMessage.ID) {
+    chatScrollNonce += 1
+    chatScrollTarget = ChatScrollTarget(id: id, anchor: .top, nonce: chatScrollNonce)
+  }
+
+  /// Leave any frozen state and let chat snap back to the live, newest message.
+  private func resumeChatLive() {
+    cancelSoftPause()
+    isChatScrolling = false
+    chatScrollAnchorID = nil
     scheduleHide()
   }
 
@@ -1472,10 +1511,9 @@ struct PlayerView: View {
         badgeURLs: chat.badgeURLs,
         useGlassBackground: isGlass,
         useLighterOverlayBackground: useLighterOverlayBackground,
-        autoScroll: focus != .chatScroll && chatSoftPauseRemaining == nil,
-        focusBinding: $focus,
-        scrollGeneration: chatScrollGeneration,
-        softPauseRemaining: chatSoftPauseRemaining
+        autoScroll: !(isChatScrolling || chatSoftPauseRemaining != nil),
+        softPauseRemaining: chatSoftPauseRemaining,
+        scrollTarget: chatScrollTarget
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -2215,6 +2253,8 @@ struct PlayerView: View {
               revealControls(preferredFocus: .chatToggle)
             case .up:
               handleChatUpPress()
+            case .down:
+              handleChatDownPress()
             case .right:
               if hasChatDraft { focus = .chatSend }
             default:
@@ -2279,6 +2319,8 @@ struct PlayerView: View {
             revealControls(preferredFocus: .chatToggle)
           case .up:
             handleChatUpPress()
+          case .down:
+            handleChatDownPress()
           default:
             break
           }
