@@ -132,14 +132,9 @@ final class ChatService {
 
   private let endpoint = URL(string: "wss://irc-ws.chat.twitch.tv:443")!
 
-  private var socket: URLSessionWebSocketTask?
-  /// One reusable session for the chat socket. Creating a fresh `URLSession` per
-  /// (re)connect leaks the old one (it is never invalidated); reusing a single
-  /// session avoids that accumulation over long viewing sessions.
-  private let urlSession = URLSession(configuration: .default)
-  /// Consecutive failed reconnects, for exponential backoff. Reset on a healthy
-  /// receive.
-  private var reconnectAttempts = 0
+  /// Shared WebSocket transport: owns the reused `URLSession`, the socket task,
+  /// and the exponential-backoff counter.
+  private let connection = WebSocketConnection()
   private var receiveTask: Task<Void, Never>?
   private var channel: String?
   private var hasSentJoin = false
@@ -205,11 +200,9 @@ final class ChatService {
     youtubeSeenMessageOrder.removeAll()
     youtubeStatusMessage = nil
     syncWarmupStart = Date()
-    reconnectAttempts = 0
+    connection.resetBackoff()
 
-    let task = urlSession.webSocketTask(with: endpoint)
-    socket = task
-    task.resume()
+    connection.connect(to: endpoint)
 
     send("PASS SCHMOOPIIE")
     send("NICK justinfan\(Int.random(in: 10_000..<99_999))")
@@ -246,8 +239,7 @@ final class ChatService {
   func disconnect() {
     receiveTask?.cancel()
     receiveTask = nil
-    socket?.cancel(with: .goingAway, reason: nil)
-    socket = nil
+    connection.cancel()
     stopYouTubeLoop(clearStatus: true)
     isConnected = false
     messages.removeAll()
@@ -273,15 +265,15 @@ final class ChatService {
   }
 
   private func send(_ command: String) {
-    socket?.send(.string(command + "\r\n")) { _ in }
+    connection.send(.string(command + "\r\n"))
   }
 
   private func receiveLoop() async {
     while !Task.isCancelled {
-      guard let currentSocket = socket else { break }
+      guard let currentSocket = connection.currentTask else { break }
       do {
         let frame = try await currentSocket.receive()
-        reconnectAttempts = 0
+        connection.resetBackoff()
         switch frame {
         case .string(let text): handle(text)
         case .data(let data): handle(String(decoding: data, as: UTF8.self))
@@ -294,17 +286,13 @@ final class ChatService {
         // Reconnect with exponential backoff (3s, 6s, 12s… capped at 30s),
         // preserving the message buffer.
         guard let channelToRejoin = channel else { break }
-        let delay = min(3.0 * pow(2.0, Double(reconnectAttempts)), 30.0)
-        reconnectAttempts += 1
+        let delay = connection.nextBackoffDelay()
         try? await Task.sleep(for: .seconds(delay))
         guard !Task.isCancelled, channel == channelToRejoin else { break }
 
-        socket?.cancel(with: .goingAway, reason: nil)
-        let newTask = urlSession.webSocketTask(with: endpoint)
-        socket = newTask
+        connection.connect(to: endpoint)
         hasSentJoin = false
         hasCapAck = false
-        newTask.resume()
         send("PASS SCHMOOPIIE")
         send("NICK justinfan\(Int.random(in: 10_000..<99_999))")
         send("CAP REQ :twitch.tv/tags twitch.tv/commands")

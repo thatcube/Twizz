@@ -136,13 +136,9 @@ final class HermesEventService {
   private static let userAgent =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
-  private var socket: URLSessionWebSocketTask?
-  /// One reusable session for this socket. Creating a fresh `URLSession` per
-  /// (re)connect leaks the old one; reusing a single session avoids that.
-  private let urlSession = URLSession(configuration: .default)
-  /// Consecutive failed reconnects, for exponential backoff. Reset on a healthy
-  /// receive.
-  private var reconnectAttempts = 0
+  /// Shared WebSocket transport: owns the reused `URLSession`, the socket task,
+  /// and the exponential-backoff counter.
+  private let connection = WebSocketConnection()
   private var receiveTask: Task<Void, Never>?
   private var channelLogin: String?
   private var broadcasterID: String?
@@ -165,10 +161,8 @@ final class HermesEventService {
     let normalized = login.lowercased()
     channelLogin = normalized
 
-    reconnectAttempts = 0
-    let task = urlSession.webSocketTask(with: endpoint)
-    socket = task
-    task.resume()
+    connection.resetBackoff()
+    connection.connect(to: endpoint)
 
     Task { [weak self] in
       guard let self else { return }
@@ -185,8 +179,7 @@ final class HermesEventService {
   func stop() {
     receiveTask?.cancel()
     receiveTask = nil
-    socket?.cancel(with: .goingAway, reason: nil)
-    socket = nil
+    connection.cancel()
 
     pollClearTask?.cancel()
     predictionClearTask?.cancel()
@@ -208,10 +201,10 @@ final class HermesEventService {
 
   private func receiveLoop() async {
     while !Task.isCancelled {
-      guard let currentSocket = socket else { break }
+      guard let currentSocket = connection.currentTask else { break }
       do {
         let frame = try await currentSocket.receive()
-        reconnectAttempts = 0
+        connection.resetBackoff()
         switch frame {
         case .string(let text): handle(text)
         case .data(let data): handle(String(decoding: data, as: UTF8.self))
@@ -219,16 +212,12 @@ final class HermesEventService {
         }
       } catch {
         guard !Task.isCancelled, let login = channelLogin else { break }
-        let delay = min(3.0 * pow(2.0, Double(reconnectAttempts)), 30.0)
-        reconnectAttempts += 1
+        let delay = connection.nextBackoffDelay()
         try? await Task.sleep(for: .seconds(delay))
         guard !Task.isCancelled, channelLogin == login else { break }
 
-        socket?.cancel(with: .goingAway, reason: nil)
-        let newTask = urlSession.webSocketTask(with: endpoint)
-        socket = newTask
+        connection.connect(to: endpoint)
         hasSubscribed = false
-        newTask.resume()
         // Re-subscribe once the new connection's welcome arrives.
       }
     }
@@ -258,11 +247,8 @@ final class HermesEventService {
 
   private func reconnect() {
     receiveTask?.cancel()
-    socket?.cancel(with: .goingAway, reason: nil)
-    let newTask = urlSession.webSocketTask(with: endpoint)
-    socket = newTask
+    connection.connect(to: endpoint)
     hasSubscribed = false
-    newTask.resume()
     receiveTask = Task { [weak self] in await self?.receiveLoop() }
   }
 
@@ -276,7 +262,7 @@ final class HermesEventService {
   ]
 
   private func subscribeIfReady() {
-    guard !hasSubscribed, let socket, let id = broadcasterID else { return }
+    guard !hasSubscribed, connection.isOpen, let id = broadcasterID else { return }
     hasSubscribed = true
     for template in Self.topicTemplates {
       let topic = template.replacingOccurrences(of: "%@", with: id)
@@ -293,7 +279,7 @@ final class HermesEventService {
       guard let data = try? JSONSerialization.data(withJSONObject: frame),
         let text = String(data: data, encoding: .utf8)
       else { continue }
-      socket.send(.string(text)) { _ in }
+      connection.send(.string(text))
     }
   }
 
