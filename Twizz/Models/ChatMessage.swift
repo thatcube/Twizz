@@ -23,6 +23,9 @@ struct ChatMessage: Identifiable {
     let youtubeEmoteURLs: [String: URL]
     /// True for `/me` action messages (rendered in the user's color).
     let isAction: Bool
+    /// True when Twitch flags this as the user's first message in the channel
+    /// (IRC `first-msg=1`). Drives the highlighted "FIRST MESSAGE" treatment.
+    let isFirstMessage: Bool
     /// The platform this message came from (Twitch or YouTube).
     let source: ChatSource
     /// Timestamp when the message was received (for chronological merging).
@@ -86,6 +89,7 @@ extension ChatMessage {
         self.twitchEmoteURLs = twitchEmoteURLs
         self.youtubeEmoteURLs = [:]
         self.isAction = action
+        self.isFirstMessage = tags["first-msg"] == "1"
         self.source = .twitch
         self.timestamp = Date()
     }
@@ -103,6 +107,7 @@ extension ChatMessage {
         self.twitchEmoteURLs = [:]
         self.youtubeEmoteURLs = youtubeEmoteURLs
         self.isAction = false
+        self.isFirstMessage = false
         self.source = .youtube
         self.timestamp = timestamp
     }

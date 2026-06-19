@@ -172,7 +172,7 @@ struct ChatView: View {
   }
 
   private func line(for message: ChatMessage) -> some View {
-    return RichChatLineView(
+    let richLine = RichChatLineView(
       message: message,
       nameColor: color(for: message),
       globalEmoteURLs: emoteURLs,
@@ -186,7 +186,48 @@ struct ChatView: View {
       showBadges: showBadges,
       bodyColorOverride: isSideLayout ? palette.chatSidePrimaryText : nil
     )
+
+    if message.isFirstMessage {
+      return AnyView(firstMessageHighlight(around: richLine))
+    }
+    return AnyView(richLine)
   }
+
+  // MARK: - First-message highlight
+
+  /// Twitch-style accent purple used for the first-message treatment.
+  private var firstMessageAccent: Color {
+    Color(twitchHex: "#A970FF") ?? .purple
+  }
+
+  /// Wraps a chat line in the highlighted "first message" treatment: a tinted
+  /// strip that bleeds to the panel edges, a left accent bar, and a small
+  /// "FIRST MESSAGE" label above the text — mirroring Twitch's affordance.
+  private func firstMessageHighlight<Content: View>(around line: Content) -> some View {
+    let barWidth: CGFloat = 4
+    let labelSize = max(11, textSize * 0.44)
+
+    return VStack(alignment: .leading, spacing: 4) {
+      Text("FIRST MESSAGE")
+        .font(.system(size: labelSize, weight: .heavy))
+        .tracking(0.6)
+        .foregroundStyle(firstMessageAccent)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+      line
+    }
+    .padding(.vertical, verticalPadding)
+    .padding(.horizontal, horizontalPadding)
+    .background(alignment: .leading) {
+      ZStack(alignment: .leading) {
+        firstMessageAccent.opacity(isSideLayout ? 0.12 : 0.20)
+        firstMessageAccent.frame(width: barWidth)
+      }
+    }
+    // Bleed the tinted strip out past the list's horizontal inset so it spans
+    // the full width of the chat panel like the reference design.
+    .padding(.horizontal, -horizontalPadding)
+  }
+
 
   /// Use the user's Twitch color, or a stable color derived from their name.
   private func color(for message: ChatMessage) -> Color {
