@@ -1807,17 +1807,19 @@ struct PlayerView: View {
       var pressStart: Date?
       var active = false
       var velocity = 0.0
+      // Direction resolved for the current hold. Sticks for the whole hold so the
+      // flickery live position can't flip it mid-scroll.
+      var heldDir = 0
       while !Task.isCancelled {
         try? await Task.sleep(for: .milliseconds(16))
         if Task.isCancelled { break }
         guard isChatScrolling else { break }
 
-        let dir = trackpad.clickLatchedDirection
-        let held = trackpad.clickPressed && dir != 0
-        guard held else {
+        guard trackpad.clickPressed else {
           pressStart = nil
           active = false
           velocity = 0
+          heldDir = 0
           continue
         }
 
@@ -1826,7 +1828,22 @@ struct PlayerView: View {
           pressStart = now
           active = false
           velocity = 0
+          heldDir = 0
         }
+        // Resolve a direction for this hold. Prefer the click-down latch, but if
+        // it missed (click registered a frame before the finger position updated)
+        // recover from the live dpad/y signal and then stick with it.
+        if heldDir == 0 {
+          if trackpad.clickLatchedDirection != 0 {
+            heldDir = trackpad.clickLatchedDirection
+          } else if trackpad.dpadUpPressed || Double(trackpad.verticalValue) > 0.12 {
+            heldDir = 1
+          } else if trackpad.dpadDownPressed || Double(trackpad.verticalValue) < -0.12 {
+            heldDir = -1
+          }
+        }
+        guard heldDir != 0 else { continue }
+
         // Let an active swipe own the scroll; pause the hold without resetting.
         if Date().timeIntervalSince(lastGestureScrollAt) < 0.12 { continue }
         if !active {
@@ -1837,7 +1854,7 @@ struct PlayerView: View {
           velocity = chatHoldStartVelocity
         }
         // Up (dir +1) scrolls toward older messages, i.e. a negative index delta.
-        let delta = dir > 0 ? -velocity : velocity
+        let delta = heldDir > 0 ? -velocity : velocity
         lastHoldRepeatAt = now
         if !applyScrollDelta(delta) { break }  // reached the live bottom
         velocity = min(chatHoldMaxVelocity, velocity * chatHoldVelocityAccel)
