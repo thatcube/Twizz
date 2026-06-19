@@ -187,10 +187,65 @@ struct ChatView: View {
       bodyColorOverride: isSideLayout ? palette.chatSidePrimaryText : nil
     )
 
+    if let systemMessage = message.systemMessage {
+      return AnyView(
+        subscriptionHighlight(
+          systemMessage: systemMessage,
+          showUserLine: !message.text.isEmpty,
+          line: richLine
+        )
+      )
+    }
     if message.isFirstMessage {
       return AnyView(firstMessageHighlight(around: richLine))
     }
     return AnyView(richLine)
+  }
+
+  // MARK: - Subscription highlight
+
+  /// Twitch-style teal/green accent used for subscription event lines.
+  private var subscriptionAccent: Color {
+    Color(twitchHex: "#00D6A1") ?? .green
+  }
+
+  /// Wraps a subscription USERNOTICE in a highlighted treatment: a tinted strip
+  /// that bleeds to the panel edges, a left accent bar, a star glyph and the
+  /// ready-made `system-msg` text, and — when the subscriber attached a resub
+  /// comment — their normal chat line beneath it.
+  private func subscriptionHighlight<Content: View>(
+    systemMessage: String,
+    showUserLine: Bool,
+    line: Content
+  ) -> some View {
+    let barWidth: CGFloat = 4
+
+    return VStack(alignment: .leading, spacing: 4) {
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Image(systemName: "star.fill")
+          .font(fontStyle.font(size: textSize * 0.7, weight: .bold))
+        Text(systemMessage)
+          .font(fontStyle.font(size: textSize, weight: .semibold))
+          .tracking(letterSpacing)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .foregroundStyle(subscriptionAccent)
+
+      if showUserLine {
+        line
+      }
+    }
+    .padding(.vertical, verticalPadding)
+    .padding(.horizontal, horizontalPadding)
+    .background(alignment: .leading) {
+      ZStack(alignment: .leading) {
+        subscriptionAccent.opacity(isSideLayout ? 0.12 : 0.20)
+        subscriptionAccent.frame(width: barWidth)
+      }
+    }
+    // Bleed the tinted strip out past the list's horizontal inset so it spans
+    // the full width of the chat panel, matching the first-message treatment.
+    .padding(.horizontal, -horizontalPadding)
   }
 
   // MARK: - First-message highlight
