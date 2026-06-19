@@ -107,6 +107,10 @@ struct PlayerView: View {
 
   let channel: String
   var auth: TwitchAuthSession
+  /// Shared go-live watcher. Optional because VOD playback (`OnDemandPlayerView`)
+  /// has no live-follow context. When present, the player surfaces "just went
+  /// live" toasts and suppresses the channel currently on screen.
+  var goLive: GoLiveWatcher? = nil
   /// When set, the player runs in VOD mode: it plays the recorded broadcast,
   /// drives `replay` for chat, exposes a full-duration seek bar + playback speed,
   /// and gates off all live-only machinery (latency, low-latency proxy, EventSub,
@@ -577,6 +581,7 @@ struct PlayerView: View {
     case simulateRaidButton
     case simulateOfflineButton
     case simulateMomentButton
+    case simulateGoLiveButton
     case chatSettingsButton
     // Stream Rewind transport bar
     case rewindScrubber
@@ -768,12 +773,19 @@ struct PlayerView: View {
       // treatment and only appear when chat is open — matching how Twitch shows
       // them beside the stream. Read-only.
 
+      if let goLive, let event = goLive.pending {
+        goLiveToast(goLive, event: event)
+          .transition(.move(edge: .top).combined(with: .opacity))
+          .zIndex(13)
+      }
+
       if isSleeping {
         sleepingOverlay
           .transition(.opacity)
       }
     }
     .animation(.easeInOut(duration: 0.35), value: hermes.currentMoment)
+    .animation(.easeOut(duration: 0.25), value: goLive?.pending)
     .onChange(of: chat.pendingRaid) { _, newRaid in
       // Incoming raids (someone raiding the channel you're watching) are purely
       // informational: show a passive banner and auto-dismiss it. We never steal
@@ -820,6 +832,8 @@ struct PlayerView: View {
       if isVOD {
         await startVOD()
       } else {
+        // Don't toast the channel we're already watching.
+        goLive?.suppressedLogin = activeChannel
         configurePlayerForLive()
         resetDiagnostics()
         applyExperimentalYouTubeSettings()
@@ -879,6 +893,8 @@ struct PlayerView: View {
       chat.disconnect()
       eventSub.stop()
       hermes.stop()
+      // Hand go-live suppression back to Home now that no channel is on screen.
+      goLive?.suppressedLogin = nil
       setIdleTimer(disabled: false)
     }
     .onExitCommand {
@@ -1042,6 +1058,8 @@ struct PlayerView: View {
       // The rewind window is per-stream: drop the previous channel's DVR history.
       lowLatencyProxy.resetDVR()
       isUserPaused = false
+      // Keep the go-live watcher from toasting whatever we just switched to.
+      goLive?.suppressedLogin = activeChannel
     }
     .task(id: activeChannel) {
       await refreshYouTubeAutoTarget()
@@ -1255,6 +1273,9 @@ struct PlayerView: View {
           .buttonStyle(.borderedProminent)
           .tint(ThemePalette.brandPurple)
           .focused($focus, equals: .offlineViewChannel)
+          .onMoveCommand { direction in
+            if direction == .right { focus = .offlineTryAgain }
+          }
 
           Button {
             retryFromOffline()
@@ -1265,8 +1286,26 @@ struct PlayerView: View {
           }
           .TwizzControlButtonStyle()
           .focused($focus, equals: .offlineTryAgain)
+          .onMoveCommand { direction in
+            switch direction {
+            case .left:
+              focus = .offlineViewChannel
+            case .right:
+              // Deliberate exit out of the focus section into chat, mirroring
+              // the control row's chat-toggle button.
+              if showChat { focus = chatFocusAnchor }
+            default:
+              break
+            }
+          }
         }
         .padding(.top, 8)
+        // Group the two buttons as one focus section so the full-height chat
+        // pane (a strong geometric focus magnet) can't out-pull the adjacent
+        // Try Again button. Within the section the explicit move handlers above
+        // step View Channel -> Try Again, and only a right-press from Try Again
+        // exits into chat. Mirrors the bottom control row's focus corralling.
+        .focusSection()
       }
       .frame(maxWidth: 760)
       .padding(48)
@@ -1649,6 +1688,20 @@ struct PlayerView: View {
   }
 
   // MARK: - Controls visibility
+
+  /// Left-press target when leaving the chat composer. While the channel is
+  /// offline the bottom controls (and `.chatToggle`) aren't rendered — the
+  /// offline empty state is shown instead — so revealing controls would focus a
+  /// target that doesn't exist and trap focus on the composer. Return to the
+  /// offline state's "Try Again" button, which is the control adjacent to the
+  /// chat pane, so a subsequent right-press hops straight back into chat.
+  func exitChatComposerLeft() {
+    if isOffline {
+      focus = .offlineTryAgain
+    } else {
+      revealControls(preferredFocus: .chatToggle)
+    }
+  }
 
   func revealControls(preferredFocus: Focusable) {
     focusRecoveryTask?.cancel()
@@ -2091,6 +2144,7 @@ struct PlayerView: View {
       .simulateRaidButton,
       .simulateOfflineButton,
       .simulateMomentButton,
+      .simulateGoLiveButton,
       .youtubeMergeToggle,
       .youtubeMergeURL,
       .chatAdvancedBack,
@@ -2478,6 +2532,26 @@ struct PlayerView: View {
             focusTag: .simulateMomentButton
           ) {
             simulateInteractiveMoment()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          // Debug-only: real follows rarely go live on cue, so this injects a
+          // simulated "just went live" toast (for Monstercat, a near-24/7
+          // stream) to exercise the toast, its auto-dismiss countdown, and the
+          // "Watch" channel switch. Visible only while Diagnostics is enabled.
+          settingsPill(
+            title: "Simulate Go Live",
+            isSelected: false,
+            focusTag: .simulateGoLiveButton
+          ) {
+            showChatSettings = false
+            // Let the settings sheet finish dismissing before the toast appears,
+            // otherwise it surfaces mid-transition and the focus engine can't
+            // reliably hand focus to its "Watch" button.
+            Task {
+              try? await Task.sleep(for: .milliseconds(600))
+              goLive?.simulateGoLive()
+            }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -3032,7 +3106,7 @@ struct PlayerView: View {
           .onMoveCommand { direction in
             switch direction {
             case .left:
-              revealControls(preferredFocus: .chatToggle)
+              exitChatComposerLeft()
             case .up:
               handleChatUpPress()
             case .down:
@@ -3106,7 +3180,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            revealControls(preferredFocus: .chatToggle)
+            exitChatComposerLeft()
           case .up:
             handleChatUpPress()
           case .down:
@@ -4236,6 +4310,11 @@ private struct ChatMessagesColumn: View {
   private var isConnected: Bool { replay?.isReady ?? chat?.isConnected ?? false }
   private var emoteURLs: [String: URL] { replay?.emoteURLs ?? chat?.emoteURLs ?? [:] }
   private var badgeURLs: [String: URL] { replay?.badgeURLs ?? chat?.badgeURLs ?? [:] }
+  private var cheermotes: [Cheermote] { replay?.cheermotes ?? chat?.cheermotes ?? [] }
+  /// VOD comments carry no `bits` tag, so cheermote tokens there are matched by
+  /// token alone (the way Twitch renders VOD cheers). Live chat stays gated on
+  /// the IRC `bits` tag to avoid false positives.
+  private var matchCheersWithoutBits: Bool { replay != nil }
 
   var body: some View {
     ChatView(
@@ -4252,6 +4331,8 @@ private struct ChatMessagesColumn: View {
       isConnected: isConnected,
       emoteURLs: emoteURLs,
       badgeURLs: badgeURLs,
+      cheermotes: cheermotes,
+      matchCheersWithoutBits: matchCheersWithoutBits,
       useGlassBackground: useGlassBackground,
       useLighterOverlayBackground: useLighterOverlayBackground,
       autoScroll: autoScroll,

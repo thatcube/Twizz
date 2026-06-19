@@ -19,6 +19,8 @@ final class VODChatReplayService {
   private(set) var emoteURLs: [String: URL] = [:]
   /// Channel + global badge catalog, keyed by `setID/version`.
   private(set) var badgeURLs: [String: URL] = [:]
+  /// Channel + global cheermotes, so cheers in VOD comments render like Twitch.
+  private(set) var cheermotes: [Cheermote] = []
   /// True once the first page of comments has resolved (success or empty), so
   /// the UI can drop its "loading replay" state.
   private(set) var isReady = false
@@ -71,6 +73,7 @@ final class VODChatReplayService {
     messages = []
     emoteURLs = [:]
     badgeURLs = [:]
+    cheermotes = []
     coverageStart = 0
     coverageEnd = 0
     nextFetchOffset = 0
@@ -81,10 +84,12 @@ final class VODChatReplayService {
       catalogTask = Task { [weak self] in
         async let emotes = EmoteCatalogService.shared.catalog(for: login)
         async let badges = BadgeCatalogService.shared.catalog(for: login)
-        let (resolvedEmotes, resolvedBadges) = await (emotes, badges)
+        async let cheers = CheermoteCatalogService.shared.catalog(for: login)
+        let (resolvedEmotes, resolvedBadges, resolvedCheers) = await (emotes, badges, cheers)
         guard let self, !Task.isCancelled, self.vodID == vodID else { return }
         self.emoteURLs = resolvedEmotes
         self.badgeURLs = resolvedBadges
+        self.cheermotes = resolvedCheers
       }
     }
 

@@ -26,6 +26,10 @@ struct ChatMessage: Identifiable {
     /// True when Twitch flags this as the user's first message in the channel
     /// (IRC `first-msg=1`). Drives the highlighted "FIRST MESSAGE" treatment.
     let isFirstMessage: Bool
+    /// Bits cheered in this message (IRC `bits` tag); 0 when none. Gates
+    /// cheermote rendering for live chat (where a token is only a real cheer if
+    /// bits were actually spent).
+    let bits: Int
     /// The platform this message came from (Twitch or YouTube).
     let source: ChatSource
     /// Non-nil when this line is a Twitch subscription/event notice (USERNOTICE).
@@ -95,6 +99,7 @@ extension ChatMessage {
         self.youtubeEmoteURLs = [:]
         self.isAction = action
         self.isFirstMessage = tags["first-msg"] == "1"
+        self.bits = tags["bits"].flatMap { Int($0) } ?? 0
         self.source = .twitch
         self.systemMessage = nil
         self.timestamp = Date()
@@ -114,6 +119,7 @@ extension ChatMessage {
         self.youtubeEmoteURLs = youtubeEmoteURLs
         self.isAction = false
         self.isFirstMessage = false
+        self.bits = 0
         self.source = .youtube
         self.systemMessage = nil
         self.timestamp = timestamp
@@ -130,6 +136,7 @@ extension ChatMessage {
         twitchEmoteURLs: [String: URL],
         youtubeEmoteURLs: [String: URL] = [:],
         isAction: Bool = false,
+        bits: Int = 0,
         source: ChatSource = .twitch,
         timestamp: Date = Date()
     ) {
@@ -141,6 +148,7 @@ extension ChatMessage {
         self.youtubeEmoteURLs = youtubeEmoteURLs
         self.isAction = isAction
         self.isFirstMessage = false
+        self.bits = bits
         self.source = source
         self.systemMessage = nil
         self.timestamp = timestamp
@@ -205,6 +213,7 @@ extension ChatMessage {
         self.youtubeEmoteURLs = [:]
         self.isAction = false
         self.isFirstMessage = false
+        self.bits = 0
         self.source = .twitch
         self.systemMessage = systemMsg
         self.timestamp = Date()

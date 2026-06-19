@@ -6,6 +6,11 @@ struct RichChatLineView: View {
     let nameColor: Color
     let globalEmoteURLs: [String: URL]
     let badgeURLs: [String: URL]
+    /// Channel + global cheermotes for rendering bits cheers (e.g. `Cheer100`).
+    var cheermotes: [Cheermote] = []
+    /// When true, cheermote tokens render even without a bits count on the
+    /// message (VOD replay). Live chat gates on `message.bits` instead.
+    var matchCheersWithoutBits: Bool = false
     /// Body/name font point size.
     var textSize: CGFloat = ChatAppearance.defaultTextSize
     /// Emote glyph height (already resolved: Auto callers pass the derived value).
@@ -26,6 +31,13 @@ struct RichChatLineView: View {
     private enum Segment: Hashable {
         case text(String)
         case emote(name: String, url: URL)
+        case cheer(amount: Int, url: URL, color: Color)
+    }
+
+    /// Whether this message should have its tokens scanned for cheermotes.
+    private var shouldRenderCheers: Bool {
+        guard !cheermotes.isEmpty else { return false }
+        return message.bits > 0 || matchCheersWithoutBits
     }
 
     private var bodyColor: Color {
@@ -156,6 +168,14 @@ struct RichChatLineView: View {
                 .foregroundStyle(bodyColor)
         case .emote(let name, let url):
             EmoteView(name: name, url: url, fallbackColor: bodyColor, fallbackFontSize: bodyFontSize, emoteHeight: emoteHeight, animated: animatedEmotes)
+        case .cheer(let amount, let url, let color):
+            HStack(spacing: 1) {
+                EmoteView(name: "", url: url, fallbackColor: color, fallbackFontSize: bodyFontSize, emoteHeight: emoteHeight, animated: animatedEmotes)
+                Text("\(amount)")
+                    .font(fontStyle.font(size: bodyFontSize, weight: .bold))
+                    .tracking(letterSpacing)
+                    .foregroundStyle(color)
+            }
         }
     }
 
@@ -168,7 +188,7 @@ struct RichChatLineView: View {
         // chat scroll cost on the Apple TV's CPU. Cache by message id (+ global
         // emote count so newly-loaded globals still resolve). body runs on the
         // main thread, so the static store needs no locking.
-        let key = SegmentCacheKey(id: message.id, globalEmoteCount: globalEmoteURLs.count)
+        let key = SegmentCacheKey(id: message.id, globalEmoteCount: globalEmoteURLs.count, cheermoteCount: shouldRenderCheers ? cheermotes.count : 0)
         if let cached = Self.segmentCache[key] {
             return cached
         }
@@ -188,6 +208,7 @@ struct RichChatLineView: View {
     private struct SegmentCacheKey: Hashable {
         let id: UUID
         let globalEmoteCount: Int
+        let cheermoteCount: Int
     }
 
     private static var segmentCache: [SegmentCacheKey: [Segment]] = [:]
@@ -225,7 +246,9 @@ struct RichChatLineView: View {
                 output.append(.text(String(leading)))
             }
 
-            if let inlineSegments = inlineMessageScopedEmoteSegments(for: core) {
+            if shouldRenderCheers, let cheerSegment = cheermoteSegment(for: core) {
+                output.append(cheerSegment)
+            } else if let inlineSegments = inlineMessageScopedEmoteSegments(for: core) {
                 output.append(contentsOf: inlineSegments)
             } else if let url = messageScopedEmoteURLs[core] ?? globalEmoteURLs[core] {
                 output.append(.emote(name: core, url: url))
@@ -243,6 +266,28 @@ struct RichChatLineView: View {
         }
 
         return output
+    }
+
+    /// Match a `<prefix><amount>` cheermote token (e.g. `exemCheer100`) against
+    /// the catalog. The longest matching prefix wins (so `pokiCheer` beats a
+    /// hypothetical `Cheer`), and the tier is chosen by the cheered amount.
+    private func cheermoteSegment(for token: String) -> Segment? {
+        guard !token.isEmpty else { return nil }
+        let lower = token.lowercased()
+
+        var best: (cheer: Cheermote, amount: Int)?
+        for cheer in cheermotes {
+            let prefix = cheer.prefixLower
+            guard !prefix.isEmpty, lower.hasPrefix(prefix) else { continue }
+            let digits = lower.dropFirst(prefix.count)
+            guard !digits.isEmpty, let amount = Int(digits) else { continue }
+            if best == nil || prefix.count > best!.cheer.prefixLower.count {
+                best = (cheer, amount)
+            }
+        }
+
+        guard let match = best, let tier = match.cheer.tier(forBits: match.amount) else { return nil }
+        return .cheer(amount: match.amount, url: tier.imageURL, color: tier.color)
     }
 
     private func inlineMessageScopedEmoteSegments(for token: String) -> [Segment]? {

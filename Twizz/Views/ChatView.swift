@@ -28,6 +28,12 @@ struct ChatView: View {
   var isConnected: Bool = false
   var emoteURLs: [String: URL] = [:]
   var badgeURLs: [String: URL] = [:]
+  /// Channel + global cheermotes, used to render bits cheers (e.g. `Cheer100`).
+  var cheermotes: [Cheermote] = []
+  /// When true, cheermote tokens are matched without an accompanying bits count
+  /// (VOD replay, where comments carry no `bits` tag). Live chat leaves this
+  /// false so only real cheers (with bits) render as cheermotes.
+  var matchCheersWithoutBits: Bool = false
   /// When true, the message list draws a light scrim instead of a solid
   /// background so an underlying Liquid Glass panel can show through.
   var useGlassBackground: Bool = false
@@ -259,6 +265,8 @@ struct ChatView: View {
       nameColor: color(for: message),
       globalEmoteURLs: emoteURLs,
       badgeURLs: badgeURLs,
+      cheermotes: cheermotes,
+      matchCheersWithoutBits: matchCheersWithoutBits,
       textSize: textSize,
       emoteSize: emoteSize,
       lineHeight: lineHeight,

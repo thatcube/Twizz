@@ -36,6 +36,7 @@ enum Glyph: String {
   case chartLine = "chart-line"
   case flame
   case targetArrow = "target-arrow"
+  case broadcast
   // Brand glyphs for channel social links.
   case brandYoutube = "brand-youtube"
   case brandInstagram = "brand-instagram"

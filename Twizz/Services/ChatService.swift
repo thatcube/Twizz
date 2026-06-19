@@ -87,6 +87,7 @@ final class ChatService {
   private(set) var isConnected = false
   private(set) var emoteURLs: [String: URL] = [:]
   private(set) var badgeURLs: [String: URL] = [:]
+  private(set) var cheermotes: [Cheermote] = []
   private(set) var condensedMessagesCount = 0
   private(set) var youtubeStatusMessage: String?
   /// Set when a raid USERNOTICE arrives. Cleared by the consumer after handling.
@@ -192,6 +193,7 @@ final class ChatService {
     hasCapAck = false
     emoteURLs = [:]
     badgeURLs = [:]
+    cheermotes = []
     youtubeSeenMessageIDs.removeAll()
     youtubeSeenMessageOrder.removeAll()
     youtubeStatusMessage = nil
@@ -219,6 +221,13 @@ final class ChatService {
       self.badgeURLs = catalog
     }
 
+    Task { [weak self] in
+      guard let self else { return }
+      let catalog = await CheermoteCatalogService.shared.catalog(for: normalized)
+      guard self.channel == normalized else { return }
+      self.cheermotes = catalog
+    }
+
     receiveTask = Task { [weak self] in await self?.receiveLoop() }
     restartYouTubeLoopIfNeeded()
   }
@@ -239,6 +248,7 @@ final class ChatService {
     syncWarmupStart = nil
     emoteURLs.removeAll()
     badgeURLs.removeAll()
+    cheermotes.removeAll()
     youtubeSeenMessageIDs.removeAll()
     youtubeSeenMessageOrder.removeAll()
     channel = nil
