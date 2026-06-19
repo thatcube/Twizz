@@ -338,7 +338,11 @@ actor AudioOnlyLevelDecoder {
 /// decodes a raw ADTS `.aac` file. Twitch carries AAC audio (stream type 0x0F,
 /// already ADTS-framed) inside its transport stream, so concatenating the audio
 /// PID's PES payloads yields a valid `.aac` file we can hand to AVAssetReader.
-private enum TSAudioExtractor {
+///
+/// Internal (not `private`) so the experimental live-caption spike
+/// (`LiveCaptionSpike`) can reuse the exact same MPEG-TS → ADTS demux to feed
+/// on-device speech recognition without duplicating the parser.
+enum TSAudioExtractor {
   private static let packetSize = 188
 
   static func extractADTS(from data: Data) -> Data? {
