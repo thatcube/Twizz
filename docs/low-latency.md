@@ -1,17 +1,21 @@
 # Low-Latency Playback — what we know
 
-Notes on the experimental **Low-Latency Mode** (the local playlist-rewriting
-proxy) and the stream latency work around it. This file deliberately separates
-**verified facts** from **open questions**. Only add something to "Established
-facts" once it is actually confirmed (by Apple docs, the HLS spec, the code
-itself, or a reproducible on-device observation). Hypotheses go under "Open
-questions" until proven.
+Notes on the live-playback latency work: the local playlist-rewriting **proxy**
+(prefetch promotion) and the two **Auto profiles** that trade latency against
+quality on top of it. This file deliberately separates **verified facts** from
+**open questions**. Only add something to "Established facts" once it is actually
+confirmed (by Apple docs, the HLS spec, the code itself, or a reproducible
+on-device observation). Hypotheses go under "Open questions" until proven.
 
 ## TL;DR
 
 - Twitch's own low-latency relies on a proprietary HLS tag AVPlayer ignores.
 - We close most of that gap with an in-process proxy that promotes those
-  segments. It is the real, stable latency win.
+  segments. It is always on for live and is the real, stable latency win.
+- The quality picker exposes two Auto profiles — **Auto · Low Latency** and
+  **Auto · High Quality** — that differ only in buffer depth and gentle
+  catch-up (see `LivePlaybackPolicy`). An explicit rendition pick is a third,
+  fixed-quality case.
 - AVPlayer on tvOS cannot match the Twitch app's sub-second player; ~2–6s
   behind the freshest segment is the realistic floor here.
 - Sharpness, freezes, and "jumps" are governed by buffering and ABR behavior,
@@ -24,11 +28,31 @@ questions" until proven.
    (via the GraphQL access token + Usher), and parses the per-rendition
    variants into `StreamQuality` values (each with a direct media-playlist URL).
 2. `PlayerView` plays it with `AVPlayer`.
-3. When **Low-Latency Mode** is on, `LowLatencyHLSProxy` sits in front of the
-   playlists via an `AVAssetResourceLoaderDelegate` on a custom URL scheme
-   (`twizz-ll://`).
-4. For new installs (no prior saved preference), **Low-Latency Mode defaults to
-   on**. Users can toggle it in in-player chat settings → Playback.
+3. `LowLatencyHLSProxy` sits in front of the playlists via an
+   `AVAssetResourceLoaderDelegate` on a custom URL scheme (`twizz-ll://`). It is
+   attached whenever prefetch promotion **or** Stream Rewind is on.
+4. Prefetch promotion is **on by default** and powers both Auto profiles. It is
+   no longer a user-facing toggle; an advanced **Prefetch Proxy** kill-switch
+   lives under the Diagnostics overlay for troubleshooting only.
+
+## The two Auto profiles (`LivePlaybackPolicy`)
+
+Both Auto rows stay on the adaptive master (ABR active) and keep prefetch
+promotion on; they differ only in how they trade quality for latency. The
+concrete tuning lives in `Twizz/Models/LivePlaybackProfile.swift`:
+
+- **Auto · Low Latency** (default) — shallow forward buffer (~4s) to sit near
+  the edge, plus gentle catch-up (≤1.04×) once the edge gap exceeds ~8s. ABR is
+  free to drop resolution to avoid a stall; degraded quality is acceptable,
+  stutter is not.
+- **Auto · High Quality** — deeper forward buffer (~8s) so ABR has the runway to
+  settle on and hold the best stable resolution, accepting a little more
+  latency. No catch-up; it never sacrifices quality on its own.
+- **Pinned rendition** — a stable buffer (~8s) with no catch-up; ABR is off, so
+  it holds exactly that rendition (and rebuffers rather than downshifting).
+
+Stutter-resistance in both Auto modes comes from ABR headroom, not from a hard
+pin: ABR is what lets the stream step down instead of stalling.
 
 ## Established facts (verified)
 
@@ -87,11 +111,20 @@ questions" until proven.
   only as a fallback when the edge gap is unavailable.
 
 ### Recovery behavior
-- The playback watchdog, on a detected freeze, calls `recoverFromPlaybackStall`,
-  which does a **full reload** (`load(...)`) and restarts playback near the live
-  edge. A reload therefore looks like a large forward "jump" on screen — this is
-  one known, code-level source of jumps (counted separately as "Reloads" in the
-  Diagnostics overlay).
+- **Involuntary live-edge drift is detected independently of the frozen-playhead
+  heuristic.** With a large DVR window and `automaticallyWaitsToMinimizeStalling`
+  on, AVPlayer can rewind the playhead far back inside the seekable window to
+  refill its buffer and then play *forward* from there — so the old "playhead
+  isn't advancing" stall check never fired, and the player could sit 120s+ behind
+  live indefinitely. `samplePlaybackHealth` now also watches the edge gap while
+  pinned to live and, past a threshold (~45s, safely above normal edge latency),
+  runs a **resync ladder**: a throttled lightweight seek back toward the edge,
+  escalating to a full reload only after repeated failures.
+- The playback watchdog, on a detected hard freeze, calls
+  `recoverFromPlaybackStall`, which does a **full reload** (`load(...)`) and
+  restarts playback near the live edge. A reload therefore looks like a large
+  forward "jump" on screen — this is one known, code-level source of jumps
+  (counted separately as "Reloads" in the Diagnostics overlay).
 
 ## Realistic floor
 
@@ -113,10 +146,11 @@ These are hypotheses. Do not treat them as fact until the Diagnostics overlay
   1. AVPlayer's own skip-to-live after the buffer dips (native behavior).
   2. The watchdog reload (confirmed mechanism; magnitude/frequency TBD).
   3. A pinned rendition stalling then re-snapping.
-  4. The proxy's `#EXTINF` duration heuristic: prefetch segment durations are
-     guessed from the previous real segment. If those guesses drift from real
-     durations, the media timeline can accumulate error and AVPlayer may resync
-     with a jump. Plausible, unproven.
+  4. The proxy's `#EXTINF` duration heuristic: prefetch tags carry no duration,
+     so the proxy synthesizes one. It now uses the **average** of the real
+     segment durations (matching Streamlink) rather than just the previous
+     segment, which is steadier near boundaries. Residual timeline drift from
+     this estimate is still possible but less likely; unproven.
 - **Are streams actually delivered at the selected resolution?** The Diagnostics
   overlay now shows the real rendered size (`presentationSize`) and the
   indicated bitrate, so this can finally be checked per stream instead of
@@ -124,10 +158,11 @@ These are hypotheses. Do not treat them as fact until the Diagnostics overlay
 
 ## Diagnostics overlay (how to gather data)
 
-Player → open chat settings (`slider.horizontal.3`) → **Playback**. The same
-section contains both **Low-Latency Mode** and **Diagnostics Overlay** toggles.
-With Diagnostics on, the player shows a panel (while controls are visible)
-reporting, all measured live from the current item:
+Player → open chat settings (`slider.horizontal.3`) → **Playback**. Turn on the
+**Diagnostics Overlay** toggle; doing so also reveals the advanced **Prefetch
+Proxy** kill-switch and the simulate-event buttons. With Diagnostics on, the
+player shows a panel (while controls are visible) reporting, all measured live
+from the current item:
 
 - **Mode** — proxy on/off and whether quality is Auto/adaptive or pinned.
 - **Render** — actual decoded video size (`presentationSize`) and playback rate.
