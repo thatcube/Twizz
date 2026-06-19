@@ -83,6 +83,10 @@ struct ChatView: View {
     // Reduce-transparency / disable-glass: the pane paints an opaque, theme-aware
     // chrome surface (light in Light theme), so resolve text contrast against it.
     if glassDisabled { return palette.chromeOpaqueSurface }
+    // Light theme: the translucent overlay/glass chat now sits on light chrome
+    // (the player tree renders in the light color scheme), so resolve text and
+    // accent contrast against a light surface instead of the dark video.
+    if palette.isLight { return Color(white: 0.97) }
     if useLighterOverlayBackground { return Color(white: 0.13) }
     return Color(white: 0.12)
   }
@@ -114,11 +118,11 @@ struct ChatView: View {
           : (useGlassBackground
             ? (glassDisabled
               ? AnyShapeStyle(Color.clear)
-              : AnyShapeStyle(Color.black.opacity(0.22)))
+              : AnyShapeStyle(palette.chromeGlassTint(0.22)))
             : (useLighterOverlayBackground
               ? (glassDisabled
                 ? AnyShapeStyle(palette.chromeOpaqueSurface)
-                : AnyShapeStyle(Color(white: 0.13).opacity(0.90)))
+                : AnyShapeStyle(palette.isLight ? Color(white: 0.97).opacity(0.92) : Color(white: 0.13).opacity(0.90)))
               : AnyShapeStyle(palette.chatSideSurface))))
   }
 
