@@ -223,6 +223,11 @@ struct PlayerView: View {
   /// Debounced "settle" that commits a final frame-accurate seek and clears the
   /// intended position once rapid stepping/jogging stops.
   @State private var scrubCommitTask: Task<Void, Never>?
+  /// True while the playhead is following the live edge. The real seekable edge
+  /// quantizes in segment-sized steps, so `behindLiveSeconds` wobbles a few
+  /// seconds even when "at live"; this flag lets us pin the orb to the right edge
+  /// and show LIVE deterministically until the viewer actually rewinds.
+  @State private var pinnedToLive = true
   /// Drives the analog (precision) trackpad scrubbing while the bar is focused.
   @State private var scrubInput = ScrubInputCoordinator()
 
@@ -390,7 +395,7 @@ struct PlayerView: View {
   /// Trackpad swipe sensitivity: timeline-seconds moved per unit of finger travel
   /// on the trackpad (the surface spans roughly -1...1, so a full edge-to-edge
   /// swipe ≈ 2 units). Higher = a given swipe covers more of the rewind window.
-  private let scrubGainSecondsPerUnit: Double = 55
+  private let scrubGainSecondsPerUnit: Double = 28
   // Latency tuning stays at the proven-stable baseline even in low-latency mode.
   // The latency win comes from the proxy promoting Twitch prefetch segments — not
   // from starving buffers or chasing the edge, both of which caused freezes and
@@ -3837,20 +3842,34 @@ struct PlayerView: View {
         isPaused: isUserPaused, isAtLiveEdge: true)
       return
     }
+    let span = max(window.end - window.start, 0.001)
+    // While following live, pin the orb to the right edge and show LIVE rather than
+    // tracking the real (segment-quantized) playhead, which would jitter ±a few
+    // seconds and flicker between LIVE and -0:0x. Only do this when not paused and
+    // not actively scrubbing/stepping.
+    if pinnedToLive, scrubTargetSeconds == nil, !isUserPaused {
+      rewindReadout.update(
+        positionFraction: 1, behindLiveSeconds: 0, windowSeconds: span,
+        isPaused: false, isAtLiveEdge: true)
+      return
+    }
     // While scrubbing/stepping the orb tracks the intended position instantly so
     // it feels buttery even though the real seek lags slightly behind.
     let position = scrubTargetSeconds.map { min(max($0, window.start), window.end) } ?? window.now
-    let span = max(window.end - window.start, 0.001)
     let fraction = (position - window.start) / span
     let behind = max(window.end - position, 0)
-    let atLive =
-      !isUserPaused && scrubTargetSeconds == nil && behind <= targetLiveEdgeSeconds + 1.5
     rewindReadout.update(
       positionFraction: fraction,
       behindLiveSeconds: behind,
       windowSeconds: span,
       isPaused: isUserPaused,
-      isAtLiveEdge: atLive)
+      isAtLiveEdge: false)
+  }
+
+  /// True when the playhead/target sits close enough to the live edge to be
+  /// treated as "following live".
+  private func isNearLiveEdge(_ position: Double, in window: (start: Double, end: Double, now: Double)) -> Bool {
+    (window.end - position) <= targetLiveEdgeSeconds + 4
   }
 
   /// Steps the playhead by `delta` seconds with instant orb feedback and a
@@ -3861,6 +3880,7 @@ struct PlayerView: View {
     let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
     let base = scrubTargetSeconds ?? window.now
     let target = min(max(base + delta, window.start), liveCap)
+    pinnedToLive = target >= liveCap - 0.5
     scrubTargetSeconds = target
     updateRewindReadout()
     throttledScrubSeek(to: target)
@@ -3872,8 +3892,12 @@ struct PlayerView: View {
   private func toggleRewindPlayPause() {
     if isUserPaused {
       isUserPaused = false
+      if let window = currentSeekWindow() {
+        pinnedToLive = isNearLiveEdge(window.now, in: window)
+      }
       player.play()
     } else {
+      pinnedToLive = false
       isUserPaused = true
       player.pause()
     }
@@ -3940,6 +3964,7 @@ struct PlayerView: View {
     let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
     let base = scrubTargetSeconds ?? window.now
     let target = min(max(base + deltaSeconds, window.start), liveCap)
+    pinnedToLive = target >= liveCap - 0.5
     scrubTargetSeconds = target
     updateRewindReadout()
     throttledScrubSeek(to: target)
