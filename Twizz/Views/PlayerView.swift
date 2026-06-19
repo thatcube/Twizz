@@ -773,6 +773,16 @@ struct PlayerView: View {
       }
     }
     .onChange(of: focus) { oldFocus, newFocus in
+      // The rewind bar must never be reachable from the chat pane. The focus
+      // engine treats the full-width bar as the chat composer's geometric left
+      // neighbor, so a left-press from chat can land on it. Redirect any such
+      // chat -> scrubber transition straight to the chat collapse button so the
+      // bar never even flashes focus when coming from chat.
+      if newFocus == .rewindScrubber, let oldFocus,
+         oldFocus == .chatInput || oldFocus == .chatSend {
+        focus = .chatToggle
+        return
+      }
       // Start/stop precision trackpad scrubbing as the rewind bar gains/loses
       // focus. The analog jog (GameController + display link) only runs while the
       // bar is focused so it never competes with normal control navigation.
@@ -1316,15 +1326,20 @@ struct PlayerView: View {
         .focused($focus, equals: .rewindScrubber)
         .onMoveCommand { direction in
           // This Button traps directional focus (same proven pattern as the top
-          // control cluster): every direction is handled here, so a swipe/press
-          // can never fling focus out to the chat pane while scrubbing.
+          // control cluster): every direction explicitly re-asserts focus on the
+          // scrubber so the tvOS focus engine can never fling focus out to the
+          // chat pane while scrubbing. Only an up-press is allowed to leave.
           switch direction {
           case .up:
             focus = .quality
           case .left:
             if !isScrubbing { rewindStep(-rewindStepSeconds) }
+            focus = .rewindScrubber
           case .right:
             if !isScrubbing { rewindStep(rewindStepSeconds) }
+            focus = .rewindScrubber
+          case .down:
+            focus = .rewindScrubber
           default:
             break
           }
