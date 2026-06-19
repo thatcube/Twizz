@@ -1112,19 +1112,10 @@ struct PlayerView: View {
         .ignoresSafeArea()
 
       if isAudioOnlyActive, !isLoading, errorMessage == nil, !isOffline {
-        AudioVisualizerView(
-          level: audioLevelMonitor.level,
+        AudioVisualizerContainer(
+          monitor: audioLevelMonitor,
           avatarURL: channelAvatarURL,
-          palette: palette,
-          isReactive: audioLevelMonitor.isReceivingRealAudio,
-          debugInfo: String(
-            format: "%@  lvl %.2f  seg %d  q %d  lag %dms",
-            audioLevelMonitor.isReceivingRealAudio ? "REAL" : "AMBIENT",
-            audioLevelMonitor.level,
-            audioLevelMonitor.decodedSegmentCount,
-            audioLevelMonitor.pendingRealSamples,
-            audioLevelMonitor.syncLagMs
-          )
+          palette: palette
         )
         .transition(.opacity)
         .onAppear {
