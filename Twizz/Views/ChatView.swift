@@ -85,10 +85,11 @@ struct ChatView: View {
       }
       .scrollIndicators(.hidden)
       .onChange(of: scrollTarget) { _, target in
-        // Manual scroll: jump to the requested message with a short animation.
+        // Manual scroll: jump to the requested message with a quick, snappy
+        // animation so multi-message steps feel responsive rather than draggy.
         guard let target else { return }
         pendingScrollWork?.cancel()
-        withAnimation(.easeOut(duration: 0.14)) {
+        withAnimation(.snappy(duration: 0.18, extraBounce: 0)) {
           proxy.scrollTo(target.id, anchor: target.anchor)
         }
       }
@@ -122,7 +123,7 @@ struct ChatView: View {
         }
       }
       .animation(.easeInOut(duration: 0.2), value: autoScroll)
-      .animation(.easeInOut(duration: 0.2), value: softPauseRemaining)
+      .animation(.easeInOut(duration: 0.2), value: softPauseRemaining != nil)
       .overlay {
         if messages.isEmpty {
           Text(isConnected ? "Waiting for messages…" : "Connecting to chat…")
@@ -133,16 +134,23 @@ struct ChatView: View {
     }
   }
 
-  /// Shown while the list is frozen — either the soft-pause read mode (with a
-  /// countdown) or the full scrollable pause — so the viewer knows chat is held
-  /// and how to get back to live.
+  /// Shown while the list is frozen. In the soft-pause "read" mode it nudges the
+  /// viewer that they can scroll up (animated chevron); once they actually scroll
+  /// it collapses to a minimal "Scrolling" indicator.
   private var pausedPill: some View {
-    HStack(spacing: 7) {
-      Image(systemName: "pause.fill")
-        .font(.caption2.weight(.bold))
-      Text(pillText)
-        .font(.caption.weight(.semibold))
-        .contentTransition(.numericText())
+    HStack(spacing: 8) {
+      if softPauseRemaining != nil {
+        Image(systemName: "chevron.up")
+          .font(.caption.weight(.bold))
+          .symbolEffect(.bounce.up, options: .repeating)
+        Text("Scroll")
+          .font(.caption.weight(.semibold))
+      } else {
+        Image(systemName: "chevron.up.chevron.down")
+          .font(.caption.weight(.bold))
+        Text("Scrolling")
+          .font(.caption.weight(.semibold))
+      }
     }
     .lineLimit(1)
     .fixedSize()
@@ -152,13 +160,6 @@ struct ChatView: View {
     .modifier(PausedPillGlassStyle())
     .padding(.bottom, 12)
     .transition(.move(edge: .bottom).combined(with: .opacity))
-  }
-
-  private var pillText: String {
-    if let remaining = softPauseRemaining {
-      return "Chat paused · \(remaining)s"
-    }
-    return "Paused · Scroll or press Back"
   }
 
   private func line(for message: ChatMessage) -> some View {

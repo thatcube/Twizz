@@ -298,7 +298,7 @@ struct PlayerView: View {
   @State private var chatScrollTarget: ChatScrollTarget?
   @State private var chatScrollNonce = 0
   /// Messages to advance per up/down swipe while scrolling.
-  private let chatScrollStep = 3
+  private let chatScrollStep = 6
   /// When the composer last became focused, used to ignore a stray up-swipe that
   /// rides in on a diagonal move from the chat-toggle button (accidental pause).
   @State private var chatInputFocusedAt = Date.distantPast
