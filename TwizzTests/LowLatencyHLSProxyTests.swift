@@ -121,4 +121,142 @@ final class LowLatencyHLSProxyTests: XCTestCase {
     XCTAssertTrue(out.contains("URI=\"twizz-ll://video.example/audio.m3u8\""))
     XCTAssertFalse(out.contains("https://video.example/chunked.m3u8"))
   }
+
+  // MARK: - Predictive instability
+
+  /// Builds a media playlist with explicit per-segment durations and an optional
+  /// per-segment discontinuity flag, plus an explicit discontinuity-sequence — the
+  /// inputs the predictive scorer reads.
+  private func instabilityPlaylist(
+    mediaSequence: Int,
+    targetDuration: Int = 2,
+    discontinuitySequence: Int = 0,
+    segments: [(name: String, duration: Double, discontinuity: Bool)]
+  ) -> String {
+    var lines = [
+      "#EXTM3U",
+      "#EXT-X-VERSION:3",
+      "#EXT-X-TARGETDURATION:\(targetDuration)",
+      "#EXT-X-MEDIA-SEQUENCE:\(mediaSequence)",
+      "#EXT-X-DISCONTINUITY-SEQUENCE:\(discontinuitySequence)",
+    ]
+    for seg in segments {
+      if seg.discontinuity { lines.append("#EXT-X-DISCONTINUITY") }
+      lines.append("#EXTINF:\(String(format: "%.3f", seg.duration)),")
+      lines.append("https://video.example/\(seg.name).ts")
+    }
+    return lines.joined(separator: "\n")
+  }
+
+  /// Feeds a sequence of refreshes through the proxy and returns the final verdict.
+  private func feedRefreshes(_ proxy: LowLatencyHLSProxy, _ playlists: [String]) {
+    for playlist in playlists {
+      _ = proxy.rewriteMediaPlaylistForTesting(
+        playlist, sourceURL: source, promotePrefetch: true, retainHistory: false)
+    }
+  }
+
+  /// A flawless stream — segments exactly at target, sequence advancing every
+  /// refresh, no discontinuities — must never be predicted unstable.
+  func testCleanStreamIsNotPredictedUnstable() {
+    let proxy = makeProxy()
+    let playlists = (0..<12).map { i in
+      instabilityPlaylist(
+        mediaSequence: 100 + i,
+        segments: [
+          (name: "seg\(100 + i)", duration: 2, discontinuity: false),
+          (name: "seg\(101 + i)", duration: 2, discontinuity: false),
+          (name: "seg\(102 + i)", duration: 2, discontinuity: false),
+        ])
+    }
+    feedRefreshes(proxy, playlists)
+
+    XCTAssertFalse(proxy.predictedUnstable, "a clean stream must keep full low latency")
+    XCTAssertEqual(proxy.instabilityDiagnostics.score, 0, accuracy: 0.0001)
+  }
+
+  /// A stalled encoder — the media sequence (and segment list) never advances
+  /// across refreshes — should trip the predictor.
+  func testStalledMediaSequenceIsPredictedUnstable() {
+    let proxy = makeProxy()
+    // Identical playlist five times: the tail sequence never moves.
+    let frozen = instabilityPlaylist(
+      mediaSequence: 100,
+      segments: [
+        (name: "seg100", duration: 2, discontinuity: false),
+        (name: "seg101", duration: 2, discontinuity: false),
+        (name: "seg102", duration: 2, discontinuity: false),
+      ])
+    feedRefreshes(proxy, Array(repeating: frozen, count: 5))
+
+    XCTAssertTrue(proxy.predictedUnstable, "a non-advancing media sequence signals a stalled encoder")
+  }
+
+  /// Wildly irregular `#EXTINF` durations (a struggling encoder) should trip the
+  /// predictor even while the sequence keeps advancing.
+  func testIrregularSegmentDurationsArePredictedUnstable() {
+    let proxy = makeProxy()
+    let playlists = (0..<5).map { i in
+      instabilityPlaylist(
+        mediaSequence: 100 + i,
+        segments: [
+          (name: "a\(i)", duration: 0.4, discontinuity: false),
+          (name: "b\(i)", duration: 3.6, discontinuity: false),
+          (name: "c\(i)", duration: 2, discontinuity: false),
+        ])
+    }
+    feedRefreshes(proxy, playlists)
+
+    XCTAssertTrue(proxy.predictedUnstable, "off-cadence segment durations signal a struggling encoder")
+  }
+
+  /// Discontinuities alone — as a normal ad break produces — are capped below the
+  /// trip threshold, so an otherwise-healthy stream is NOT predicted unstable.
+  func testDiscontinuitiesAloneDoNotFalseTrip() {
+    let proxy = makeProxy()
+    // Every refresh introduces a fresh discontinuity, but durations stay regular
+    // and the sequence keeps advancing — mimicking repeated ad markers.
+    let playlists = (0..<12).map { i in
+      instabilityPlaylist(
+        mediaSequence: 100 + i,
+        discontinuitySequence: i,
+        segments: [
+          (name: "seg\(100 + i)", duration: 2, discontinuity: false),
+          (name: "seg\(101 + i)", duration: 2, discontinuity: false),
+          (name: "seg\(102 + i)", duration: 2, discontinuity: true),
+        ])
+    }
+    feedRefreshes(proxy, playlists)
+
+    XCTAssertFalse(
+      proxy.predictedUnstable,
+      "discontinuities are capped so an ad break can't trip the predictor alone")
+    XCTAssertLessThan(
+      proxy.instabilityDiagnostics.score, LowLatencyHLSProxy.predictedUnstableScoreThreshold)
+  }
+
+  /// The verdict is per channel session — resetting clears a latched prediction.
+  func testResetClearsPrediction() {
+    let proxy = makeProxy()
+    let frozen = instabilityPlaylist(
+      mediaSequence: 100,
+      segments: [
+        (name: "seg100", duration: 2, discontinuity: false),
+        (name: "seg101", duration: 2, discontinuity: false),
+        (name: "seg102", duration: 2, discontinuity: false),
+      ])
+    feedRefreshes(proxy, Array(repeating: frozen, count: 5))
+    XCTAssertTrue(proxy.predictedUnstable)
+
+    proxy.resetInstabilityPrediction()
+    // resetInstabilityPrediction dispatches onto the delegate queue; a subsequent
+    // rewrite (also on that queue) is guaranteed to observe the cleared state.
+    _ = proxy.rewriteMediaPlaylistForTesting(
+      instabilityPlaylist(
+        mediaSequence: 200,
+        segments: [(name: "x", duration: 2, discontinuity: false)]),
+      sourceURL: source, promotePrefetch: true, retainHistory: false)
+
+    XCTAssertFalse(proxy.predictedUnstable, "reset must forget the prior channel session's verdict")
+  }
 }

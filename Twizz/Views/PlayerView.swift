@@ -444,6 +444,10 @@ struct PlayerView: View {
     get { mon.lastSoftStallNudgeAt }
     nonmutating set { mon.lastSoftStallNudgeAt = newValue }
   }
+  var streamUnstableWasPredicted: Bool {
+    get { mon.streamUnstableWasPredicted }
+    nonmutating set { mon.streamUnstableWasPredicted = newValue }
+  }
   /// True while the stream-stability watchdog has us in deep-buffer stability mode.
   var isStreamUnstable: Bool { mon.streamUnstableSince != nil }
   @State var lastStallNotificationAt = Date.distantPast
@@ -657,6 +661,14 @@ struct PlayerView: View {
   /// edge to build a cushion (and skip past a stuck near-edge segment). Only used
   /// when the proxy was already off; otherwise a reload repositions the timeline.
   let stabilityTargetBehindEdgeSeconds: Double = 20
+  /// Predictive stability: the proxy (`LowLatencyHLSProxy`) analyzes each HLS
+  /// media-playlist refresh and latches a `predictedUnstable` verdict when a
+  /// struggling encoder's manifests show structural trouble (media-sequence
+  /// stalls, irregular `#EXTINF`, recurring discontinuities) in the opening
+  /// refreshes. The watchdog polls that verdict here and trips the same
+  /// `enterStreamStabilityMode()` path *before* the viewer sits through stalls.
+  /// The scoring thresholds live next to the data they score, as the
+  /// `static let`s on `LowLatencyHLSProxy`.
   /// How long the player may sit unable to play (waiting on a starved buffer)
   /// before we authoritatively ask Twitch whether the channel is still live.
   /// Short enough to surface an ended broadcast promptly, long enough that a
@@ -1794,7 +1806,20 @@ struct PlayerView: View {
     let pin = preferredQuality == "Auto" ? "Auto/adaptive" : "\(preferredQuality) (pinned)"
     lines.append("Mode: \(mode) · \(pin)")
     if isStreamUnstable {
-      lines.append("⚠︎ STABILITY MODE (proxy off, deep buffer, riding behind edge)")
+      let trigger = streamUnstableWasPredicted ? "predictive" : "observed"
+      lines.append(
+        "⚠︎ STABILITY MODE [\(trigger)] (proxy off, deep buffer, riding behind edge)")
+    } else if lowLatencyProxyEnabled, !isVOD {
+      // Surface the live predictive score so a near-trip is observable on stream.
+      let snap = lowLatencyProxy.instabilityDiagnostics
+      if snap.refreshes > 0 {
+        var line =
+          "Predict: score \(diagFormat(snap.score, decimals: 1))"
+          + "/\(diagFormat(LowLatencyHLSProxy.predictedUnstableScoreThreshold, decimals: 1))"
+          + " · \(snap.refreshes) refresh\(snap.refreshes == 1 ? "" : "es")"
+        if !snap.detail.isEmpty { line += " · \(snap.detail)" }
+        lines.append(line)
+      }
     }
 
     if let item = player.currentItem {
@@ -3147,6 +3172,9 @@ final class PlaybackMonitorBox {
   var streamUnstableSince: Date?
   /// When the most recent stall/jump was counted.
   var lastStallAt: Date?
+  /// Set when the stability trip came from the proxy's predictive (manifest)
+  /// signal rather than from observed stalls/jumps. Drives the overlay readout.
+  var streamUnstableWasPredicted = false
   /// When playback first started advancing for this stream session, used to apply
   /// a more sensitive (single-event) instability trip during the opening seconds.
   var streamPlaybackStartedAt: Date?

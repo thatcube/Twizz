@@ -487,6 +487,11 @@ extension PlayerView {
       diagFrozenSince = nil
       return
     }
+
+    // Early, predictive stability trip from the proxy's manifest analysis — acts
+    // before the behavioral stall/jump counters below ever fire.
+    checkPredictedInstability()
+
     guard let item = player.currentItem else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil

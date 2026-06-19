@@ -71,6 +71,26 @@ extension PlayerView {
     recordInstabilityEvent()
   }
 
+  /// Predictive stability trip: the low-latency proxy analyzes each HLS manifest
+  /// refresh and, when a struggling encoder's playlists show structural trouble in
+  /// the opening refreshes, latches a `predictedUnstable` verdict. We act on it
+  /// the moment it appears — *before* the viewer sits through the stalls the
+  /// behavioral watchdog waits for — by tripping the same stability-mode path.
+  /// Only relevant while the prefetch proxy is the active (destabilizing)
+  /// strategy; if it's already off there is nothing to drop.
+  func checkPredictedInstability() {
+    guard !isVOD, !isStreamUnstable, lowLatencyProxyEnabled else { return }
+    guard !isUserPaused, !isScrubbing else { return }
+    guard lowLatencyProxy.predictedUnstable else { return }
+    streamUnstableWasPredicted = true
+    if showLatencyDiagnostics {
+      let snap = lowLatencyProxy.instabilityDiagnostics
+      logDiagnosticsEvent(
+        "predicted unstable (\(snap.detail), score \(diagFormat(snap.score, decimals: 1)))")
+    }
+    enterStreamStabilityMode()
+  }
+
   private func recordInstabilityEvent() {
     guard !isVOD, !isStreamUnstable else { return }
     let now = Date()
@@ -196,10 +216,14 @@ extension PlayerView {
     lastStallNotificationAt = Date.distantPast
     // New stream: forget any prior instability so we start in low-latency mode.
     streamUnstableSince = nil
+    streamUnstableWasPredicted = false
     recentInstabilityEvents = []
     lastStallAt = nil
     streamPlaybackStartedAt = nil
     softStallSince = nil
     lastSoftStallNudgeAt = Date.distantPast
+    // Drop the proxy's manifest-derived instability accumulators too, so the
+    // predictive verdict is scoped to this channel session.
+    lowLatencyProxy.resetInstabilityPrediction()
   }
 }

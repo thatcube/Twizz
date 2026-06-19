@@ -98,6 +98,71 @@ concrete tuning lives in `Twizz/Models/LivePlaybackProfile.swift`:
   Diagnostics overlay as "LL proxy auto-off (unstable)" + "⚠︎ STABILITY MODE".
   Resets on every new channel session (`resetDiagnostics`).
 
+### Predictive instability (manifest analysis)
+
+The behavioral watchdog above is reactive: it has to wait for actual stalls and
+rewinds before it reacts, so the viewer still sits through the opening stutters
+of a chronically-bad stream. The **predictive** path closes that gap by reading
+the stream's own HLS media playlists — which the low-latency proxy already
+parses on every refresh — and flagging a struggling encoder *before* playback
+stutters. When it fires it trips the exact same `enterStreamStabilityMode()`
+path (drop the prefetch proxy, deep-buffer, reload), so all the behavior above is
+reused unchanged; only the *trigger* is earlier.
+
+It lives in `LowLatencyHLSProxy` (`recordInstabilitySignals`), accumulates a
+small score per media-playlist refresh, and publishes a thread-safe
+`predictedUnstable` verdict (guarded by `instabilityLock`, since the proxy writes
+it on its `delegateQueue` and the watchdog reads it from the `@MainActor`). The
+watchdog polls it in `samplePlaybackHealth` (`checkPredictedInstability`).
+
+**Signals used (all manifest-*structure* only — deliberately independent of
+wall-clock and `#EXT-X-PROGRAM-DATE-TIME`, so a device clock skewed from the
+broadcaster can never produce a false trip):**
+
+1. **Media-sequence stall** — the tail sequence (`#EXT-X-MEDIA-SEQUENCE` + number
+   of listed segments) didn't advance between refreshes, i.e. the encoder
+   appended no new segment this cycle. Strongest single signal
+   (`stalledRefreshPoints = 1.5`).
+2. **Irregular `#EXTINF`** — a listed segment deviates from
+   `#EXT-X-TARGETDURATION` by more than `segmentDurationToleranceFraction` (0.5 ⇒
+   a 2s-target segment shorter than 1.0s or longer than 3.0s). A steady encoder
+   emits near-exact target-length segments; a struggling one does not. The final
+   listed segment is excluded (a live tail can be a legitimate partial) and at
+   least `minSegmentsForDurationCheck` (3) segments are required
+   (`irregularRefreshPoints = 1.0`).
+3. **New discontinuities** — the cumulative discontinuity count
+   (`#EXT-X-DISCONTINUITY-SEQUENCE` + in-window `#EXT-X-DISCONTINUITY`) grew since
+   the last refresh, i.e. the encoder broke timeline continuity again
+   (`discontinuityRefreshPoints = 0.75`). **Capped at `discontinuityScoreCap`
+   (1.5), below the trip threshold**, so a normal ad break (which inserts
+   discontinuities) can contribute but can never trip the predictor on its own.
+
+**Tuning.** The score latches `predictedUnstable` once it reaches
+`predictedUnstableScoreThreshold` (3.0) *and* at least
+`minRefreshesBeforePrediction` (3) refreshes have been seen; accumulation stops
+after `observationRefreshWindow` (12) refreshes (the predictor is an *early*
+signal only — anything later is left to the behavioral watchdog, and bounding the
+window stops a mid-stream ad break from tripping it late). With Twitch's ~2s
+refresh cadence a chronically-bad stream (`shxtou`, `RTGame`, struggling
+encoders) trips within roughly the first 3–4 refreshes (~6–8s), while a flawless
+stream (score 0) or a single ad break (≤1.5) never does. All thresholds are named
+`static let`s on `LowLatencyHLSProxy`; **they are first-cut values reasoned from
+the HLS spec + Twitch's observed manifest behavior and still want on-device
+confirmation against real known-bad streams.** Surfaced in the Diagnostics
+overlay: a live `Predict: score x.x/3.0 · N refreshes · <reason>` line before a
+trip, and `⚠︎ STABILITY MODE [predictive]` (vs `[observed]`) once latched. The
+verdict is per channel session (cleared in `resetDiagnostics` /
+`LowLatencyHLSProxy.resetInstabilityPrediction`).
+
+**Rejected for this first cut: PDT / prefetch *staleness*.** "How old is the
+freshest segment" (now − newest `#EXT-X-PROGRAM-DATE-TIME`) is an intuitive
+encoder-falling-behind signal, but normal healthy low latency is already ~5–15s
+behind live, and an absolute age measurement depends on the device clock matching
+the broadcaster's — clock skew makes it false-trip-prone. The skew-invariant
+structural signals above distinguish bad streams without that risk. A
+*skew-invariant* version (the newest-content age *growing* across refreshes, or
+prefetch dropping out after having been present) is a reasonable future addition.
+
 The adaptive-rate technique mirrors low-latency DASH/HLS players (e.g. dash.js
 `liveCatchup`): keep latency near a target by trimming a few percent off the
 playback rate either side of 1.0 rather than hard seeks/pauses. Time-domain
@@ -244,6 +309,17 @@ These are hypotheses. Do not treat them as fact until the Diagnostics overlay
   overlay now shows the real rendered size (`presentationSize`) and the
   indicated bitrate, so this can finally be checked per stream instead of
   guessed.
+- **Does the predictive instability detector survive a mid-roll ad transition?**
+  Twitch's mid-roll ads splice via `#EXT-X-DISCONTINUITY` and can briefly perturb
+  the manifest (discontinuity markers, occasionally off-cadence ad segments)
+  without the *broadcaster's* encoder being unhealthy. The discontinuity score is
+  capped (`discontinuityScoreCap = 1.5`, below the 3.0 trip threshold) precisely
+  so an ad break can't trip the predictor on its own, and `testDiscontinuities`
+  `AloneDoNotFalseTrip` covers the synthetic case — but this must be **confirmed
+  on-device against a real mid-roll ad** to be sure the splice doesn't also throw
+  enough irregular-`#EXTINF` or stalled-sequence points to clear the threshold
+  alongside the discontinuities. Watch the overlay `Predict:` score across an ad
+  to verify it stays under 3.0.
 
 ## Diagnostics overlay (how to gather data)
 
@@ -253,7 +329,11 @@ Proxy** kill-switch and the simulate-event buttons. With Diagnostics on, the
 player shows a panel (while controls are visible) reporting, all measured live
 from the current item:
 
-- **Mode** — proxy on/off and whether quality is Auto/adaptive or pinned.
+- **Mode** — proxy on/off and whether quality is Auto/adaptive or pinned. When
+  the predictive detector is still watching a live stream this row is followed by
+  a `Predict:` line (running score / threshold, refreshes seen, latest reason);
+  once stability mode latches, the `STABILITY MODE` line is tagged `[predictive]`
+  or `[observed]` to show which trigger fired.
 - **Render** — actual decoded video size (`presentationSize`) and playback rate.
   This is the ground truth for "is it really 1080p".
 - **Bitrate** — indicated (the rendition ABR chose) vs observed (measured
