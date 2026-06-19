@@ -81,6 +81,70 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
 
     private var tasks: [ObjectIdentifier: URLSessionDataTask] = [:]
 
+    // MARK: - Predictive instability detection (tuning)
+
+    /// Stop accumulating/deciding after this many media-playlist refreshes. The
+    /// predictor is an *early* signal only: a stream that hasn't shown structural
+    /// trouble in its opening manifests is treated as healthy and left to the
+    /// behavioral watchdog. Bounding the window also stops a mid-stream ad break
+    /// from ever tripping the predictor late.
+    static let observationRefreshWindow = 12
+    /// Require a few refreshes before declaring anything, so a single odd opening
+    /// manifest can't latch us.
+    static let minRefreshesBeforePrediction = 3
+    /// Weighted-score threshold that latches `predictedUnstable`. Tuned so a
+    /// struggling encoder (several bad refreshes) trips within the first few
+    /// refreshes (~6-8s) while a single ad break or a flawless stream never does.
+    static let predictedUnstableScoreThreshold = 3.0
+    /// A refresh whose newly-listed segments are off-cadence (see
+    /// `segmentDurationToleranceFraction`) scores this much.
+    static let irregularRefreshPoints = 1.0
+    /// A refresh that introduces a new `#EXT-X-DISCONTINUITY` scores this much…
+    static let discontinuityRefreshPoints = 0.75
+    /// …but the discontinuity category is capped here, so a normal ad break (one
+    /// or two discontinuities) can contribute but never single-handedly trip the
+    /// predictor. Kept below `predictedUnstableScoreThreshold`.
+    static let discontinuityScoreCap = 1.5
+    /// A refresh where the tail media-sequence didn't advance (the encoder
+    /// produced no new segment) scores this much — the strongest single signal.
+    static let stalledRefreshPoints = 1.5
+    /// A real segment counts as "off-cadence" when its `#EXTINF` deviates from
+    /// `#EXT-X-TARGETDURATION` by more than this fraction (0.5 ⇒ a 2s-target
+    /// segment must be <1.0s or >3.0s). Lenient on purpose to avoid false trips.
+    static let segmentDurationToleranceFraction = 0.5
+    /// Don't assess duration regularity on a sparse playlist.
+    static let minSegmentsForDurationCheck = 3
+
+    /// A point-in-time read of the predictor, safe to read from any thread.
+    struct InstabilitySnapshot: Sendable {
+        var predictedUnstable = false
+        var score = 0.0
+        var refreshes = 0
+        var detail = ""
+    }
+
+    /// Per-source-key accumulator. Mutated only on `delegateQueue`.
+    private struct InstabilityState {
+        var refreshes = 0
+        var score = 0.0
+        var discontinuityScore = 0.0
+        var lastTailSequence: Int?
+        var lastDiscontinuityTotal: Int?
+        var predicted = false
+        var finalized = false
+        var lastReason = ""
+    }
+
+    /// Keyed by the real (https) media-playlist URL. Mutated only on
+    /// `delegateQueue`, exactly like `dvrBuffers`. Twitch effectively serves one
+    /// muxed media playlist per stream; keying defensively means an extra
+    /// (clean) audio playlist can never poison the verdict.
+    private var instabilityByKey: [String: InstabilityState] = [:]
+    private let instabilityLock = NSLock()
+    /// The published verdict, guarded by `instabilityLock` because the watchdog
+    /// reads it from the `@MainActor` while the proxy writes it on `delegateQueue`.
+    private var instabilitySnapshot = InstabilitySnapshot()
+
     // MARK: - DVR (Stream Rewind) configuration & state
 
     /// When true, promote Twitch `#EXT-X-TWITCH-PREFETCH` segments at the live
@@ -147,11 +211,48 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     }
 
     /// Drops all retained DVR history (e.g. on a channel switch / raid) so the
-    /// rewind window starts fresh for the new stream.
+    /// rewind window starts fresh for the new stream. Also clears the predictive
+    /// instability accumulators — the verdict is per channel session.
     func resetDVR() {
         delegateQueue.async { [weak self] in
-            self?.dvrBuffers.removeAll()
+            guard let self else { return }
+            self.dvrBuffers.removeAll()
+            self.clearInstabilityState()
         }
+    }
+
+    // MARK: - Predictive instability accessors
+
+    /// The proxy's early, manifest-derived verdict that this stream's encoder is
+    /// chronically struggling. Thread-safe; read by the watchdog on the main actor.
+    var predictedUnstable: Bool {
+        instabilityLock.lock()
+        defer { instabilityLock.unlock() }
+        return instabilitySnapshot.predictedUnstable
+    }
+
+    /// A full snapshot of the predictor for the diagnostics overlay. Thread-safe.
+    var instabilityDiagnostics: InstabilitySnapshot {
+        instabilityLock.lock()
+        defer { instabilityLock.unlock() }
+        return instabilitySnapshot
+    }
+
+    /// Forgets any accumulated instability signal so a new channel session starts
+    /// in full low-latency mode. Dispatched onto the delegate queue for
+    /// consistency with playlist parsing.
+    func resetInstabilityPrediction() {
+        delegateQueue.async { [weak self] in
+            self?.clearInstabilityState()
+        }
+    }
+
+    /// Must be called on `delegateQueue`.
+    private func clearInstabilityState() {
+        instabilityByKey.removeAll()
+        instabilityLock.lock()
+        instabilitySnapshot = InstabilitySnapshot()
+        instabilityLock.unlock()
     }
 
     /// Rewrites an `https` master-playlist URL onto the custom scheme so AVPlayer
@@ -269,6 +370,9 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     ///   as the window slides.
     private func rewriteMediaPlaylist(_ text: String, sourceURL: URL) -> Data {
         let parsed = parseMediaPlaylist(text)
+
+        // Observe every refresh for predictive instability before any rewriting.
+        recordInstabilitySignals(parsed, sourceURL: sourceURL)
 
         guard retainHistory else {
             var out = parsed.header
@@ -428,6 +532,118 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     private func isSegmentStart(_ trimmed: String) -> Bool {
         if trimmed.hasPrefix(Self.discontinuitySequenceTag) { return false }
         return Self.segmentStartTags.contains { trimmed.hasPrefix($0) }
+    }
+
+    // MARK: - Predictive instability scoring
+
+    /// Accumulates manifest-structure instability signals for one media-playlist
+    /// refresh and republishes the verdict. Runs on `delegateQueue`.
+    ///
+    /// All three signals are derived purely from the manifest's *structure*, with
+    /// no dependency on wall-clock or `#EXT-X-PROGRAM-DATE-TIME`, so a device clock
+    /// skewed from the broadcaster can never produce a false trip:
+    /// 1. **Media-sequence stall** — the tail sequence didn't advance, i.e. the
+    ///    encoder appended no new segment this cycle.
+    /// 2. **Irregular `#EXTINF`** — listed segments deviate sharply from
+    ///    `#EXT-X-TARGETDURATION` (a steady encoder emits near-exact lengths).
+    /// 3. **New discontinuities** — the encoder broke timeline continuity again,
+    ///    capped so a normal ad break can't trip the predictor alone.
+    private func recordInstabilitySignals(_ parsed: ParsedMediaPlaylist, sourceURL: URL) {
+        let key = sourceURL.absoluteString
+        var state = instabilityByKey[key] ?? InstabilityState()
+        if state.finalized { return }
+
+        state.refreshes += 1
+
+        // (1) Media-sequence stall. The tail sequence (first sequence + number of
+        // listed real segments) advances every refresh on a healthy live stream as
+        // the encoder appends segments. If it doesn't move, nothing was produced.
+        let tailSequence = parsed.mediaSequence + parsed.segments.count
+        if let lastTail = state.lastTailSequence, tailSequence <= lastTail {
+            state.score += Self.stalledRefreshPoints
+            state.lastReason = "media-seq stalled"
+        }
+        state.lastTailSequence = tailSequence
+
+        // (2) Off-cadence segment durations. Exclude the final listed segment — a
+        // live tail can legitimately be a short partial — and require a few
+        // segments before judging.
+        if parsed.segments.count >= Self.minSegmentsForDurationCheck {
+            let target = targetDurationSeconds(parsed)
+            if target > 0 {
+                let body = parsed.segments.dropLast()
+                let offCadence = body.contains { seg in
+                    abs(seg.duration - target) / target > Self.segmentDurationToleranceFraction
+                }
+                if offCadence {
+                    state.score += Self.irregularRefreshPoints
+                    state.lastReason = "irregular EXTINF"
+                }
+            }
+        }
+
+        // (3) New discontinuities. The cumulative count (rolled-off via the
+        // discontinuity-sequence header + those still in-window) only grows; an
+        // increase since last refresh means the encoder broke continuity again.
+        let discTotal =
+            parsed.discontinuitySequence + parsed.segments.filter { $0.isDiscontinuity }.count
+        if let lastDisc = state.lastDiscontinuityTotal, discTotal > lastDisc,
+            state.discontinuityScore < Self.discontinuityScoreCap
+        {
+            let add = min(
+                Self.discontinuityRefreshPoints,
+                Self.discontinuityScoreCap - state.discontinuityScore)
+            state.discontinuityScore += add
+            state.score += add
+            state.lastReason = "discontinuity"
+        }
+        state.lastDiscontinuityTotal = discTotal
+
+        if state.refreshes >= Self.minRefreshesBeforePrediction,
+            state.score >= Self.predictedUnstableScoreThreshold
+        {
+            state.predicted = true
+        }
+        if state.refreshes >= Self.observationRefreshWindow {
+            state.finalized = true
+        }
+
+        instabilityByKey[key] = state
+        publishInstabilitySnapshot()
+    }
+
+    /// Aggregates per-key accumulators into the published verdict (any key
+    /// predicting unstable wins; the highest score drives the overlay readout).
+    /// Runs on `delegateQueue`.
+    private func publishInstabilitySnapshot() {
+        var snapshot = InstabilitySnapshot()
+        for state in instabilityByKey.values {
+            if state.predicted { snapshot.predictedUnstable = true }
+            if state.score > snapshot.score {
+                snapshot.score = state.score
+                snapshot.detail = state.lastReason
+            }
+            snapshot.refreshes = max(snapshot.refreshes, state.refreshes)
+        }
+        instabilityLock.lock()
+        instabilitySnapshot = snapshot
+        instabilityLock.unlock()
+    }
+
+    /// `#EXT-X-TARGETDURATION` if present, else the median listed segment duration.
+    private func targetDurationSeconds(_ parsed: ParsedMediaPlaylist) -> Double {
+        for raw in parsed.header {
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix(Self.targetDurationTag),
+                let value = Double(
+                    t.dropFirst(Self.targetDurationTag.count).trimmingCharacters(in: .whitespaces))
+            {
+                return value
+            }
+        }
+        let durations = parsed.segments.map { $0.duration }.sorted()
+        guard !durations.isEmpty else { return 0 }
+        return durations[durations.count / 2]
     }
 
     // MARK: - Test seams
