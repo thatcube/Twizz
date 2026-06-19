@@ -1,5 +1,28 @@
 import SwiftUI
 
+/// How the caption slab is drawn behind the text. User-selectable in caption
+/// settings; `blur` falls back to `dim` automatically when Reduce Transparency
+/// (`glassDisabled`) is on.
+enum CaptionBackgroundStyle: String, CaseIterable, Identifiable {
+    case blur
+    case dim
+    case none
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .blur: return "Blur"
+        case .dim: return "Dim"
+        case .none: return "None"
+        }
+    }
+
+    static func from(_ raw: String) -> CaptionBackgroundStyle {
+        CaptionBackgroundStyle(rawValue: raw) ?? .blur
+    }
+}
+
 /// Bridges the (tvOS 26-gated) `LiveCaptionEngine` to SwiftUI, and owns the
 /// rolling caption text shown by `CaptionOverlayView`.
 ///
@@ -37,6 +60,8 @@ final class CaptionController {
     /// Sendable, so it must only ever be called here on the MainActor.
     private var playerClock: (() -> Date?)?
     private var playheadTimer: Timer?
+    /// User timing fine-tune (seconds), forwarded into the engine each tick.
+    private var timingOffset: TimeInterval = 0
     /// Clears stale captions when the speaker goes quiet, so the last phrase
     /// doesn't linger on screen indefinitely.
     private var idleTimer: Timer?
@@ -62,6 +87,7 @@ final class CaptionController {
         headers: [String: String],
         isLive: Bool,
         isReady: Bool,
+        timingOffset: TimeInterval = 0,
         playerClock: (() -> Date?)? = nil
     ) {
         let shouldRun = enabled && isLive && isReady && playlistURL != nil && Self.isSupported
@@ -69,6 +95,8 @@ final class CaptionController {
         // Keep the latest clock even when the config key is unchanged, so the
         // playhead sampler always reads the current player.
         self.playerClock = shouldRun ? playerClock : nil
+        // Likewise keep the latest timing fine-tune live without a restart.
+        self.timingOffset = timingOffset
         if key == activeKey { return }
         activeKey = key
 
@@ -134,7 +162,11 @@ final class CaptionController {
         let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 let date = self?.playerClock?()
-                Task { await engine.setPlayhead(date) }
+                let offset = self?.timingOffset ?? 0
+                Task {
+                    await engine.setTimingOffset(offset)
+                    await engine.setPlayhead(date)
+                }
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -180,53 +212,109 @@ final class CaptionController {
     }
 }
 
-/// Rolling on-video caption overlay. Native styling: a legible material slab,
-/// system fonts, bottom-center, lifted above the control bar when controls are
-/// visible. Honors Reduce Transparency (`glassDisabled`) and Reduce Motion.
+/// Rolling on-video caption overlay. Native styling: system fonts on a legible
+/// slab, honoring Reduce Transparency (`glassDisabled`) and Reduce Motion. The
+/// user controls (in caption settings) drive text size, vertical position, the
+/// background style, and an optional outline for legibility over bright video.
 struct CaptionOverlayView: View {
     let controller: CaptionController
     /// True while the player's bottom control bar is on screen, so the overlay
-    /// can sit higher and not collide with it (or the interactive-moment dock).
+    /// lifts above it (and the interactive-moment dock) at the lowest positions.
     let controlsVisible: Bool
+    /// Multiplier on the base caption font size (user "Text Size" control).
+    var fontScale: Double = 1.0
+    /// 0 = bottom of the safe area, 1 = top (user "Position" control).
+    var verticalPosition: Double = 0.0
+    /// Slab background treatment (user "Background" control).
+    var backgroundStyle: CaptionBackgroundStyle = .blur
+    /// Draw a dark outline around the glyphs for legibility (user toggle).
+    var outline: Bool = false
 
     @Environment(\.glassDisabled) private var glassDisabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var text: String { controller.displayText }
 
+    /// Base point size (tvOS, ~title2) before the user scale is applied.
+    private let baseFontSize: CGFloat = 40
+
     var body: some View {
-        Group {
+        GeometryReader { geo in
             if !text.isEmpty {
-                Text(text)
-                  .font(.system(.title2, weight: .semibold))
-                  .multilineTextAlignment(.center)
-                  .foregroundStyle(.white)
-                  .lineLimit(1)
-                  // Single, fixed-height line that always shows the most recent
-                  // words (older ones scroll off the front) — avoids the jank of
-                  // the slab growing to two lines and snapping back to one.
-                  .truncationMode(.head)
-                  .padding(.horizontal, 28)
-                  .padding(.vertical, 14)
-                  .background(captionBackground)
-                  .frame(maxWidth: 1200)
-                  .padding(.bottom, controlsVisible ? 260 : 96)
-                  .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
-                  .accessibilityLabel("Live captions")
-                  .accessibilityValue(text)
+                captionSlab
+                    .frame(maxWidth: 1200)
+                    .position(
+                        x: geo.size.width / 2,
+                        y: captionCenterY(in: geo.size.height)
+                    )
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: text)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .allowsHitTesting(false)
     }
 
+    private var captionSlab: some View {
+        Text(text)
+            .font(.system(size: baseFontSize * fontScale, weight: .semibold))
+            .multilineTextAlignment(.center)
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            // Single, fixed-height line that always shows the most recent words
+            // (older ones scroll off the front) — avoids the jank of the slab
+            // growing to two lines and snapping back to one.
+            .truncationMode(.head)
+            .captionOutline(outline)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 14)
+            .background(captionBackground)
+            .accessibilityLabel("Live captions")
+            .accessibilityValue(text)
+    }
+
+    /// Map the 0…1 position control to a vertical center, keeping the lowest
+    /// positions clear of the control bar when it's visible.
+    private func captionCenterY(in height: CGFloat) -> CGFloat {
+        let bottomMargin: CGFloat = controlsVisible ? 260 : 96
+        let topMargin: CGFloat = 80
+        let low = height - bottomMargin
+        let high = topMargin
+        return low - CGFloat(verticalPosition) * (low - high)
+    }
+
+    @ViewBuilder
     private var captionBackground: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(
-                glassDisabled
-                    ? AnyShapeStyle(Color.black.opacity(0.82))
-                    : AnyShapeStyle(.ultraThinMaterial)
-            )
+        switch backgroundStyle {
+        case .none:
+            Color.clear
+        case .dim:
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.black.opacity(0.82))
+        case .blur:
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(
+                    // Reduce Transparency falls back to a solid dim slab.
+                    glassDisabled
+                        ? AnyShapeStyle(Color.black.opacity(0.82))
+                        : AnyShapeStyle(.ultraThinMaterial)
+                )
+        }
+    }
+}
+
+private extension View {
+    /// Cheap text outline: four hard 1.5pt black shadows at the corners. Applied
+    /// only when the user enables it, to stay legible over bright/no-background.
+    @ViewBuilder
+    func captionOutline(_ enabled: Bool) -> some View {
+        if enabled {
+            self
+                .shadow(color: .black.opacity(0.9), radius: 0, x: 1.5, y: 1.5)
+                .shadow(color: .black.opacity(0.9), radius: 0, x: -1.5, y: 1.5)
+                .shadow(color: .black.opacity(0.9), radius: 0, x: 1.5, y: -1.5)
+                .shadow(color: .black.opacity(0.9), radius: 0, x: -1.5, y: -1.5)
+        } else {
+            self
+        }
     }
 }

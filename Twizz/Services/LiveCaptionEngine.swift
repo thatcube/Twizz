@@ -72,7 +72,11 @@ actor LiveCaptionEngine {
     /// recognition latency so captions land near the spoken words instead of
     /// trailing them. Kept below typical recognition latency so captions never
     /// run ahead of the video.
-    private let recognitionLead: TimeInterval = 0.5
+    private let recognitionLead: TimeInterval = 0.6
+    /// User-adjustable fine-tune on top of `recognitionLead` (the "Timing" control
+    /// in caption settings). Positive = release audio sooner = captions appear
+    /// earlier/faster; negative = later. Pushed in from the MainActor controller.
+    private var timingOffset: TimeInterval = 0
     /// Player playhead (the on-screen frame's PROGRAM-DATE-TIME), pushed in from
     /// the MainActor. `AVPlayer` isn't Sendable, so the controller samples it on
     /// the main actor and forwards the plain `Date` here rather than us reaching
@@ -83,6 +87,12 @@ actor LiveCaptionEngine {
     /// the MainActor controller.
     func setPlayhead(_ date: Date?) {
         latestPlayhead = date
+    }
+
+    /// Update the user's timing fine-tune. Called periodically from the MainActor
+    /// controller alongside `setPlayhead`.
+    func setTimingOffset(_ offset: TimeInterval) {
+        timingOffset = offset
     }
 
     init(
@@ -265,7 +275,7 @@ actor LiveCaptionEngine {
                 // Feed a touch before the playhead literally reaches the audio so
                 // that, after recognition latency (~1–1.5s), the caption surfaces
                 // roughly as the words are heard rather than lagging behind.
-                due = date <= playhead.addingTimeInterval(recognitionLead)
+                due = date <= playhead.addingTimeInterval(recognitionLead + timingOffset)
             } else {
                 // Undated segment or no playhead clock — no basis to hold it.
                 due = true

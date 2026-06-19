@@ -213,6 +213,17 @@ struct PlayerView: View {
   @AppStorage("showLatencyDiagnostics") var showLatencyDiagnostics = false
   /// On-device live captions toggle (beta). See `captionController`.
   @AppStorage("captionsEnabled") var captionsEnabled = false
+  /// Caption appearance + timing controls (the Captions settings sub-page).
+  /// Font multiplier on the base caption size (0.7…1.6).
+  @AppStorage("captionsFontScale") var captionsFontScale = 1.0
+  /// Vertical placement, 0 = bottom of safe area, 1 = top.
+  @AppStorage("captionsVerticalPosition") var captionsVerticalPosition = 0.0
+  /// User timing fine-tune in seconds (+ = captions appear earlier/faster).
+  @AppStorage("captionsTimingOffset") var captionsTimingOffset = 0.0
+  /// Slab background style (`CaptionBackgroundStyle` raw value).
+  @AppStorage("captionsBackgroundStyle") var captionsBackgroundStyleRaw = CaptionBackgroundStyle.blur.rawValue
+  /// Draw a dark outline around caption glyphs for legibility.
+  @AppStorage("captionsOutline") var captionsOutline = false
   /// Live viewer count badge in the top-left HUD. On by default — a glanceable,
   /// non-diagnostic stat most viewers want while watching.
   @AppStorage("showViewerCount") var showViewerCount = true
@@ -789,6 +800,8 @@ struct PlayerView: View {
     case chatLatencyToggle
     case chatDiagnosticsToggle
     case chatCaptionsToggle
+    case chatCaptionsBackgroundOption(Int)
+    case chatCaptionsOutlineToggle
     case youtubeMergeToggle
     case youtubeMergeURL
     // Events sub-page
@@ -833,6 +846,10 @@ struct PlayerView: View {
     case letterSpacing
     case messageSpacing
     case width
+    // Caption settings sub-page steppers.
+    case captionFontSize
+    case captionPosition
+    case captionTiming
   }
 
   var chatTextSize: CGFloat {
@@ -1309,6 +1326,7 @@ struct PlayerView: View {
       Task { await load(reason: "rewindToggle", resetMetadata: false) }
     }
     .onChange(of: captionsEnabled) { _, _ in syncCaptions() }
+    .onChange(of: captionsTimingOffset) { _, _ in syncCaptions() }
     .onChange(of: audioOnlyPlaylistURL) { _, _ in syncCaptions() }
     .onChange(of: isLoading) { _, _ in syncCaptions() }
     .onChange(of: isOffline) { _, _ in syncCaptions() }
@@ -1346,6 +1364,7 @@ struct PlayerView: View {
       headers: PlaybackService.streamHeaders,
       isLive: !isVOD,
       isReady: !isLoading && errorMessage == nil && !isOffline,
+      timingOffset: captionsTimingOffset,
       playerClock: { [weak player] in player?.currentItem?.currentDate() }
     )
   }
@@ -1373,8 +1392,15 @@ struct PlayerView: View {
       }
 
       if captionsEnabled, !isVOD, errorMessage == nil, !isOffline {
-        CaptionOverlayView(controller: captionController, controlsVisible: showControls)
-          .transition(.opacity)
+        CaptionOverlayView(
+          controller: captionController,
+          controlsVisible: showControls,
+          fontScale: captionsFontScale,
+          verticalPosition: captionsVerticalPosition,
+          backgroundStyle: CaptionBackgroundStyle.from(captionsBackgroundStyleRaw),
+          outline: captionsOutline
+        )
+        .transition(.opacity)
       }
 
       if showControls, !isLoading,
@@ -2130,6 +2156,8 @@ struct PlayerView: View {
       .chatDiagnosticsToggle,
       .chatCaptionsButton,
       .chatCaptionsToggle,
+      .chatCaptionsBackgroundOption,
+      .chatCaptionsOutlineToggle,
       .chatEventsButton,
       .chatRaidEventToggle,
       .chatHypeTrainEventToggle,
