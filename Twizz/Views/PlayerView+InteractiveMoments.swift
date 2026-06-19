@@ -188,6 +188,55 @@ extension PlayerView {
       ? Color(red: 0.93, green: 0.28, blue: 0.6)
       : Color(red: 0.36, green: 0.55, blue: 0.98)
   }
+
+  /// Debug-only: cycle a sample moment through all four banner types so the
+  /// overlay can be verified on-device without waiting for a real broadcaster
+  /// event. Order: poll → prediction → hype train → goal → clear.
+  func simulateInteractiveMoment() {
+    showChatSettings = false
+    let samples: [InteractiveMoment?] = [
+      .poll(
+        LivePoll(
+          id: "debug-poll",
+          title: "Which map next?",
+          choices: [
+            .init(id: "a", title: "Dust II", votes: 1842),
+            .init(id: "b", title: "Mirage", votes: 1207),
+            .init(id: "c", title: "Inferno", votes: 663),
+          ],
+          isActive: true
+        )
+      ),
+      .prediction(
+        LivePrediction(
+          id: "debug-pred",
+          title: "Will they clutch this round?",
+          outcomes: [
+            .init(id: "blue", title: "Yes, easy", color: "BLUE", points: 48200, users: 312),
+            .init(id: "pink", title: "No chance", color: "PINK", points: 21750, users: 145),
+          ],
+          status: .active,
+          winningOutcomeID: nil
+        )
+      ),
+      .hypeTrain(
+        LiveHypeTrain(id: "debug-train", level: 3, progress: 1800, goal: 2500, isActive: true)
+      ),
+      .goal(
+        LiveGoal(
+          id: "debug-goal",
+          description: "Road to 10k followers",
+          contributionType: "FOLLOWERS",
+          current: 8420,
+          target: 10000
+        )
+      ),
+      nil,
+    ]
+    let moment = samples[debugMomentIndex % samples.count]
+    debugMomentIndex += 1
+    hermes.debugInject(moment)
+  }
 }
 
 /// A labelled horizontal progress bar used inside moment cards.

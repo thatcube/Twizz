@@ -189,6 +189,8 @@ struct PlayerView: View {
   /// Surfaces live polls / predictions / hype trains / goals for the watched
   /// channel via Twitch's private Hermes WebSocket (read-only).
   @State var hermes = HermesEventService()
+  /// Debug-only cursor for the "Simulate Interactive Moment" cycle button.
+  @State var debugMomentIndex = 0
   @State var player = AVPlayer()
   /// Drives the audio-only visualizer orb. Reacts to real audio when the player
   /// item exposes a tappable audio track (best effort on live HLS), otherwise
@@ -574,6 +576,7 @@ struct PlayerView: View {
     case sleepKeepWatching, sleepResume
     case simulateRaidButton
     case simulateOfflineButton
+    case simulateMomentButton
     case chatSettingsButton
     // Stream Rewind transport bar
     case rewindScrubber
@@ -2091,6 +2094,7 @@ struct PlayerView: View {
       .chatDiagnosticsToggle,
       .simulateRaidButton,
       .simulateOfflineButton,
+      .simulateMomentButton,
       .youtubeMergeToggle,
       .youtubeMergeURL,
       .chatAdvancedBack,
@@ -2436,6 +2440,20 @@ struct PlayerView: View {
           ) {
             showChatSettings = false
             presentOfflineState()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          // Debug-only: real polls/predictions/hype-trains only fire when a
+          // broadcaster runs one, so this cycles a sample moment through all
+          // four banner types (poll → prediction → hype train → goal → clear)
+          // to exercise the overlay on-device. Visible only while the
+          // Diagnostics overlay is enabled.
+          settingsPill(
+            title: "Simulate Interactive Moment",
+            isSelected: false,
+            focusTag: .simulateMomentButton
+          ) {
+            simulateInteractiveMoment()
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }

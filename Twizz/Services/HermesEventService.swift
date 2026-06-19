@@ -488,3 +488,14 @@ final class HermesEventService {
 }
 
 private enum HermesError: Error { case resolveFailed }
+
+extension HermesEventService {
+  /// Debug-only: force a sample moment so the overlay can be exercised on-device
+  /// without waiting for a broadcaster to run a real poll/prediction. Pass `nil`
+  /// to clear. Stops the live listener so a real event can't immediately replace
+  /// the sample.
+  func debugInject(_ moment: InteractiveMoment?) {
+    stop()
+    currentMoment = moment
+  }
+}
