@@ -1653,6 +1653,19 @@ struct PlayerView: View {
 
   // MARK: - Controls visibility
 
+  /// Left-press target when leaving the chat composer. While the channel is
+  /// offline the bottom controls (and `.chatToggle`) aren't rendered — the
+  /// offline empty state is shown instead — so revealing controls would focus a
+  /// target that doesn't exist and trap focus on the composer. Jump straight to
+  /// the offline state's primary button in that case.
+  func exitChatComposerLeft() {
+    if isOffline {
+      focus = .offlineViewChannel
+    } else {
+      revealControls(preferredFocus: .chatToggle)
+    }
+  }
+
   func revealControls(preferredFocus: Focusable) {
     focusRecoveryTask?.cancel()
     if !showControls {
@@ -3013,7 +3026,7 @@ struct PlayerView: View {
           .onMoveCommand { direction in
             switch direction {
             case .left:
-              revealControls(preferredFocus: .chatToggle)
+              exitChatComposerLeft()
             case .up:
               handleChatUpPress()
             case .down:
@@ -3087,7 +3100,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            revealControls(preferredFocus: .chatToggle)
+            exitChatComposerLeft()
           case .up:
             handleChatUpPress()
           case .down:
