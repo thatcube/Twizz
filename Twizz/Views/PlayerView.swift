@@ -2846,28 +2846,17 @@ struct PlayerView: View {
     focus = showControls ? .quality : .video
   }
 
-  /// Dim full-screen overlay shown after a sleep timer fires. Pressing any
-  /// select/tap resumes playback.
+  /// Dim full-screen "Sleeping" scene shown after a sleep timer fires. Pressing
+  /// any select/tap resumes playback. Deliberately night-friendly: a dark,
+  /// warm-red starry sky that stays easy on the eyes in a dark room and ignores
+  /// the app's light/dark setting.
   private var sleepingOverlay: some View {
-    ZStack {
-      Color.black.opacity(0.94).ignoresSafeArea()
-      VStack(spacing: 18) {
-        Image(systemName: "moon.zzz.fill")
-          .font(.system(size: 64))
-          .foregroundStyle(.white.opacity(0.85))
-        Text("Sleeping")
-          .font(.largeTitle).bold()
-          .foregroundStyle(.white)
-        Text("Press to resume")
-          .font(.title3)
-          .foregroundStyle(.white.opacity(0.7))
-      }
-    }
-    .contentShape(Rectangle())
-    .focusable()
-    .focused($focus, equals: .sleepResume)
-    .onTapGesture { wakeFromSleep() }
-    .zIndex(50)
+    SleepingScreen()
+      .contentShape(Rectangle())
+      .focusable()
+      .focused($focus, equals: .sleepResume)
+      .onTapGesture { wakeFromSleep() }
+      .zIndex(50)
   }
 
   /// "Still watching?" heads-up shown ~30s before a timed sleep, with a
@@ -4442,6 +4431,177 @@ private struct SleepCountdownBadge: View {
     .clipShape(shape)
   }
 }
+
+// MARK: - Sleeping screen
+
+/// Deterministic, seedable RNG so the star field is generated once and never
+/// reshuffles between frames.
+private struct SeededGenerator: RandomNumberGenerator {
+  private var state: UInt64
+  init(seed: UInt64) { state = seed == 0 ? 0x9E3779B97F4A7C15 : seed }
+  mutating func next() -> UInt64 {
+    state = state &* 6364136223846793005 &+ 1442695040888963407
+    var x = state
+    x ^= x >> 33
+    x = x &* 0xFF51AFD7ED558CCD
+    x ^= x >> 33
+    return x
+  }
+}
+
+private struct SleepStar {
+  let x: Double
+  let y: Double
+  let size: Double
+  let baseOpacity: Double
+  let twinkleSpeed: Double
+  let phase: Double
+  let warmth: Double   // 0 = cool dim white, 1 = warm red
+}
+
+private struct SleepShootingStar {
+  let startX: Double
+  let startY: Double
+  let dx: Double
+  let dy: Double
+  let length: Double
+  let period: Double
+  let offset: Double
+  let duration: Double
+}
+
+/// A cute, low-brightness starry-night scene for the post-sleep-timer state.
+/// Warm reds + near-black keep it gentle on the eyes in a dark room, and the
+/// palette is hard-coded (plus a forced dark color scheme) so it looks the same
+/// whether the app is in light or dark mode.
+private struct SleepingScreen: View {
+  private let stars: [SleepStar]
+  private let shootingStars: [SleepShootingStar]
+
+  init() {
+    var rng = SeededGenerator(seed: 0x5_7A_84)
+    stars = (0..<90).map { _ in
+      SleepStar(
+        x: Double.random(in: 0...1, using: &rng),
+        y: Double.random(in: 0...1, using: &rng),
+        size: Double.random(in: 1.4...3.6, using: &rng),
+        baseOpacity: Double.random(in: 0.18...0.62, using: &rng),
+        twinkleSpeed: Double.random(in: 0.4...1.5, using: &rng),
+        phase: Double.random(in: 0...(2 * .pi), using: &rng),
+        warmth: Double.random(in: 0...1, using: &rng)
+      )
+    }
+    shootingStars = [
+      SleepShootingStar(startX: 0.08, startY: 0.16, dx: 0.42, dy: 0.20,
+                        length: 0.10, period: 9.0, offset: 1.5, duration: 1.1),
+      SleepShootingStar(startX: 0.55, startY: 0.10, dx: 0.36, dy: 0.26,
+                        length: 0.08, period: 14.0, offset: 6.0, duration: 1.3)
+    ]
+  }
+
+  // Hard-coded, night-vision-friendly palette.
+  private let skyTop = Color(red: 0.05, green: 0.01, blue: 0.02)
+  private let skyBottom = Color(red: 0.10, green: 0.015, blue: 0.03)
+  private let emberLow = Color(red: 0.30, green: 0.05, blue: 0.05)
+  private let ember = Color(red: 0.62, green: 0.16, blue: 0.14)
+  private let emberSoft = Color(red: 0.72, green: 0.26, blue: 0.20)
+
+  private func starColor(_ warmth: Double, opacity: Double) -> Color {
+    // Blend a dim cool white toward warm red.
+    let r = 0.78 + 0.14 * warmth
+    let g = 0.62 - 0.40 * warmth
+    let b = 0.56 - 0.42 * warmth
+    return Color(red: r, green: g, blue: b).opacity(opacity)
+  }
+
+  var body: some View {
+    TimelineView(.animation) { timeline in
+      let t = timeline.date.timeIntervalSinceReferenceDate
+      ZStack {
+        LinearGradient(
+          colors: [skyTop, skyBottom, Color.black],
+          startPoint: .top,
+          endPoint: .bottom
+        )
+        .overlay(
+          RadialGradient(
+            colors: [emberLow.opacity(0.22), .clear],
+            center: .init(x: 0.5, y: 0.62),
+            startRadius: 10,
+            endRadius: 720
+          )
+        )
+
+        Canvas { context, size in
+          for star in stars {
+            let twinkle = 0.5 + 0.5 * sin(t * star.twinkleSpeed + star.phase)
+            let opacity = star.baseOpacity * (0.35 + 0.65 * twinkle)
+            let d = star.size
+            let rect = CGRect(
+              x: star.x * size.width - d / 2,
+              y: star.y * size.height - d / 2,
+              width: d, height: d
+            )
+            context.fill(
+              Path(ellipseIn: rect),
+              with: .color(starColor(star.warmth, opacity: opacity))
+            )
+          }
+
+          for shot in shootingStars {
+            let local = (t + shot.offset).truncatingRemainder(dividingBy: shot.period)
+            guard local >= 0, local <= shot.duration else { continue }
+            let p = local / shot.duration
+            // Ease in/out so it streaks in and fades away.
+            let fade = sin(p * .pi)
+            let headX = (shot.startX + shot.dx * p) * size.width
+            let headY = (shot.startY + shot.dy * p) * size.height
+            let tailX = headX - shot.dx * shot.length * size.width
+            let tailY = headY - shot.dy * shot.length * size.height
+            var path = Path()
+            path.move(to: CGPoint(x: tailX, y: tailY))
+            path.addLine(to: CGPoint(x: headX, y: headY))
+            context.stroke(
+              path,
+              with: .linearGradient(
+                Gradient(colors: [
+                  emberSoft.opacity(0.0),
+                  emberSoft.opacity(0.55 * fade)
+                ]),
+                startPoint: CGPoint(x: tailX, y: tailY),
+                endPoint: CGPoint(x: headX, y: headY)
+              ),
+              lineWidth: 2
+            )
+          }
+        }
+        .ignoresSafeArea()
+
+        centerContent(pulse: 0.5 + 0.5 * sin(t * 0.6))
+      }
+      .ignoresSafeArea()
+    }
+    .environment(\.colorScheme, .dark)
+  }
+
+  private func centerContent(pulse: Double) -> some View {
+    VStack(spacing: 20) {
+      Image(systemName: "moon.stars.fill")
+        .font(.system(size: 70, weight: .regular))
+        .foregroundStyle(emberSoft.opacity(0.55 + 0.25 * pulse))
+        .shadow(color: ember.opacity(0.35), radius: 18)
+
+      Text("Sleeping")
+        .font(.system(size: 46, weight: .semibold, design: .rounded))
+        .foregroundStyle(ember.opacity(0.70 + 0.20 * pulse))
+
+      Text("Press to resume")
+        .font(.system(size: 22, weight: .medium, design: .rounded))
+        .foregroundStyle(emberSoft.opacity(0.45))
+    }
+  }
+}
+
 /// Its own `View` type so the per-second diagnostics refresh invalidates only
 /// this panel. The parent computes `lines` (it owns the player state) and
 /// passes them in; rendering lives here.
