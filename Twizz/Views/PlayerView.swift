@@ -134,6 +134,7 @@ struct PlayerView: View {
   /// social links, then description, then a name-based guess).
   @State private var youtubeAutoResolvedTarget = ""
   @AppStorage(LowLatencyHLSProxy.settingsKey) private var lowLatencyProxyEnabled = true
+  @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) private var streamRewindEnabled = true
   @AppStorage("showLatencyDiagnostics") private var showLatencyDiagnostics = false
 
   @State private var chat = ChatService()
@@ -198,6 +199,21 @@ struct PlayerView: View {
   // leaf observes), so only the badge — not the whole player — updates.
   @State private var mon = PlaybackMonitorBox()
   @State private var latencyReadout = LatencyReadout()
+
+  // MARK: Stream Rewind (DVR)
+  /// Observed by the rewind transport bar only, so its once-per-second updates
+  /// don't churn the whole player (same isolation pattern as `latencyReadout`).
+  @State private var rewindReadout = RewindReadout()
+  /// True while the viewer has explicitly paused the live stream. Pausing keeps
+  /// the playhead in place while the DVR window keeps growing, so resuming/seeking
+  /// stays inside the retained window. Also gates the stall watchdog so an
+  /// intentional pause is never mistaken for a freeze.
+  @State private var isUserPaused = false
+  /// The in-progress broadcast VOD for "From Start", when the streamer stores
+  /// past broadcasts. `nil` hides the affordance.
+  @State private var currentBroadcastVOD: (id: String, title: String)?
+  /// Presented VOD ("From Start" / deep rewind) in the native on-demand player.
+  @State private var rewindVODItem: OnDemandItem?
 
   private var wallClockLatencySeconds: Double? {
     get { mon.wallClockLatencySeconds }
@@ -354,6 +370,12 @@ struct PlayerView: View {
   @State private var diagSessionStartedAt: Date?
 
   private let controlsAutoHideSeconds: Double = 10
+  /// How much live history the Stream Rewind DVR retains (and therefore how far
+  /// back you can scrub). Capped because Twitch's segment URLs eventually age off
+  /// its CDN; deeper history is offered via the in-progress VOD ("From Start").
+  private let rewindWindowSeconds: Double = 1800
+  /// Seconds the rewind step buttons jump per press.
+  private let rewindStepSeconds: Double = 10
   // Latency tuning stays at the proven-stable baseline even in low-latency mode.
   // The latency win comes from the proxy promoting Twitch prefetch segments — not
   // from starving buffers or chasing the edge, both of which caused freezes and
@@ -415,6 +437,8 @@ struct PlayerView: View {
     case simulateRaidButton
     case simulateOfflineButton
     case chatSettingsButton
+    // Stream Rewind transport bar
+    case rewindBack, rewindPlayPause, rewindForward, rewindLive, rewindFromStart
     // Main settings page
     case chatPresetOption(Int)
     case chatAdvancedButton
@@ -423,6 +447,7 @@ struct PlayerView: View {
     case chatLayoutOption(Int)
     case chatSyncToggle
     case chatLowLatencyToggle
+    case chatRewindToggle
     case chatDiagnosticsToggle
     case youtubeMergeToggle
     case youtubeMergeURL
@@ -661,6 +686,8 @@ struct PlayerView: View {
       notification in
       guard let stalledItem = notification.object as? AVPlayerItem else { return }
       guard stalledItem == player.currentItem else { return }
+      // Ignore stalls while intentionally paused for DVR rewind.
+      guard !isUserPaused else { return }
       let now = Date()
       guard now.timeIntervalSince(lastStallNotificationAt) >= stallNotificationDebounceSeconds
       else { return }
@@ -800,9 +827,17 @@ struct PlayerView: View {
       // when the channel changes (e.g. following a raid) so it can't leak.
       experimentalYouTubeMergeChannelOrURL = ""
       youtubeAutoResolvedTarget = ""
+      // The rewind window is per-stream: drop the previous channel's DVR history
+      // and reset its VOD ("From Start") target.
+      lowLatencyProxy.resetDVR()
+      currentBroadcastVOD = nil
+      isUserPaused = false
     }
     .task(id: activeChannel) {
       await refreshYouTubeAutoTarget()
+    }
+    .task(id: activeChannel) {
+      await refreshCurrentBroadcastVOD()
     }
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
       if suppressLowLatencyToggleReload {
@@ -812,6 +847,14 @@ struct PlayerView: View {
       // Rebuild the asset pipeline so the proxy is attached/detached cleanly.
       configurePlayerForLive()
       Task { await load(reason: "lowLatencyToggle", resetMetadata: false) }
+    }
+    .onChange(of: streamRewindEnabled) { _, _ in
+      // Toggling Stream Rewind changes whether the proxy retains history (and,
+      // when low-latency is off, whether the proxy is attached at all), so
+      // rebuild the pipeline from a clean DVR state.
+      lowLatencyProxy.resetDVR()
+      configurePlayerForLive()
+      Task { await load(reason: "rewindToggle", resetMetadata: false) }
     }
     .fullScreenCover(isPresented: $showSignInSheet) {
       SignInView(auth: auth)
@@ -928,6 +971,14 @@ struct PlayerView: View {
       } else if showControls {
         bottomOverlay
       }
+    }
+    .onPlayPauseCommand {
+      guard streamRewindEnabled, errorMessage == nil, !isOffline, !isLoading else { return }
+      toggleRewindPlayPause()
+    }
+    .fullScreenCover(item: $rewindVODItem) { item in
+      OnDemandPlayerView(item: item)
+        .environment(\.themePalette, palette)
     }
   }
 
@@ -1047,7 +1098,8 @@ struct PlayerView: View {
   }
 
   private var bottomOverlay: some View {
-    HStack(alignment: .top, spacing: 24) {
+    VStack(spacing: 18) {
+      HStack(alignment: .top, spacing: 24) {
       HStack(alignment: .top, spacing: 12) {
         Button {
           presentChannelPage()
@@ -1084,6 +1136,8 @@ struct PlayerView: View {
             focus = .quality
           case .left:
             focus = .streamInfo
+          case .down:
+            if streamRewindEnabled { focus = .rewindPlayPause }
           default:
             break
           }
@@ -1164,6 +1218,8 @@ struct PlayerView: View {
             focus = .streamInfo
           case .right:
             focus = .chatSettingsButton
+          case .down:
+            if streamRewindEnabled { focus = .rewindPlayPause }
           default:
             break
           }
@@ -1182,6 +1238,8 @@ struct PlayerView: View {
             focus = .quality
           case .right:
             focus = .chatToggle
+          case .down:
+            if streamRewindEnabled { focus = .rewindPlayPause }
           default:
             break
           }
@@ -1206,6 +1264,8 @@ struct PlayerView: View {
             if showChat {
               focus = .chatInput
             }
+          case .down:
+            if streamRewindEnabled { focus = .rewindPlayPause }
           default:
             break
           }
@@ -1222,6 +1282,23 @@ struct PlayerView: View {
     // list) offers competing focus targets and a quick swipe can fling focus out of
     // the row or drop it entirely — which never happens with chat closed.
     .focusSection()
+
+      if streamRewindEnabled {
+        RewindTransportBar(
+          readout: rewindReadout,
+          showFromStart: currentBroadcastVOD != nil,
+          focus: $focus,
+          onBack: { rewindStep(-rewindStepSeconds) },
+          onPlayPause: { toggleRewindPlayPause() },
+          onForward: { rewindStep(rewindStepSeconds) },
+          onLive: { backToLive() },
+          onFromStart: { presentBroadcastFromStart() }
+        )
+        .focusSection()
+        .frame(maxWidth: .infinity)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.leading, 48)
     .padding(.trailing, controlsTrailingInset)
     .padding(.top, 12)
@@ -1636,7 +1713,8 @@ struct PlayerView: View {
 
   private func isControlFocus(_ focus: Focusable) -> Bool {
     switch focus {
-    case .streamInfo, .quality, .chatToggle, .chatInput:
+    case .streamInfo, .quality, .chatToggle, .chatInput,
+      .rewindBack, .rewindPlayPause, .rewindForward, .rewindLive, .rewindFromStart:
       return true
     default:
       return false
@@ -1653,6 +1731,7 @@ struct PlayerView: View {
       .chatLayoutOption,
       .chatSyncToggle,
       .chatLowLatencyToggle,
+      .chatRewindToggle,
       .chatDiagnosticsToggle,
       .simulateRaidButton,
       .simulateOfflineButton,
@@ -1919,6 +1998,15 @@ struct PlayerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
 
         settingsPill(
+          title: streamRewindEnabled ? "Stream Rewind On" : "Stream Rewind Off",
+          isSelected: streamRewindEnabled,
+          focusTag: .chatRewindToggle
+        ) {
+          streamRewindEnabled.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        settingsPill(
           title: showLatencyDiagnostics ? "Diagnostics Overlay On" : "Diagnostics Overlay Off",
           isSelected: showLatencyDiagnostics,
           focusTag: .chatDiagnosticsToggle
@@ -1957,7 +2045,7 @@ struct PlayerView: View {
         }
 
         Text(
-          "Low-Latency Mode rewrites Twitch prefetch segments to reduce delay. Diagnostics shows live render/bitrate/buffer and freeze/jump events."
+          "Low-Latency Mode rewrites Twitch prefetch segments to reduce delay. Stream Rewind keeps recent video buffered so you can pause and rewind live — press play/pause or open the on-screen controls to scrub, jump back to live, or watch from the start. Diagnostics shows live render/bitrate/buffer and freeze/jump events."
         )
         .font(.caption2)
         .foregroundStyle(.white.opacity(0.6))
@@ -3421,25 +3509,32 @@ struct PlayerView: View {
 
   private func makeItem(url: URL) -> AVPlayerItem {
     currentSourceURL = url
-    let assetURL: URL
-    if lowLatencyProxyEnabled {
-      assetURL = lowLatencyProxy.proxyURL(for: url)
-    } else {
-      assetURL = url
-    }
+    // The proxy is attached when EITHER low-latency promotion OR Stream Rewind
+    // (DVR retention) is on. Each behavior is independent: promotion pulls the
+    // live edge in, retention grows the seekable window for rewind.
+    let useProxy = lowLatencyProxyEnabled || streamRewindEnabled
+    lowLatencyProxy.configure(
+      promotePrefetch: lowLatencyProxyEnabled,
+      retainHistory: streamRewindEnabled,
+      windowSeconds: rewindWindowSeconds
+    )
+    let assetURL = useProxy ? lowLatencyProxy.proxyURL(for: url) : url
     let asset = AVURLAsset(
       url: assetURL,
       options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
     )
-    if lowLatencyProxyEnabled {
+    if useProxy {
       // Promotes Twitch's #EXT-X-TWITCH-PREFETCH segments (which AVPlayer would
-      // otherwise ignore) into real segments, pulling playback closer to live.
+      // otherwise ignore) and/or retains seen segments to grow the rewind window.
       asset.resourceLoader.setDelegate(lowLatencyProxy, queue: lowLatencyProxy.callbackQueue)
     }
     let item = AVPlayerItem(asset: asset)
     // Favor smoothness over latency: extra buffer reduces native AVPlayer
     // skip-ahead behavior and rebuffer risk on throughput dips.
     item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 8 : 3
+    // Keep refreshing the live playlist while paused so the seekable (rewind)
+    // window keeps growing and pause-then-resume stays inside the DVR window.
+    item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
     return item
   }
 
@@ -3528,6 +3623,7 @@ struct PlayerView: View {
           // Push the rendered badge values into the observed readout (deduped),
           // so only the badge leaf updates — not the whole player every tick.
           latencyReadout.update(color: latencyColor, label: latencyLabel)
+          updateRewindReadout()
         }
         try? await Task.sleep(for: .seconds(1))
       }
@@ -3591,6 +3687,16 @@ struct PlayerView: View {
     else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
+      return
+    }
+    // An intentional viewer pause (DVR rewind) holds the playhead in place; that
+    // is not a stall, so reset the watchdog counters and bail before they trip.
+    guard !isUserPaused else {
+      stalledPlaybackSamples = 0
+      lastObservedPlaybackTimeSeconds = nil
+      diagWasStalled = false
+      diagIsFrozen = false
+      diagFrozenSince = nil
       return
     }
     guard let item = player.currentItem else {
@@ -3675,6 +3781,108 @@ struct PlayerView: View {
     diagLastPlayheadSeconds = nil
     diagLastSampleAt = nil
     await load(maxAttempts: 2, reason: reason, resetMetadata: false)
+  }
+
+  // MARK: - Stream Rewind (DVR)
+
+  /// The live `seekableTimeRanges` window the proxy keeps growing as history is
+  /// retained. Returns the start/end (seconds, player timeline) of the last
+  /// seekable range plus the current playhead, or `nil` when no window exists.
+  private func currentSeekWindow() -> (start: Double, end: Double, now: Double)? {
+    guard let item = player.currentItem,
+      let range = item.seekableTimeRanges.last?.timeRangeValue
+    else { return nil }
+    let start = CMTimeGetSeconds(range.start)
+    let duration = CMTimeGetSeconds(range.duration)
+    guard start.isFinite, duration.isFinite, duration > 0 else { return nil }
+    let end = start + duration
+    let now = CMTimeGetSeconds(item.currentTime())
+    guard now.isFinite else { return nil }
+    return (start, end, min(max(now, start), end))
+  }
+
+  /// Mirrors the player's real seekable window into the observed `rewindReadout`
+  /// so only the transport bar leaf re-renders (not the whole player) per tick.
+  private func updateRewindReadout() {
+    guard streamRewindEnabled, let window = currentSeekWindow() else {
+      rewindReadout.update(
+        positionFraction: 1, behindLiveSeconds: 0, windowSeconds: 0,
+        isPaused: isUserPaused, isAtLiveEdge: true)
+      return
+    }
+    let span = max(window.end - window.start, 0.001)
+    let fraction = (window.now - window.start) / span
+    let behind = max(window.end - window.now, 0)
+    let atLive = !isUserPaused && behind <= targetLiveEdgeSeconds + 1.5
+    rewindReadout.update(
+      positionFraction: fraction,
+      behindLiveSeconds: behind,
+      windowSeconds: span,
+      isPaused: isUserPaused,
+      isAtLiveEdge: atLive)
+  }
+
+  /// Seeks relative to the current playhead, clamped to the retained window.
+  private func rewindStep(_ delta: Double) {
+    guard let window = currentSeekWindow() else { return }
+    let target = min(max(window.now + delta, window.start), window.end - 0.5)
+    seekRewind(to: target)
+  }
+
+  /// Toggles between pausing in place (DVR window keeps growing) and resuming.
+  private func toggleRewindPlayPause() {
+    if isUserPaused {
+      isUserPaused = false
+      player.play()
+    } else {
+      isUserPaused = true
+      player.pause()
+    }
+    updateRewindReadout()
+    scheduleHide()
+  }
+
+  /// Jumps back to the live edge. The proxy inflates the seekable edge with the
+  /// promoted prefetch tail, and a zero-tolerance seek to that inflated edge can
+  /// freeze, so target a small offset behind the edge with default tolerance.
+  private func backToLive() {
+    guard let window = currentSeekWindow() else { return }
+    let target = max(window.end - targetLiveEdgeSeconds, window.start)
+    isUserPaused = false
+    let time = CMTime(seconds: target, preferredTimescale: 600)
+    player.currentItem?.seek(to: time, completionHandler: { [player] _ in
+      player.play()
+    })
+    updateRewindReadout()
+    scheduleHide()
+  }
+
+  /// Seeks to an absolute position on the player timeline (default tolerance so
+  /// the seek lands on a real segment boundary inside the retained window).
+  private func seekRewind(to seconds: Double) {
+    let time = CMTime(seconds: seconds, preferredTimescale: 600)
+    player.currentItem?.seek(to: time, completionHandler: { [self] _ in
+      if !isUserPaused { player.play() }
+      updateRewindReadout()
+    })
+    updateRewindReadout()
+    scheduleHide()
+  }
+
+  /// Opens the in-progress broadcast VOD ("From Start") in the native on-demand
+  /// player for rewind deeper than the retained live window.
+  private func presentBroadcastFromStart() {
+    guard let vod = currentBroadcastVOD else { return }
+    rewindVODItem = .vod(id: vod.id, title: vod.title)
+  }
+
+  /// Fetches the channel's in-progress broadcast VOD so "From Start" can offer
+  /// deep rewind. `nil` (no stored broadcasts) hides the affordance.
+  private func refreshCurrentBroadcastVOD() async {
+    let login = activeChannel
+    let vod = await PlaybackService.currentBroadcastVOD(login: login)
+    guard login == activeChannel else { return }
+    currentBroadcastVOD = vod
   }
 
   // MARK: - Offline empty state
@@ -4462,7 +4670,178 @@ private struct LatencyBadge: View {
   }
 }
 
-/// Small top-right chip showing the time left on an armed sleep timer.
+/// Isolated state the rewind transport bar observes, mirrored from the player's
+/// real `seekableTimeRanges` once per second (and immediately after each seek).
+/// Assigns only on change so an unchanged tick produces no SwiftUI update and the
+/// bar re-renders in isolation instead of churning the whole player.
+@Observable
+private final class RewindReadout {
+  /// 0 = oldest retained moment, 1 = live edge.
+  var positionFraction: Double = 1
+  /// How far the playhead sits behind the live edge, in seconds.
+  var behindLiveSeconds: Double = 0
+  /// Total length of the seekable (retained) window, in seconds.
+  var windowSeconds: Double = 0
+  var isPaused: Bool = false
+  var isAtLiveEdge: Bool = true
+
+  func update(
+    positionFraction pf: Double,
+    behindLiveSeconds behind: Double,
+    windowSeconds window: Double,
+    isPaused paused: Bool,
+    isAtLiveEdge live: Bool
+  ) {
+    let clampedPF = min(max(pf, 0), 1)
+    if abs(positionFraction - clampedPF) > 0.002 { positionFraction = clampedPF }
+    if abs(behindLiveSeconds - behind) > 0.49 { behindLiveSeconds = behind }
+    if abs(windowSeconds - window) > 0.49 { windowSeconds = window }
+    if isPaused != paused { isPaused = paused }
+    if isAtLiveEdge != live { isAtLiveEdge = live }
+  }
+}
+
+/// Custom DVR transport bar shown along the bottom of the live player. The native
+/// `AVPlayerViewController` controls are disabled (the player surface is passive),
+/// so all seeking is driven through these focusable SwiftUI controls.
+private struct RewindTransportBar: View {
+  @Bindable var readout: RewindReadout
+  let showFromStart: Bool
+  @FocusState.Binding var focus: PlayerView.Focusable?
+  let onBack: () -> Void
+  let onPlayPause: () -> Void
+  let onForward: () -> Void
+  let onLive: () -> Void
+  let onFromStart: () -> Void
+
+  private func behindLabel() -> String {
+    if readout.isAtLiveEdge { return "LIVE" }
+    let total = Int(readout.behindLiveSeconds.rounded())
+    let m = total / 60
+    let s = total % 60
+    return String(format: "-%d:%02d", m, s)
+  }
+
+  var body: some View {
+    let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+    return VStack(spacing: 12) {
+      // Position track: oldest retained moment (left) -> live edge (right).
+      HStack(spacing: 12) {
+        GeometryReader { geo in
+          ZStack(alignment: .leading) {
+            Capsule().fill(.white.opacity(0.22))
+            Capsule()
+              .fill(readout.isAtLiveEdge ? Color.red : Color.white)
+              .frame(width: max(6, geo.size.width * readout.positionFraction))
+          }
+        }
+        .frame(height: 6)
+
+        HStack(spacing: 6) {
+          if readout.isAtLiveEdge {
+            Circle().fill(.red).frame(width: 8, height: 8)
+          }
+          Text(behindLabel())
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundStyle(.white)
+            .monospacedDigit()
+        }
+        .frame(minWidth: 64, alignment: .trailing)
+      }
+
+      HStack(spacing: 18) {
+        controlButton(
+          system: "gobackward.10", tag: .rewindBack, action: onBack,
+          left: nil, right: .rewindPlayPause)
+
+        controlButton(
+          system: readout.isPaused ? "play.fill" : "pause.fill",
+          tag: .rewindPlayPause, action: onPlayPause,
+          left: .rewindBack, right: .rewindForward)
+
+        controlButton(
+          system: "goforward.10", tag: .rewindForward, action: onForward,
+          left: .rewindPlayPause, right: .rewindLive)
+
+        liveButton
+
+        if showFromStart {
+          fromStartButton
+        }
+      }
+    }
+    .padding(.horizontal, 26)
+    .padding(.vertical, 18)
+    .background(.ultraThinMaterial, in: shape)
+    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    .clipShape(shape)
+  }
+
+  private func controlButton(
+    system: String,
+    tag: PlayerView.Focusable,
+    action: @escaping () -> Void,
+    left: PlayerView.Focusable?,
+    right: PlayerView.Focusable?
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: system)
+        .font(.title3)
+        .frame(width: 44, height: 44)
+    }
+    .buttonStyle(.card)
+    .focused($focus, equals: tag)
+    .onMoveCommand { dir in
+      switch dir {
+      case .left: if let left { focus = left }
+      case .right: if let right { focus = right }
+      case .up: focus = .quality
+      default: break
+      }
+    }
+  }
+
+  private var liveButton: some View {
+    Button(action: onLive) {
+      Text("LIVE")
+        .font(.callout)
+        .fontWeight(.bold)
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+    }
+    .buttonStyle(.card)
+    .focused($focus, equals: .rewindLive)
+    .onMoveCommand { dir in
+      switch dir {
+      case .left: focus = .rewindForward
+      case .right: if showFromStart { focus = .rewindFromStart }
+      case .up: focus = .quality
+      default: break
+      }
+    }
+  }
+
+  private var fromStartButton: some View {
+    Button(action: onFromStart) {
+      Label("From Start", systemImage: "backward.end.fill")
+        .font(.callout)
+        .fontWeight(.semibold)
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+    }
+    .buttonStyle(.card)
+    .focused($focus, equals: .rewindFromStart)
+    .onMoveCommand { dir in
+      switch dir {
+      case .left: focus = .rewindLive
+      case .up: focus = .quality
+      default: break
+      }
+    }
+  }
+}
+
 /// Small top-right chip showing the armed sleep timer: a `m:ss` countdown for
 /// timed sleeps, or a short label (e.g. "End") when set to sleep at end of
 /// stream.

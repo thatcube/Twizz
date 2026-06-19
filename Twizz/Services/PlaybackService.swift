@@ -283,6 +283,49 @@ struct PlaybackService {
         return usher
     }
 
+    /// The in-progress (or most recent) archive VOD for a live channel, used by
+    /// Stream Rewind's "From Start" affordance to seek back further than the live
+    /// DVR window retains. Returns `nil` when the channel has no stored past
+    /// broadcasts (the streamer must have "Store past broadcasts" enabled). The
+    /// newest ARCHIVE video while live has status `RECORDING` and *is* the current
+    /// broadcast, so — unlike the channel-page "Past Broadcasts" row — it is
+    /// intentionally kept here.
+    static func currentBroadcastVOD(login: String) async -> (id: String, title: String)? {
+        let normalized = login.lowercased()
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
+        req.httpMethod = "POST"
+        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let query = """
+            query($login: String!) {
+              user(login: $login) {
+                videos(first: 1, sort: TIME, type: ARCHIVE) {
+                  edges { node { id title } }
+                }
+              }
+            }
+            """
+        let body: [String: Any] = ["query": query, "variables": ["login": normalized]]
+        guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else { return nil }
+        req.httpBody = httpBody
+
+        guard let (data, response) = try? await networkSession.data(for: req),
+              (200...299).contains((response as? HTTPURLResponse)?.statusCode ?? -1),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dataObj = json["data"] as? [String: Any],
+              let user = dataObj["user"] as? [String: Any],
+              let videos = user["videos"] as? [String: Any],
+              let edges = videos["edges"] as? [[String: Any]],
+              let node = edges.first?["node"] as? [String: Any],
+              let id = node["id"] as? String, !id.isEmpty
+        else { return nil }
+
+        let title = (node["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (id: id, title: (title?.isEmpty == false ? title! : "Live broadcast"))
+    }
+
     private static func fetchVodAccessToken(vodID: String) async throws -> Token {
         var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
