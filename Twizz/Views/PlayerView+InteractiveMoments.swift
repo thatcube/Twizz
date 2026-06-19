@@ -45,6 +45,17 @@ struct MomentDockStyle: Equatable {
 // couch viewers don't miss them. Non-interactive by design: Twitch exposes no
 // viewer-side API to vote, and these never take focus or steal input.
 extension PlayerView {
+  /// Whether the given interactive moment should be surfaced, per the user's
+  /// per-event visibility toggles (Events sub-page of chat settings).
+  func isEventEnabled(_ moment: InteractiveMoment) -> Bool {
+    switch moment {
+    case .poll: return showPollEvents
+    case .prediction: return showPredictionEvents
+    case .hypeTrain: return showHypeTrainEvents
+    case .goal: return showGoalEvents
+    }
+  }
+
   /// Docked above the chat list (see `chatPane`): surfaces the current live
   /// interactive moment sharing the chat's width and surface treatment. Passive
   /// and non-interactive — Twitch exposes no viewer-side API to vote, and this

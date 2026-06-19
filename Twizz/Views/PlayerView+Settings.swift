@@ -7,7 +7,7 @@ extension PlayerView {
   /// The focus target for the first control on whichever settings page is shown.
   var firstChatSettingsFocus: Focusable {
     switch chatSettingsPage {
-    case .appearance, .playback:
+    case .appearance, .playback, .events:
       return .chatAdvancedBack
     case .main:
       let index =
@@ -34,6 +34,8 @@ extension PlayerView {
           appearanceSettingsContent
         case .playback:
           playbackSettingsContent
+        case .events:
+          eventsSettingsContent
         }
       }
       .padding(.vertical, 18)
@@ -127,6 +129,15 @@ extension PlayerView {
         .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
       }
+
+      settingsDisclosureRow(
+        title: "Events",
+        detail: eventsSettingsSummary,
+        focusTag: .chatEventsButton
+      ) {
+        openSubpage(.events)
+      }
+      .focusSection()
 
       settingsDisclosureRow(
         title: "Playback & Diagnostics",
@@ -343,6 +354,81 @@ extension PlayerView {
         }
       }
       .focusSection()
+    }
+  }
+
+  // MARK: Events sub-page
+
+  /// Short summary for the main-page Events row: "All on" when nothing is
+  /// hidden, otherwise how many are hidden.
+  var eventsSettingsSummary: String {
+    let hidden = [
+      showRaidEvents, showHypeTrainEvents, showPollEvents,
+      showPredictionEvents, showGoalEvents,
+    ].filter { !$0 }.count
+    return hidden == 0 ? "All on" : "\(hidden) hidden"
+  }
+
+  var eventsSettingsContent: some View {
+    VStack(alignment: .leading, spacing: 30) {
+      subpageHeader("Events")
+
+      VStack(alignment: .leading, spacing: 7) {
+        settingsSectionHeader("Show on Screen")
+
+        settingsPill(
+          title: "Raids",
+          isSelected: showRaidEvents,
+          focusTag: .chatRaidEventToggle
+        ) {
+          showRaidEvents.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        settingsPill(
+          title: "Hype Trains",
+          isSelected: showHypeTrainEvents,
+          focusTag: .chatHypeTrainEventToggle
+        ) {
+          showHypeTrainEvents.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        settingsPill(
+          title: "Polls",
+          isSelected: showPollEvents,
+          focusTag: .chatPollEventToggle
+        ) {
+          showPollEvents.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        settingsPill(
+          title: "Predictions",
+          isSelected: showPredictionEvents,
+          focusTag: .chatPredictionEventToggle
+        ) {
+          showPredictionEvents.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        settingsPill(
+          title: "Creator Goals",
+          isSelected: showGoalEvents,
+          focusTag: .chatGoalEventToggle
+        ) {
+          showGoalEvents.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .focusSection()
+
+      Text(
+        "Choose which live moments appear while you watch. These banners are passive and read-only — turning one off just hides it."
+      )
+      .font(.caption2)
+      .foregroundStyle(.white.opacity(0.6))
+      .fixedSize(horizontal: false, vertical: true)
     }
   }
 
@@ -717,8 +803,12 @@ extension PlayerView {
   }
 
   func closeSubpage() {
-    let returnFocus: Focusable =
-      chatSettingsPage == .playback ? .chatMoreButton : .chatAdvancedButton
+    let returnFocus: Focusable
+    switch chatSettingsPage {
+    case .playback: returnFocus = .chatMoreButton
+    case .events: returnFocus = .chatEventsButton
+    default: returnFocus = .chatAdvancedButton
+    }
     chatSettingsPage = .main
     lastChatSettingsFocus = returnFocus
     Task { @MainActor in

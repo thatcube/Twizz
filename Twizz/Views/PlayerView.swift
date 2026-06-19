@@ -184,6 +184,15 @@ struct PlayerView: View {
   /// non-diagnostic stat most viewers want while watching.
   @AppStorage("showViewerCount") var showViewerCount = true
 
+  // Per-event visibility for the passive, read-only event banners (Events
+  // sub-page of chat settings). All on by default — they mirror what Twitch
+  // shows every viewer — but each can be hidden independently.
+  @AppStorage("showRaidEvents") var showRaidEvents = true
+  @AppStorage("showHypeTrainEvents") var showHypeTrainEvents = true
+  @AppStorage("showPollEvents") var showPollEvents = true
+  @AppStorage("showPredictionEvents") var showPredictionEvents = true
+  @AppStorage("showGoalEvents") var showGoalEvents = true
+
   @State var chat = ChatService()
   /// Drives chat replay when in VOD mode (reveals comments up to the playhead).
   @State var replay = VODChatReplayService()
@@ -601,6 +610,13 @@ struct PlayerView: View {
     case chatDiagnosticsToggle
     case youtubeMergeToggle
     case youtubeMergeURL
+    // Events sub-page
+    case chatEventsButton
+    case chatRaidEventToggle
+    case chatHypeTrainEventToggle
+    case chatPollEventToggle
+    case chatPredictionEventToggle
+    case chatGoalEventToggle
     // Advanced settings page
     case chatAdvancedBack
     case chatStepperDec(ChatStepperField)
@@ -620,6 +636,8 @@ struct PlayerView: View {
     case appearance
     /// Playback, stream sync, diagnostics, and experimental toggles.
     case playback
+    /// Per-event visibility toggles (raids, hype trains, polls, etc.).
+    case events
   }
 
   /// The granular dimensions adjusted by the Advanced page steppers.
@@ -754,7 +772,7 @@ struct PlayerView: View {
         .ignoresSafeArea()
       }
 
-      if let raid = chat.pendingRaid {
+      if showRaidEvents, let raid = chat.pendingRaid {
         raidBanner(raid)
           .transition(.move(edge: .bottom).combined(with: .opacity))
           .zIndex(10)
@@ -1931,7 +1949,7 @@ struct PlayerView: View {
       // visible while chat is open (this whole pane is). Passive +
       // non-interactive: never takes focus, so chat keeps scrolling underneath.
       .overlay(alignment: .top) {
-        if let moment = hermes.currentMoment, !isSleeping {
+        if let moment = hermes.currentMoment, !isSleeping, isEventEnabled(moment) {
           dockedInteractiveMoment(moment, style: momentDockStyle(isGlass: isGlass))
             .transition(.move(edge: .top).combined(with: .opacity))
         }
