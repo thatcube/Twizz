@@ -28,6 +28,11 @@ struct ChatMessage: Identifiable {
     let isFirstMessage: Bool
     /// The platform this message came from (Twitch or YouTube).
     let source: ChatSource
+    /// Non-nil when this line is a Twitch subscription/event notice (USERNOTICE).
+    /// Holds the ready-to-display text from the IRC `system-msg` tag, e.g.
+    /// "So-and-so subscribed at Tier 1. They've subscribed for 6 months!".
+    /// When set, the line is rendered with a highlighted subscription treatment.
+    let systemMessage: String?
     /// Timestamp when the message was received (for chronological merging).
     let timestamp: Date
 }
@@ -91,6 +96,7 @@ extension ChatMessage {
         self.isAction = action
         self.isFirstMessage = tags["first-msg"] == "1"
         self.source = .twitch
+        self.systemMessage = nil
         self.timestamp = Date()
     }
 
@@ -109,7 +115,101 @@ extension ChatMessage {
         self.isAction = false
         self.isFirstMessage = false
         self.source = .youtube
+        self.systemMessage = nil
         self.timestamp = timestamp
+    }
+
+    /// Twitch USERNOTICE `msg-id` values we surface as a highlighted
+    /// subscription line in chat. The IRC `system-msg` tag already carries the
+    /// human-readable text (e.g. "X subscribed at Tier 1…") for each of these.
+    private static let subscriptionMsgIDs: Set<String> = [
+        "sub", "resub", "subgift", "anonsubgift", "submysterygift",
+        "giftpaidupgrade", "anongiftpaidupgrade", "primepaidupgrade",
+    ]
+
+    /// Parse a Twitch USERNOTICE subscription event into a highlighted chat line.
+    /// Returns `nil` for non-USERNOTICE lines and for USERNOTICE msg-ids that are
+    /// not subscription events (e.g. `raid`, which is handled separately).
+    init?(subscriptionUSERNOTICE line: String) {
+        guard line.contains(" USERNOTICE ") else { return nil }
+
+        // Tags section: "@key=value;key=value ".
+        var tags: [String: String] = [:]
+        if line.first == "@", let spaceIdx = line.firstIndex(of: " ") {
+            let tagString = line[line.index(after: line.startIndex)..<spaceIdx]
+            for pair in tagString.split(separator: ";") {
+                let kv = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                if kv.count == 2 { tags[String(kv[0])] = String(kv[1]) }
+                else if kv.count == 1 { tags[String(kv[0])] = "" }
+            }
+        }
+
+        guard let msgID = tags["msg-id"], Self.subscriptionMsgIDs.contains(msgID) else { return nil }
+
+        let systemMsg = Self.unescapeIRCTagValue(tags["system-msg"] ?? "")
+        guard !systemMsg.isEmpty else { return nil }
+
+        // Optional user-attached comment (resub message): the text after the
+        // ":" that follows "USERNOTICE #channel". Channel names never contain
+        // ":", so the first ":" after the command marks the message body.
+        var userText = ""
+        if let usernoticeRange = line.range(of: " USERNOTICE ") {
+            let afterCommand = line[usernoticeRange.upperBound...]
+            if let colonIdx = afterCommand.firstIndex(of: ":") {
+                userText = String(afterCommand[afterCommand.index(after: colonIdx)...])
+            }
+        }
+
+        let display = tags["display-name"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? tags["login"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? ""
+        let color = tags["color"].flatMap { $0.isEmpty ? nil : $0 }
+        let badges = Self.mergeBadgeKeys(
+            explicit: Self.parseBadgeKeys(tags["badges"]),
+            inferred: Self.inferRoleBadgeKeys(from: tags, nick: display)
+        )
+        let twitchEmoteURLs = Self.parseTwitchEmoteURLs(tags["emotes"], in: userText)
+
+        self.username = display
+        self.colorHex = color
+        self.badgeKeys = badges
+        self.text = userText
+        self.twitchEmoteURLs = twitchEmoteURLs
+        self.youtubeEmoteURLs = [:]
+        self.isAction = false
+        self.isFirstMessage = false
+        self.source = .twitch
+        self.systemMessage = systemMsg
+        self.timestamp = Date()
+    }
+
+    /// Unescape an IRCv3 message-tag value per the spec: `\s`→space, `\:`→`;`,
+    /// `\\`→`\`, `\r`→CR, `\n`→LF. Other escapes drop the backslash.
+    private static func unescapeIRCTagValue(_ value: String) -> String {
+        guard value.contains("\\") else { return value }
+        var out = ""
+        var idx = value.startIndex
+        while idx < value.endIndex {
+            let char = value[idx]
+            if char == "\\" {
+                let next = value.index(after: idx)
+                if next < value.endIndex {
+                    switch value[next] {
+                    case "s": out.append(" ")
+                    case ":": out.append(";")
+                    case "\\": out.append("\\")
+                    case "r": out.append("\r")
+                    case "n": out.append("\n")
+                    default: out.append(value[next])
+                    }
+                    idx = value.index(after: next)
+                    continue
+                }
+            }
+            out.append(char)
+            idx = value.index(after: idx)
+        }
+        return out
     }
 
     private static func parseBadgeKeys(_ tag: String?) -> [String] {
