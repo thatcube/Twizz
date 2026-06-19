@@ -553,6 +553,25 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     }
 
     // MARK: - Predictive instability scoring
+    //
+    // ┌─ FIELD NOTES (on-device, 2026-06) — read before re-tuning ──────────────┐
+    // │ • Irregular #EXTINF is NOT discriminating. A flawless Rocket League      │
+    // │   stream read "irregular EXTINF" on EVERY refresh, identical to the      │
+    // │   struggling shxtou encoder — so any scheme that lets duration jitter    │
+    // │   alone trip the predictor WILL false-trip good channels (it did, and    │
+    // │   dropped low latency on flawless streams). Kept only as a capped,       │
+    // │   corroborating signal (irregularIsolatedScoreCap) — never solo-trips.   │
+    // │ • The one signal that reliably separates a dead encoder from a healthy   │
+    // │   one is the MEDIA-SEQUENCE STALL (encoder stops appending segments).    │
+    // │   That's what the predictor should lean on. A bad encoder that merely    │
+    // │   jitters durations is left to the reactive watchdog (stalls + jumps),   │
+    // │   which already catches it a beat later.                                 │
+    // │ • PDT / prefetch-age were rejected up front: they false-trip on healthy  │
+    // │   5–15s low-latency streams whose device clock is skewed from the        │
+    // │   broadcaster. Keep signals manifest-STRUCTURE-only.                     │
+    // │ • Lesson: predict conservatively. Punishing many good streams to catch   │
+    // │   one bad one a couple seconds earlier is a bad trade.                   │
+    // └─────────────────────────────────────────────────────────────────────────┘
 
     /// Accumulates manifest-structure instability signals for one media-playlist
     /// refresh and republishes the verdict. Runs on `delegateQueue`.
