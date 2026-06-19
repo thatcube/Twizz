@@ -49,7 +49,6 @@ struct GoLiveAlertsSettingsView: View {
       .ignoresSafeArea()
 
       List {
-        bulkActionsSection
         channelsSection
       }
     }
@@ -75,44 +74,31 @@ struct GoLiveAlertsSettingsView: View {
     filteredBroadcasters
   }
 
-  /// Top-of-list "Enable All" / "Disable All" controls. Map onto the existing
-  /// opt-out muted set: Disable All mutes every visible channel, Enable All
-  /// unmutes them. Scope follows the search field (see `bulkTargets`).
-  @ViewBuilder
-  private var bulkActionsSection: some View {
-    if !bulkTargets.isEmpty {
-      Section {
-        HStack(spacing: 24) {
-          Button {
-            settings.setAlerting(true, logins: bulkTargets.map(\.login))
-          } label: {
-            Text("Enable All")
-              .frame(maxWidth: .infinity)
-          }
-          Button {
-            settings.setAlerting(false, logins: bulkTargets.map(\.login))
-          } label: {
-            Text("Disable All")
-              .frame(maxWidth: .infinity)
-          }
-        }
-        .frame(maxWidth: .infinity)
-      } footer: {
-        Text(bulkScopeDescription)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-    }
+  /// Context-aware bulk action: if every visible channel is already on, the
+  /// action mutes them ("Disable All"); if any visible channel is off, it
+  /// unmutes them all ("Enable All"). `nil` when there's nothing to act on.
+  private var bulkEnables: Bool? {
+    guard !bulkTargets.isEmpty else { return nil }
+    let anyMuted = bulkTargets.contains { settings.isMuted(login: $0.login) }
+    return anyMuted
   }
 
-  /// Footer copy clarifying what the bulk buttons act on, including the future-
-  /// follow caveat of the opt-out model.
-  private var bulkScopeDescription: String {
-    if isSearching {
-      let count = bulkTargets.count
-      return "Enable All / Disable All apply to the \(count) channel\(count == 1 ? "" : "s") matching your search."
+  /// Compact, secondary-styled action shown at the top-right of the channels
+  /// section header (the small list-level action pattern, not a giant row).
+  /// Reading `settings.isMuted` via `bulkEnables` registers an observation so
+  /// the label flips as toggles change.
+  @ViewBuilder
+  private var bulkActionButton: some View {
+    if let enables = bulkEnables {
+      Button {
+        settings.setAlerting(enables, logins: bulkTargets.map(\.login))
+      } label: {
+        Text(enables ? "Enable All" : "Disable All")
+          .font(.caption)
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(.tint)
     }
-    return "Enable All / Disable All apply to every channel you follow now. Channels you follow later start on."
   }
 
   @ViewBuilder
@@ -134,14 +120,27 @@ struct GoLiveAlertsSettingsView: View {
         }
       }
     } header: {
-      Text("Channels")
+      HStack {
+        Text("Channels")
+        Spacer()
+        bulkActionButton
+      }
     } footer: {
       if !broadcasters.isEmpty {
-        Text("Channels left on will alert you when they go live.")
+        Text(footerText)
           .font(.caption)
           .foregroundStyle(.secondary)
       }
     }
+  }
+
+  /// Footer copy: states what "left on" means and, while searching, that the
+  /// bulk action is scoped to the current matches.
+  private var footerText: String {
+    if isSearching {
+      return "Enable All / Disable All apply to the channels matching your search. Channels left on will alert you when they go live."
+    }
+    return "Channels left on will alert you when they go live. Channels you follow later start on."
   }
 
   private func channelLabel(_ channel: FollowedChannel) -> some View {
