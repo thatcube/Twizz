@@ -1008,6 +1008,11 @@ struct PlayerView: View {
           .transition(.opacity)
       }
     }
+    // Render the whole player tree in the app theme's color scheme so native
+    // Liquid Glass, materials, and `.buttonStyle(.glass)` pills go
+    // light-but-translucent in the Light theme (with transparency on), instead
+    // of always rendering dark. No-op for dark/OLED (already `.dark`).
+    .environment(\.colorScheme, palette.chromeColorScheme)
     .animation(.motionAware(.easeInOut(duration: 0.35), reduceMotion: reduceMotion), value: hermes.currentMoment)
     .animation(.motionAware(.easeOut(duration: 0.25), reduceMotion: reduceMotion), value: goLive?.pending)
     .onChange(of: chat.pendingRaid) { _, newRaid in
@@ -2300,7 +2305,7 @@ struct PlayerView: View {
               .foregroundStyle(
                 focus == .chatInput && !chatIsFrozen
                   ? .black.opacity(chatDraft.isEmpty ? 0.55 : 1.0)
-                  : (glassDisabled ? palette.chromeOnOpaque : .white).opacity(chatDraft.isEmpty ? 0.5 : 1.0)
+                  : palette.chromeOnOpaque.opacity(chatDraft.isEmpty ? 0.5 : 1.0)
               )
               .lineLimit(1)
               .truncationMode(.tail)
@@ -2396,7 +2401,7 @@ struct PlayerView: View {
             .foregroundStyle(
               focus == .chatInput && !chatIsFrozen
                 ? .black.opacity(0.7)
-                : (glassDisabled ? palette.chromeOnOpaque : .white).opacity(0.45)
+                : palette.chromeOnOpaque.opacity(0.45)
             )
             .lineLimit(1)
             .padding(.horizontal, 28)
@@ -2436,11 +2441,17 @@ struct PlayerView: View {
     // evenly inside the glass pane's rounded corners.
     .padding(.bottom, 16)
     .background(
-      chatLayoutMode == .glass
-        ? AnyShapeStyle(Color.black.opacity(0.22))
-        : (chatLayoutMode == .overlay
-          ? AnyShapeStyle(Color(white: 0.13).opacity(0.90))
-          : AnyShapeStyle(Color(white: 0.07).opacity(0.96)))
+      palette.isLight
+        ? (chatLayoutMode == .glass
+          ? AnyShapeStyle(Color.white.opacity(0.55))
+          : (chatLayoutMode == .overlay
+            ? AnyShapeStyle(Color(white: 0.97).opacity(0.92))
+            : AnyShapeStyle(Color(white: 0.99).opacity(0.96))))
+        : (chatLayoutMode == .glass
+          ? AnyShapeStyle(Color.black.opacity(0.22))
+          : (chatLayoutMode == .overlay
+            ? AnyShapeStyle(Color(white: 0.13).opacity(0.90))
+            : AnyShapeStyle(Color(white: 0.07).opacity(0.96))))
     )
   }
 
@@ -3407,14 +3418,15 @@ struct ChatSettingsPanelGlassStyle: ViewModifier {
       content
         // Same darkening scrim the Glass chat pane paints over its glass
         // (ChatView uses Color.black.opacity(0.22)); without it the panel's bare
-        // glass read noticeably lighter than the chat beside it.
-        .background(Color.black.opacity(0.22), in: shape)
+        // glass read noticeably lighter than the chat beside it. Flips to a white
+        // scrim in the Light theme so it lightens rather than darkens the glass.
+        .background(palette.chromeGlassTint(0.22), in: shape)
         .glassEffect(.regular, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
     } else {
       content
         .background(.ultraThinMaterial, in: shape)
-        .background(Color.black.opacity(0.22), in: shape)
+        .background(palette.chromeGlassTint(0.22), in: shape)
         .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
     }
   }
@@ -3533,7 +3545,7 @@ private struct PlayerInfoBadge: View {
   /// Foreground for text/dividers on the chip: dark on the Light-theme opaque
   /// fill, white on the translucent glass over video.
   private var chipForeground: Color {
-    glassDisabled ? palette.chromeOnOpaque : .white
+    palette.chromeOnOpaque
   }
 
   /// Brick red from the requested reference, nudged just bright enough to stay
@@ -3607,14 +3619,14 @@ private struct HUDChipGlassStyle: ViewModifier {
         .clipShape(shape)
     } else if #available(tvOS 26.0, *) {
       content
-        .background(Color.black.opacity(0.22), in: shape)
+        .background(palette.chromeGlassTint(0.22), in: shape)
         .glassEffect(.regular, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
         .clipShape(shape)
     } else {
       content
         .background(.ultraThinMaterial, in: shape)
-        .background(Color.black.opacity(0.22), in: shape)
+        .background(palette.chromeGlassTint(0.22), in: shape)
         .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
         .clipShape(shape)
     }
@@ -3673,7 +3685,7 @@ private struct RewindScrubBar: View {
   /// Foreground for the track/orb/label: dark on the Light-theme opaque fill,
   /// white on the translucent glass over video.
   private var chromeForeground: Color {
-    glassDisabled ? palette.chromeOnOpaque : .white
+    palette.chromeOnOpaque
   }
 
   private func behindLabel() -> String {
@@ -3942,7 +3954,7 @@ private struct SleepCountdownBadge: View {
   @Environment(\.themePalette) private var palette
 
   private var chipForeground: Color {
-    glassDisabled ? palette.chromeOnOpaque : .white
+    palette.chromeOnOpaque
   }
 
   static func format(seconds: Int) -> String {
@@ -4211,7 +4223,7 @@ private struct DiagnosticsPanel: View {
   @Environment(\.glassDisabled) private var glassDisabled
   @Environment(\.themePalette) private var palette
 
-  private var fg: Color { glassDisabled ? palette.chromeOnOpaque : .white }
+  private var fg: Color { palette.chromeOnOpaque }
 
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -4238,7 +4250,7 @@ private struct DiagnosticsPanel: View {
     .padding(.horizontal, 16)
     .padding(.vertical, 12)
     .frame(maxWidth: 520, alignment: .leading)
-    .background(glassDisabled ? AnyShapeStyle(palette.chromeOpaqueSurface) : AnyShapeStyle(.black.opacity(0.55)), in: shape)
+    .background(glassDisabled ? AnyShapeStyle(palette.chromeOpaqueSurface) : AnyShapeStyle(palette.chromeGlassTint(0.55)), in: shape)
     .overlay(shape.strokeBorder(glassDisabled ? palette.chromeOpaqueBorder : .white.opacity(0.12), lineWidth: 1))
     .clipShape(shape)
   }
