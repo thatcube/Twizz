@@ -21,9 +21,6 @@ struct SettingsView: View {
   @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
   @State private var showClearHistoryConfirm = false
-  #if DEBUG
-  @State private var showCaptionSpike = false
-  #endif
   @State private var topShelfStatus = TopShelfStore.diagnosticsSummary()
   @FocusState private var focusedTheme: AppTheme?
   @FocusState private var focusedCardSize: StreamCardSize?
@@ -59,9 +56,6 @@ struct SettingsView: View {
             accountSection
             topShelfSection
             AboutSection()
-            #if DEBUG
-            captionSpikeSection
-            #endif
           }
           .frame(maxWidth: .infinity, alignment: .topLeading)
           .padding(.horizontal, AppLayout.horizontalPadding)
@@ -70,37 +64,7 @@ struct SettingsView: View {
         .scrollClipDisabled()
       }
     }
-    #if DEBUG
-    .fullScreenCover(isPresented: $showCaptionSpike) {
-      if #available(tvOS 26.0, *) {
-        CaptionSpikeDebugView()
-      } else {
-        VStack(spacing: 20) {
-          Text("Live Caption Spike requires tvOS 26 or later.")
-          Button("Close") { showCaptionSpike = false }
-        }
-        .padding(60)
-      }
-    }
-    #endif
   }
-
-  #if DEBUG
-  // MARK: - Caption generation spike (DEBUG only, experimental)
-
-  private var captionSpikeSection: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Experimental")
-        .font(.system(size: 24, weight: .semibold))
-      Text("On-device live caption generation spike (SpeechAnalyzer, tvOS 26+).")
-        .font(.callout)
-        .foregroundStyle(.secondary)
-      Button("Open Live Caption Spike") { showCaptionSpike = true }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .focusSection()
-  }
-  #endif
 
   // MARK: - Preferences group (Appearance + Stream Cards + Chat)
 

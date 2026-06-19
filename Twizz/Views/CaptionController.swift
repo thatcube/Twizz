@@ -1,0 +1,166 @@
+import SwiftUI
+
+/// Bridges the (tvOS 26-gated) `LiveCaptionEngine` to SwiftUI, and owns the
+/// rolling caption text shown by `CaptionOverlayView`.
+///
+/// The class itself is **not** availability-gated so `PlayerView` can hold it as
+/// plain `@State` on any OS; the gated engine is stored as `Any?` and only ever
+/// touched inside `if #available(tvOS 26.0, *)` blocks. On older OSes the
+/// controller is inert and `isSupported` is false, so the toggle is hidden.
+@MainActor
+@Observable
+final class CaptionController {
+    /// Settled caption lines (most recent last). Capped to a short rolling window.
+    private(set) var finalizedLines: [String] = []
+    /// The in-progress line still being refined by the recognizer.
+    private(set) var volatileLine: String = ""
+    /// True once the engine is running for the current stream.
+    private(set) var isActive = false
+
+    /// Whether the engine could not start (e.g. no on-device model for the
+    /// locale). Surfaced so the UI can explain rather than silently show nothing.
+    private(set) var failed = false
+
+    private var engine: Any?
+    private var startTask: Task<Void, Never>?
+    /// Identity of the currently-running configuration, so repeated `sync` calls
+    /// with unchanged inputs don't tear down and restart the engine.
+    private var activeKey: String?
+
+    private let maxLines = 2
+
+    /// Whether on-device caption generation is even possible on this OS. Hardware
+    /// capability (model availability) is confirmed asynchronously once started.
+    static var isSupported: Bool {
+        if #available(tvOS 26.0, *) { return true }
+        return false
+    }
+
+    /// Reconcile the engine with the desired state. Safe to call frequently
+    /// (e.g. from several `.onChange` hooks) — it no-ops when nothing changed.
+    func sync(
+        enabled: Bool,
+        playlistURL: URL?,
+        headers: [String: String],
+        isLive: Bool,
+        isReady: Bool
+    ) {
+        let shouldRun = enabled && isLive && isReady && playlistURL != nil && Self.isSupported
+        let key = shouldRun ? playlistURL?.absoluteString : nil
+        if key == activeKey { return }
+        activeKey = key
+
+        stopEngine()
+
+        guard shouldRun, let url = playlistURL else {
+            clearText()
+            return
+        }
+
+        guard #available(tvOS 26.0, *) else { return }
+
+        failed = false
+        let engine = LiveCaptionEngine(playlistURL: url, headers: headers) { [weak self] line in
+            Task { @MainActor in self?.apply(line) }
+        }
+        self.engine = engine
+        isActive = true
+        startTask = Task { [weak self] in
+            do {
+                try await engine.start()
+            } catch {
+                await MainActor.run {
+                    self?.failed = true
+                    self?.isActive = false
+                }
+            }
+        }
+    }
+
+    /// Fully stop captioning and clear any displayed text (channel exit/teardown).
+    func stop() {
+        activeKey = nil
+        stopEngine()
+        clearText()
+    }
+
+    private func stopEngine() {
+        startTask?.cancel()
+        startTask = nil
+        isActive = false
+        if #available(tvOS 26.0, *), let engine = engine as? LiveCaptionEngine {
+            Task { await engine.stop() }
+        }
+        engine = nil
+    }
+
+    private func apply(_ line: CaptionLine) {
+        if line.isVolatile {
+            volatileLine = line.text
+        } else {
+            finalizedLines.append(line.text)
+            if finalizedLines.count > maxLines {
+                finalizedLines.removeFirst(finalizedLines.count - maxLines)
+            }
+            volatileLine = ""
+        }
+    }
+
+    private func clearText() {
+        finalizedLines.removeAll()
+        volatileLine = ""
+        failed = false
+    }
+}
+
+/// Rolling on-video caption overlay. Native styling: a legible material slab,
+/// system fonts, bottom-center, lifted above the control bar when controls are
+/// visible. Honors Reduce Transparency (`glassDisabled`) and Reduce Motion.
+struct CaptionOverlayView: View {
+    let controller: CaptionController
+    /// True while the player's bottom control bar is on screen, so the overlay
+    /// can sit higher and not collide with it (or the interactive-moment dock).
+    let controlsVisible: Bool
+
+    @Environment(\.glassDisabled) private var glassDisabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var lines: [String] {
+        var all = controller.finalizedLines
+        if !controller.volatileLine.isEmpty { all.append(controller.volatileLine) }
+        return all
+    }
+
+    var body: some View {
+        Group {
+            if !lines.isEmpty {
+                Text(lines.joined(separator: "\n"))
+                  .font(.system(.title3, design: .rounded).weight(.semibold))
+                  .multilineTextAlignment(.center)
+                  .foregroundStyle(.white)
+                  .lineLimit(3)
+                  .fixedSize(horizontal: false, vertical: true)
+                  .padding(.horizontal, 28)
+                  .padding(.vertical, 16)
+                  .background(captionBackground)
+                  .frame(maxWidth: 1100)
+                  .padding(.bottom, controlsVisible ? 260 : 80)
+                  .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
+                  .accessibilityLabel("Live captions")
+                  .accessibilityValue(lines.joined(separator: ". "))
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: lines)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .allowsHitTesting(false)
+    }
+
+    private var captionBackground: some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(
+                glassDisabled
+                    ? AnyShapeStyle(Color.black.opacity(0.82))
+                    : AnyShapeStyle(.ultraThinMaterial)
+            )
+    }
+}

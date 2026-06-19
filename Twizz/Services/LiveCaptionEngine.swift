@@ -3,60 +3,40 @@ import Foundation
 import OSLog
 import Speech
 
-/// EXPERIMENTAL SPIKE — on-device live caption generation for Twitch streams.
-///
-/// Feasibility proof for Accessibility Chunk F: Twitch ships no caption tracks in
-/// its HLS (live or VOD), so the only way to caption arbitrary streams is to
-/// transcribe the audio ourselves, on device. This spike does exactly that using
-/// Apple's WWDC25 `SpeechAnalyzer` / `SpeechTranscriber` (fully on-device, no
-/// quotas, no session limit), which is available on tvOS 26+ — verified to
-/// compile and run on the test Apple TV 4K (A15, tvOS 27).
-///
-/// Audio feed: AVPlayer does not expose decompressed PCM for live HLS (see
-/// `AudioOnlyLevelDecoder`), so — exactly like the audio visualizer — we run a
-/// side-channel: poll the audio-only media playlist, download each fresh
-/// self-contained MPEG-TS segment, demux its AAC elementary stream
-/// (`TSAudioExtractor`), decode it to PCM with `AVAudioFile`, convert to the
-/// analyzer's required format, and feed it into the recognizer. Recognized text
-/// is surfaced via `onTranscript` and logged.
-///
-/// This type is intentionally isolated and self-contained: it touches no player
-/// internals and makes no destructive change to `PlayerView`. It is the minimal
-/// proof that real-time on-device captioning is achievable on Apple TV.
-@available(tvOS 26.0, *)
-actor LiveCaptionSpike {
-    /// A recognized caption update. `isVolatile` marks an in-progress guess that
-    /// will be replaced by a later, more accurate result for the same time range.
-    struct Transcript: Sendable {
-        let text: String
-        let isVolatile: Bool
-    }
+/// A single recognized caption update. `isVolatile` marks an in-progress guess
+/// that a later, more accurate result for the same time range will replace.
+/// Declared outside the (tvOS 26-gated) engine so non-gated callers — the
+/// `CaptionController` and the overlay — can pass it around freely.
+struct CaptionLine: Sendable {
+    let text: String
+    let isVolatile: Bool
+}
 
+/// On-device live caption generation for Twitch streams ("Captions (beta)").
+///
+/// Twitch ships no caption tracks in its HLS (live or VOD), so the only way to
+/// caption arbitrary streams is to transcribe the audio ourselves, on device.
+/// This uses Apple's `SpeechAnalyzer` / `SpeechTranscriber` (tvOS 26+): fully
+/// on-device, no network ASR, no quotas, no session limit, and no microphone or
+/// speech-recognition permission (we transcribe the stream's own audio).
+///
+/// Audio feed: `AVPlayer` does not expose decompressed PCM for live HLS (see
+/// `AudioOnlyLevelDecoder`), and `MTAudioProcessingTap` does not fire on it.
+/// So — exactly like the audio visualizer — we side-channel the audio: poll the
+/// audio-only media playlist, download each fresh self-contained MPEG-TS
+/// segment, demux its AAC elementary stream (`TSAudioExtractor`), decode it to
+/// PCM with `AVAudioFile`, convert to the analyzer's required format, and feed
+/// it into the recognizer. Recognized text is surfaced via `onLine`.
+///
+/// Intentionally isolated from the player's playback path: it only consumes the
+/// audio-only playlist URL the player already resolves, and never touches the
+/// `AVPlayer` or its item.
+@available(tvOS 26.0, *)
+actor LiveCaptionEngine {
     private let playlistURL: URL
     private let headers: [String: String]
-    private let onTranscript: @Sendable (Transcript) -> Void
-    private let log = Logger(subsystem: "com.thatcube.Twizz", category: "LiveCaptionSpike")
-
-    /// Append-only evidence log written to the app container so a headless
-    /// (no on-screen navigation) device run can be inspected by pulling the file
-    /// with `devicectl device copy`. Spike-only; not used by shipping code.
-    static let evidenceLogURL: URL = {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        return dir.appendingPathComponent("caption_spike.log")
-    }()
-
-    static func fileLog(_ message: String) {
-        let line = "\(Date().formatted(date: .omitted, time: .standard))  \(message)\n"
-        guard let data = line.data(using: .utf8) else { return }
-        let url = evidenceLogURL
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        } else {
-            try? data.write(to: url, options: .atomic)
-        }
-    }
+    private let onLine: @Sendable (CaptionLine) -> Void
+    private let log = Logger(subsystem: "com.thatcube.Twizz", category: "LiveCaptionEngine")
 
     private let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
@@ -80,14 +60,21 @@ actor LiveCaptionSpike {
     init(
         playlistURL: URL,
         headers: [String: String],
-        onTranscript: @escaping @Sendable (Transcript) -> Void
+        onLine: @escaping @Sendable (CaptionLine) -> Void
     ) {
         self.playlistURL = playlistURL
         self.headers = headers
-        self.onTranscript = onTranscript
+        self.onLine = onLine
     }
 
     // MARK: - Lifecycle
+
+    /// Reports whether the device can actually run on-device transcription for a
+    /// usable locale (guards against OS/hardware that lack the Speech models —
+    /// e.g. the tvOS Simulator).
+    static func isSupported() async -> Bool {
+        !(await SpeechTranscriber.supportedLocales).isEmpty
+    }
 
     /// Prepares the on-device model (downloading it once if needed), wires up the
     /// analyzer, and starts polling the audio playlist. Throws if the device has
@@ -96,37 +83,25 @@ actor LiveCaptionSpike {
         guard pollLoop == nil else { return }
 
         let locale = await Self.preferredLocale()
-        log.info("Starting caption spike with locale \(locale.identifier, privacy: .public)")
-        print("[caption] starting locale=\(locale.identifier)")
-        Self.fileLog("starting locale=\(locale.identifier)")
-        let supported = await SpeechTranscriber.supportedLocales
-        Self.fileLog("supportedLocales count=\(supported.count): \(supported.map(\.identifier).joined(separator: ","))")
         let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
         self.transcriber = transcriber
 
-        try await Self.ensureModelInstalled(for: transcriber, log: log)
-        print("[caption] model ready, wiring analyzer")
-        Self.fileLog("model ready, wiring analyzer")
+        try await Self.ensureModelInstalled(for: transcriber)
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
         self.analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
-        log.info("Analyzer format: \(String(describing: self.analyzerFormat), privacy: .public)")
-        Self.fileLog("bestAvailableAudioFormat=\(String(describing: self.analyzerFormat))")
 
         // Consume recognized results and forward them out. With the progressive
         // preset, the stream emits volatile guesses followed by finalized text.
-        resultsTask = Task { [weak self, onTranscript, log] in
+        resultsTask = Task { [weak self, onLine, log] in
             guard let self else { return }
             do {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
                     let isVolatile = await self.isVolatile(result)
                     if !text.isEmpty {
-                        log.info("[caption]\(isVolatile ? "~" : " ", privacy: .public) \(text, privacy: .public)")
-                        print("[caption]\(isVolatile ? "~" : " ") \(text)")
-                        Self.fileLog("caption\(isVolatile ? "~" : " ") \(text)")
-                        onTranscript(Transcript(text: text, isVolatile: isVolatile))
+                        onLine(CaptionLine(text: text, isVolatile: isVolatile))
                     }
                 }
             } catch {
@@ -139,7 +114,6 @@ actor LiveCaptionSpike {
         try await analyzer.start(inputSequence: stream)
 
         pollLoop = Task { [weak self] in
-            print("[caption] listening — polling audio segments")
             await self?.runPollLoop()
         }
     }
@@ -160,7 +134,7 @@ actor LiveCaptionSpike {
     }
 
     /// A result is "volatile" while playback hasn't been finalized past its end —
-    /// i.e. the analyzer may still revise it. Used only to style/log pending text.
+    /// i.e. the analyzer may still revise it. Used to style pending vs. settled text.
     private func isVolatile(_ result: SpeechTranscriber.Result) -> Bool {
         result.resultsFinalizationTime < result.range.end
     }
@@ -184,21 +158,11 @@ actor LiveCaptionSpike {
             ?? Locale(identifier: "en-US")
     }
 
-    private static func ensureModelInstalled(
-        for transcriber: SpeechTranscriber, log: Logger
-    ) async throws {
+    private static func ensureModelInstalled(for transcriber: SpeechTranscriber) async throws {
         let status = await AssetInventory.status(forModules: [transcriber])
-        log.info("Model status: \(String(describing: status), privacy: .public)")
-        Self.fileLog("model status=\(String(describing: status))")
         if status == .installed { return }
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-            log.info("Downloading on-device speech model…")
-            Self.fileLog("downloading model…")
             try await request.downloadAndInstall()
-            log.info("Speech model installed.")
-            Self.fileLog("model installed")
-        } else {
-            Self.fileLog("no installation request available (model may be unsupported here)")
         }
     }
 

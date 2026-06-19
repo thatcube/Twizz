@@ -210,6 +210,8 @@ struct PlayerView: View {
   @AppStorage(LowLatencyHLSProxy.settingsKey) var lowLatencyProxyEnabled = true
   @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) var streamRewindEnabled = true
   @AppStorage("showLatencyDiagnostics") var showLatencyDiagnostics = false
+  /// On-device live captions toggle (beta). See `captionController`.
+  @AppStorage("captionsEnabled") var captionsEnabled = false
   /// Live viewer count badge in the top-left HUD. On by default — a glanceable,
   /// non-diagnostic stat most viewers want while watching.
   @AppStorage("showViewerCount") var showViewerCount = true
@@ -246,6 +248,10 @@ struct PlayerView: View {
   /// item exposes a tappable audio track (best effort on live HLS), otherwise
   /// runs an ambient animation.
   @State var audioLevelMonitor = AudioLevelMonitor()
+  /// On-device live caption generation ("Captions (beta)"). Off by default; only
+  /// runs on live streams on tvOS 26+. Fully isolated from the playback path —
+  /// it consumes the audio-only playlist via its own side-channel.
+  @State var captionController = CaptionController()
   /// Retained for the player's lifetime: `AVURLAsset` only holds its resource
   /// loader delegate weakly, so the proxy must be owned here to stay alive.
   @State var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
@@ -775,6 +781,7 @@ struct PlayerView: View {
     case chatViewerCountToggle
     case chatLatencyToggle
     case chatDiagnosticsToggle
+    case chatCaptionsToggle
     case youtubeMergeToggle
     case youtubeMergeURL
     // Events sub-page
@@ -1098,6 +1105,7 @@ struct PlayerView: View {
       removeVODTimeObserver()
       replay.stop()
       player.pause()
+      captionController.stop()
       chat.disconnect()
       eventSub.stop()
       hermes.stop()
@@ -1291,6 +1299,10 @@ struct PlayerView: View {
       configurePlayerForLive()
       Task { await load(reason: "rewindToggle", resetMetadata: false) }
     }
+    .onChange(of: captionsEnabled) { _, _ in syncCaptions() }
+    .onChange(of: audioOnlyPlaylistURL) { _, _ in syncCaptions() }
+    .onChange(of: isLoading) { _, _ in syncCaptions() }
+    .onChange(of: isOffline) { _, _ in syncCaptions() }
     .fullScreenCover(isPresented: $showSignInSheet) {
       SignInView(auth: auth)
     }
@@ -1314,6 +1326,20 @@ struct PlayerView: View {
     playback?.qualities.first(where: { $0.isAudioOnly })?.url
   }
 
+  /// Reconcile the on-device caption engine with current playback state. Cheap
+  /// to call from multiple hooks — the controller no-ops on unchanged inputs.
+  /// Live-only: captioning rides the audio-only side-channel, which doesn't
+  /// exist for VOD/clip playback.
+  func syncCaptions() {
+    captionController.sync(
+      enabled: captionsEnabled,
+      playlistURL: audioOnlyPlaylistURL,
+      headers: PlaybackService.streamHeaders,
+      isLive: !isVOD,
+      isReady: !isLoading && errorMessage == nil && !isOffline
+    )
+  }
+
   var videoColumn: some View {
     ZStack(alignment: .bottom) {
       VideoSurface(player: player)
@@ -1334,6 +1360,11 @@ struct PlayerView: View {
           )
         }
         .onDisappear { audioLevelMonitor.stop() }
+      }
+
+      if captionsEnabled, !isVOD, errorMessage == nil, !isOffline {
+        CaptionOverlayView(controller: captionController, controlsVisible: showControls)
+          .transition(.opacity)
       }
 
       if showControls, !isLoading,

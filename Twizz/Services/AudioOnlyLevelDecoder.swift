@@ -339,9 +339,9 @@ actor AudioOnlyLevelDecoder {
 /// already ADTS-framed) inside its transport stream, so concatenating the audio
 /// PID's PES payloads yields a valid `.aac` file we can hand to AVAssetReader.
 ///
-/// Internal (not `private`) so the experimental live-caption spike
-/// (`LiveCaptionSpike`) can reuse the exact same MPEG-TS → ADTS demux to feed
-/// on-device speech recognition without duplicating the parser.
+/// Internal (not `private`) so the live-caption engine (`LiveCaptionEngine`)
+/// can reuse the exact same MPEG-TS → ADTS demux to feed on-device speech
+/// recognition without duplicating the parser.
 enum TSAudioExtractor {
   private static let packetSize = 188
 

@@ -215,6 +215,8 @@ extension PlayerView {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
+        captionsSettingsRow
+
         if showLatencyDiagnostics {
           // Advanced kill-switch: prefetch promotion (the low-latency proxy) is
           // on by default and powers both Auto profiles. Exposed here only so it
@@ -612,6 +614,42 @@ extension PlayerView {
   }
 
   // MARK: Settings controls
+
+  /// "Captions (beta)" — on-device live caption generation. Shown as a toggle on
+  /// capable hardware (tvOS 26+); on older OSes it degrades to a disabled
+  /// explanatory row rather than vanishing silently, so the capability is
+  /// discoverable. Live-only (the audio side-channel it rides doesn't exist for
+  /// VOD), which the caption text notes.
+  @ViewBuilder
+  var captionsSettingsRow: some View {
+    if CaptionController.isSupported {
+      VStack(alignment: .leading, spacing: 7) {
+        settingsPill(
+          title: captionsEnabled ? "Captions (beta) On" : "Captions (beta) Off",
+          isSelected: captionsEnabled,
+          focusTag: .chatCaptionsToggle
+        ) {
+          captionsEnabled.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        Text("On-device live captions, generated from the stream audio. English, live channels only — experimental.")
+          .font(.caption2)
+          .foregroundStyle(.white.opacity(0.6))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    } else {
+      VStack(alignment: .leading, spacing: 7) {
+        Text("Captions (beta)")
+          .font(.subheadline)
+          .foregroundStyle(.white.opacity(0.4))
+        Text("On-device live captions require tvOS 26 or later on a supported Apple TV.")
+          .font(.caption2)
+          .foregroundStyle(.white.opacity(0.4))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+  }
 
   func settingsPill(
     title: String,
