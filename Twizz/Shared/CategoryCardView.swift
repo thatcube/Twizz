@@ -31,11 +31,14 @@ struct CategoryCardView: View {
           .font(.subheadline.weight(.semibold))
           .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
           .lineLimit(2, reservesSpace: true)
+          .minimumScaleFactor(0.8)
 
         if let viewers = category.viewerCount {
           Text("\(viewers) watching")
             .font(.caption2)
             .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
         } else {
           Text(" ")
             .font(.caption2)

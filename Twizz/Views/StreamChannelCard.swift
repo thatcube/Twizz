@@ -129,11 +129,13 @@ struct StreamChannelCard: View {
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
             .lineLimit(1)
+            .minimumScaleFactor(0.7)
 
           Text(channel.title.isEmpty ? "No title" : channel.title)
             .font(.footnote)
             .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
             .lineLimit(2, reservesSpace: true)
+            .minimumScaleFactor(0.8)
             .frame(maxWidth: .infinity, alignment: .leading)
 
           if showsGameName {
@@ -141,6 +143,7 @@ struct StreamChannelCard: View {
               .font(.caption2)
               .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
               .lineLimit(1)
+              .minimumScaleFactor(0.7)
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -229,15 +232,19 @@ struct StreamChannelCard: View {
           Text("LIVE")
             .font(.caption2.weight(.bold))
             .foregroundStyle(Color.white)
+            .lineLimit(1)
         }
         if let viewerCount = channel.viewerCount {
           Text("\(viewerCount) watching")
             .font(.caption2)
             .foregroundStyle(Color.white.opacity(0.92))
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
         } else if !channel.isLive {
           Text("Offline")
             .font(.caption2)
             .foregroundStyle(Color.white.opacity(0.92))
+            .lineLimit(1)
         }
       }
       .padding(12)

@@ -145,6 +145,8 @@ struct CategoryStreamsView: View {
             VStack(alignment: .leading, spacing: 2) {
               Text(category.name)
                 .font(.title.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .accessibilityAddTraits(.isHeader)
               if let viewers = category.viewerCount {
                 Text("\(viewers) watching")

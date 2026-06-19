@@ -31,11 +31,13 @@ struct MediaContentCard: View {
           .font(.subheadline.weight(.semibold))
           .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
           .lineLimit(1)
+          .minimumScaleFactor(0.7)
 
         Text(subtitle.isEmpty ? " " : subtitle)
           .font(.footnote)
           .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
           .lineLimit(2, reservesSpace: true)
+          .minimumScaleFactor(0.8)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
