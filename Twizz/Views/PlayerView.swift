@@ -2737,6 +2737,7 @@ struct ChatInputButtonStyle: ButtonStyle {
 /// element growing. Falls back to `.ultraThinMaterial` on systems older than tvOS 26.
 struct ChatGlassFieldStyle: ViewModifier {
   let isFocused: Bool
+  @Environment(\.glassDisabled) private var glassDisabled
 
   private var shape: Capsule {
     Capsule(style: .continuous)
@@ -2744,7 +2745,15 @@ struct ChatGlassFieldStyle: ViewModifier {
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .background(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(Color.twizzOpaqueGlass), in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.0 : 0.16), lineWidth: 0.75))
+        .scaleEffect(isFocused ? 1.05 : 1.0)
+        .shadow(
+          color: .black.opacity(isFocused ? 0.22 : 0.18),
+          radius: isFocused ? 10 : 5, x: 0, y: isFocused ? 4 : 2)
+    } else if #available(tvOS 26.0, *) {
       content
         .glassEffect(isFocused ? .regular.tint(.white) : .regular, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.0 : 0.10), lineWidth: 0.75))
@@ -3142,6 +3151,7 @@ private struct ChatSyncSendIndicator: View {
 /// otherwise leaves it as a full-height docked panel.
 private struct GlassChatPaneStyle: ViewModifier {
   let enabled: Bool
+  @Environment(\.glassDisabled) private var glassDisabled
 
   /// Inset between the glass panel and the screen edges.
   static let edgeInset: CGFloat = 24
@@ -3163,7 +3173,13 @@ private struct GlassChatPaneStyle: ViewModifier {
 
   @ViewBuilder
   private func glassBody(_ content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .frame(maxHeight: .infinity)
+        .background(Color.twizzOpaqueGlass, in: shape)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
+    } else if #available(tvOS 26.0, *) {
       content
         .frame(maxHeight: .infinity)
         .clipShape(shape)
@@ -3184,13 +3200,18 @@ private struct GlassChatPaneStyle: ViewModifier {
 /// hairline. Unlike `GlassChatPaneStyle` it does not clip or inset, so the
 /// panel can size to its content and its inner focus effects can lift freely.
 struct ChatSettingsPanelGlassStyle: ViewModifier {
+  @Environment(\.glassDisabled) private var glassDisabled
   private var shape: RoundedRectangle {
     RoundedRectangle(cornerRadius: 40, style: .continuous)
   }
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .background(Color.twizzOpaqueGlass, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
+    } else if #available(tvOS 26.0, *) {
       content
         // Same darkening scrim the Glass chat pane paints over its glass
         // (ChatView uses Color.black.opacity(0.22)); without it the panel's bare
@@ -3375,9 +3396,15 @@ private struct PlayerInfoBadge: View {
 /// the standard white hairline. Keeps every chip reading at the same darkness
 /// instead of the lighter bare-material look they had before.
 private struct HUDChipGlassStyle: ViewModifier {
+  @Environment(\.glassDisabled) private var glassDisabled
   func body(content: Content) -> some View {
     let shape = Capsule(style: .continuous)
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .background(Color.twizzOpaqueGlass, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
+        .clipShape(shape)
+    } else if #available(tvOS 26.0, *) {
       content
         .background(Color.black.opacity(0.22), in: shape)
         .glassEffect(.regular, in: shape)
@@ -3528,10 +3555,16 @@ private struct RewindScrubBar: View {
 private struct ScrubBarGlassBackground: ViewModifier {
   let shape: RoundedRectangle
   let isFocused: Bool
+  @Environment(\.glassDisabled) private var glassDisabled
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .background(Color.twizzOpaqueGlass, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.30 : 0.16), lineWidth: 1))
+        .clipShape(shape)
+    } else if #available(tvOS 26.0, *) {
       content
         .glassEffect(isFocused ? .regular.tint(.white.opacity(0.10)) : .regular, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.22 : 0.10), lineWidth: 1))

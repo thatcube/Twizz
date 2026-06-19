@@ -14,6 +14,7 @@ struct GoLiveToastView: View {
   let onWatch: () -> Void
 
   @FocusState private var watchFocused: Bool
+  @Environment(\.glassDisabled) private var glassDisabled
 
   /// Large channel avatar; the toast's height tracks it (avatar + equal inset).
   private let avatarSize: CGFloat = 80
@@ -50,7 +51,10 @@ struct GoLiveToastView: View {
     .padding(.vertical, avatarInset)
     .padding(.trailing, 24)
     .background {
-      if #available(tvOS 26.0, *) {
+      if glassDisabled {
+        Capsule().fill(Color.twizzOpaqueGlass)
+          .overlay(Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 1))
+      } else if #available(tvOS 26.0, *) {
         Capsule().glassEffect(.regular, in: Capsule())
       } else {
         Capsule().fill(.ultraThinMaterial)
@@ -70,7 +74,7 @@ struct GoLiveToastView: View {
       image.resizable().scaledToFill()
     } placeholder: {
       ZStack {
-        Circle().fill(.ultraThinMaterial)
+        Circle().fill(glassDisabled ? AnyShapeStyle(Color.twizzOpaqueGlass) : AnyShapeStyle(.ultraThinMaterial))
         Icon(glyph: .broadcast, size: avatarSize * 0.45)
           .foregroundStyle(.red)
       }

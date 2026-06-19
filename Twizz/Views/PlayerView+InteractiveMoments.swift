@@ -428,6 +428,7 @@ private struct HypeTrainCountdown: View {
 /// No tinted border — the glass is left to read naturally.
 private struct MomentDockSurface: ViewModifier {
   let style: MomentDockStyle
+  @Environment(\.glassDisabled) private var glassDisabled
 
   private var shape: RoundedRectangle {
     RoundedRectangle(cornerRadius: 30, style: .continuous)
@@ -443,7 +444,11 @@ private struct MomentDockSurface: ViewModifier {
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .background(style.isLight ? Color.white : Color.twizzOpaqueGlass, in: shape)
+        .overlay(shape.strokeBorder(hairline, lineWidth: 1))
+    } else if #available(tvOS 26.0, *) {
       content
         .background(scrim, in: shape)
         .glassEffect(.regular, in: shape)

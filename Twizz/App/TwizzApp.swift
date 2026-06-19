@@ -17,6 +17,7 @@ struct TwizzApp: App {
         .onOpenURL { url in
           deepLinkRouter.handle(url)
         }
+        .resolveGlassDisabled()
     }
   }
 }

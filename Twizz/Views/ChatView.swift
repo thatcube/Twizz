@@ -627,11 +627,16 @@ extension String {
 /// lifted glass the chat composer uses when focused so they read as interactive.
 /// Falls back to a solid white capsule on tvOS versions before Liquid Glass.
 private struct PausedPillGlassStyle: ViewModifier {
+  @Environment(\.glassDisabled) private var glassDisabled
   private var shape: Capsule { Capsule(style: .continuous) }
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .background(.white, in: shape)
+        .shadow(color: .black.opacity(0.22), radius: 10, x: 0, y: 4)
+    } else if #available(tvOS 26.0, *) {
       content
         .glassEffect(.regular.tint(.white), in: shape)
         .shadow(color: .black.opacity(0.22), radius: 10, x: 0, y: 4)

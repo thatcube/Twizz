@@ -44,6 +44,7 @@ struct HomeView: View {
 
   @Environment(\.colorScheme) private var systemColorScheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.glassDisabled) private var glassDisabled
   @FocusState private var focusedItemID: String?
 
   private let firstLaunchSignInPromptKey = "hasPromptedFirstLaunchSignIn"
@@ -615,7 +616,7 @@ struct HomeView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(
         RoundedRectangle(cornerRadius: 28)
-          .fill(.ultraThinMaterial)
+          .fill(glassDisabled ? AnyShapeStyle(Color.twizzOpaqueGlass) : AnyShapeStyle(.ultraThinMaterial))
       )
       .overlay(
         RoundedRectangle(cornerRadius: 28)
@@ -793,6 +794,7 @@ enum RefreshToastState {
 /// re-tap of the Home tab gives the viewer visible feedback.
 private struct RefreshToastView: View {
   let state: RefreshToastState
+  @Environment(\.glassDisabled) private var glassDisabled
 
   var body: some View {
     HStack(spacing: 14) {
@@ -811,7 +813,10 @@ private struct RefreshToastView: View {
     .padding(.horizontal, 30)
     .padding(.vertical, 18)
     .background {
-      if #available(tvOS 26.0, *) {
+      if glassDisabled {
+        Capsule().fill(Color.twizzOpaqueGlass)
+          .overlay(Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 1))
+      } else if #available(tvOS 26.0, *) {
         Capsule().glassEffect(.regular, in: Capsule())
       } else {
         Capsule().fill(.ultraThinMaterial)
