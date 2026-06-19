@@ -574,6 +574,7 @@ struct PlayerView: View {
     case sleepKeepWatching, sleepResume
     case simulateRaidButton
     case simulateOfflineButton
+    case simulateGoLiveButton
     case chatSettingsButton
     // Stream Rewind transport bar
     case rewindScrubber
@@ -2092,6 +2093,7 @@ struct PlayerView: View {
       .chatDiagnosticsToggle,
       .simulateRaidButton,
       .simulateOfflineButton,
+      .simulateGoLiveButton,
       .youtubeMergeToggle,
       .youtubeMergeURL,
       .chatAdvancedBack,
@@ -2437,6 +2439,20 @@ struct PlayerView: View {
           ) {
             showChatSettings = false
             presentOfflineState()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          // Debug-only: real follows rarely go live on cue, so this injects a
+          // simulated "just went live" toast (for Monstercat, a near-24/7
+          // stream) to exercise the toast, its auto-dismiss countdown, and the
+          // "Watch" channel switch. Visible only while Diagnostics is enabled.
+          settingsPill(
+            title: "Simulate Go Live",
+            isSelected: false,
+            focusTag: .simulateGoLiveButton
+          ) {
+            showChatSettings = false
+            goLive?.simulateGoLive()
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }
