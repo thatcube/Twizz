@@ -70,11 +70,21 @@ struct LiveGoal: Equatable, Identifiable {
 
 /// A live Hype Train on the watched channel.
 struct LiveHypeTrain: Equatable, Identifiable {
+  /// Where the train is in its lifecycle. `approaching` is the pre-start window
+  /// where contributions are building toward kicking the train off; `active` is
+  /// a running train climbing levels; `completed` is the brief post-end state.
+  enum Phase: Equatable { case approaching, active, completed }
+
   let id: String
   let level: Int
+  /// Points toward the *current* level's goal (not the cumulative train total).
   let progress: Int
   let goal: Int
-  let isActive: Bool
+  let phase: Phase
+  /// When the current level (or the approaching window) runs out, if known.
+  let expiresAt: Date?
+
+  var isActive: Bool { phase == .active }
 
   var fraction: Double {
     goal > 0 ? min(1, Double(progress) / Double(goal)) : 0
@@ -410,26 +420,60 @@ final class HermesEventService {
     // v2 nests progress under various keys; probe the common ones.
     let progressDict =
       (data["progress"] as? [String: Any]) ?? (data["hype_train"] as? [String: Any]) ?? data
-    let level = Self.intValue(progressDict["level"]) ?? Self.intValue((progressDict["level"] as? [String: Any])?["value"]) ?? 0
-    let total = Self.intValue(progressDict["total"]) ?? Self.intValue(progressDict["progress"]) ?? 0
+    let levelDict = progressDict["level"] as? [String: Any]
+
+    let level = Self.intValue(progressDict["level"]) ?? Self.intValue(levelDict?["value"]) ?? 0
+    // Progress toward the *current level* — `value` (v2 nested) or `progress`
+    // (v1 flat). Deliberately NOT `total`, which is the cumulative train score
+    // and would peg the bar at 100% once past level one.
+    let levelProgress =
+      Self.intValue(progressDict["value"]) ?? Self.intValue(progressDict["progress"]) ?? 0
     let goalValue =
-      Self.intValue(progressDict["goal"]) ?? Self.intValue((progressDict["level"] as? [String: Any])?["goal"]) ?? 0
+      Self.intValue(progressDict["goal"]) ?? Self.intValue(levelDict?["goal"]) ?? 0
     let id = (data["id"] as? String) ?? "hype-train"
+
+    let approaching = type.contains("approach")
     let ended = type.contains("end") || type.contains("complete")
 
-    guard goalValue > 0 || ended else { return }
+    let expiresAt =
+      Self.parseDate(progressDict["expires_at"] ?? data["expires_at"])
+      ?? Self.remainingDate(progressDict["remaining_seconds"] ?? data["remaining_seconds"])
+
+    guard goalValue > 0 || ended || approaching else { return }
+
+    let phase: LiveHypeTrain.Phase = ended ? .completed : (approaching ? .approaching : .active)
     hypeTrain = LiveHypeTrain(
-      id: id, level: max(level, 1), progress: total, goal: max(goalValue, total), isActive: !ended)
+      id: id,
+      level: max(level, 1),
+      progress: levelProgress,
+      goal: max(goalValue, levelProgress),
+      phase: phase,
+      expiresAt: ended ? nil : expiresAt)
 
     hypeTrainClearTask?.cancel()
-    if ended {
+    switch phase {
+    case .completed:
       hypeTrainClearTask = Task { [weak self] in
         try? await Task.sleep(for: Self.endedGrace)
         guard !Task.isCancelled else { return }
         self?.hypeTrain = nil
         self?.recompute()
       }
-    } else {
+    case .approaching:
+      // An approaching train that never starts should dismiss itself once its
+      // window lapses, rather than hang as a permanent "incoming" banner.
+      if let expiresAt {
+        let delay = max(0, expiresAt.timeIntervalSinceNow) + Double(Self.endedGrace.components.seconds)
+        hypeTrainClearTask = Task { [weak self] in
+          try? await Task.sleep(for: .seconds(delay))
+          guard !Task.isCancelled else { return }
+          self?.hypeTrain = nil
+          self?.recompute()
+        }
+      } else {
+        hypeTrainClearTask = nil
+      }
+    case .active:
       hypeTrainClearTask = nil
     }
     recompute()
@@ -465,6 +509,40 @@ final class HermesEventService {
     case let n as NSNumber: return n.intValue
     default: return nil
     }
+  }
+
+  private static let isoFractional: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+  }()
+  private static let isoPlain: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+  }()
+
+  /// Parse an ISO8601 timestamp. Twitch sends up to nine fractional-second
+  /// digits, which `ISO8601DateFormatter` rejects, so we cap them to three.
+  private static func parseDate(_ any: Any?) -> Date? {
+    guard let raw = any as? String, !raw.isEmpty else { return nil }
+    let s = capFractionalSeconds(raw)
+    return isoFractional.date(from: s) ?? isoPlain.date(from: s)
+  }
+
+  private static func capFractionalSeconds(_ s: String) -> String {
+    guard let dot = s.firstIndex(of: ".") else { return s }
+    let firstFraction = s.index(after: dot)
+    var end = firstFraction
+    while end < s.endIndex, s[end].isNumber { end = s.index(after: end) }
+    let capped = s[firstFraction..<end].prefix(3)
+    return String(s[..<firstFraction]) + capped + String(s[end...])
+  }
+
+  /// Turn a `remaining_seconds` countdown into an absolute expiry instant.
+  private static func remainingDate(_ any: Any?) -> Date? {
+    guard let secs = intValue(any), secs > 0 else { return nil }
+    return Date().addingTimeInterval(TimeInterval(secs))
   }
 
   private static func randomID(_ length: Int = 20) -> String {
