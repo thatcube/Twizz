@@ -209,11 +209,6 @@ struct PlayerView: View {
   /// stays inside the retained window. Also gates the stall watchdog so an
   /// intentional pause is never mistaken for a freeze.
   @State private var isUserPaused = false
-  /// The in-progress broadcast VOD for "From Start", when the streamer stores
-  /// past broadcasts. `nil` hides the affordance.
-  @State private var currentBroadcastVOD: (id: String, title: String)?
-  /// Presented VOD ("From Start" / deep rewind) in the native on-demand player.
-  @State private var rewindVODItem: OnDemandItem?
 
   private var wallClockLatencySeconds: Double? {
     get { mon.wallClockLatencySeconds }
@@ -438,7 +433,7 @@ struct PlayerView: View {
     case simulateOfflineButton
     case chatSettingsButton
     // Stream Rewind transport bar
-    case rewindBack, rewindPlayPause, rewindForward, rewindLive, rewindFromStart
+    case rewindScrubber
     // Main settings page
     case chatPresetOption(Int)
     case chatAdvancedButton
@@ -827,17 +822,12 @@ struct PlayerView: View {
       // when the channel changes (e.g. following a raid) so it can't leak.
       experimentalYouTubeMergeChannelOrURL = ""
       youtubeAutoResolvedTarget = ""
-      // The rewind window is per-stream: drop the previous channel's DVR history
-      // and reset its VOD ("From Start") target.
+      // The rewind window is per-stream: drop the previous channel's DVR history.
       lowLatencyProxy.resetDVR()
-      currentBroadcastVOD = nil
       isUserPaused = false
     }
     .task(id: activeChannel) {
       await refreshYouTubeAutoTarget()
-    }
-    .task(id: activeChannel) {
-      await refreshCurrentBroadcastVOD()
     }
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
       if suppressLowLatencyToggleReload {
@@ -975,10 +965,6 @@ struct PlayerView: View {
     .onPlayPauseCommand {
       guard streamRewindEnabled, errorMessage == nil, !isOffline, !isLoading else { return }
       toggleRewindPlayPause()
-    }
-    .fullScreenCover(item: $rewindVODItem) { item in
-      OnDemandPlayerView(item: item)
-        .environment(\.themePalette, palette)
     }
   }
 
@@ -1137,7 +1123,7 @@ struct PlayerView: View {
           case .left:
             focus = .streamInfo
           case .down:
-            if streamRewindEnabled { focus = .rewindPlayPause }
+            if streamRewindEnabled { focus = .rewindScrubber }
           default:
             break
           }
@@ -1219,7 +1205,7 @@ struct PlayerView: View {
           case .right:
             focus = .chatSettingsButton
           case .down:
-            if streamRewindEnabled { focus = .rewindPlayPause }
+            if streamRewindEnabled { focus = .rewindScrubber }
           default:
             break
           }
@@ -1239,7 +1225,7 @@ struct PlayerView: View {
           case .right:
             focus = .chatToggle
           case .down:
-            if streamRewindEnabled { focus = .rewindPlayPause }
+            if streamRewindEnabled { focus = .rewindScrubber }
           default:
             break
           }
@@ -1265,7 +1251,7 @@ struct PlayerView: View {
               focus = .chatInput
             }
           case .down:
-            if streamRewindEnabled { focus = .rewindPlayPause }
+            if streamRewindEnabled { focus = .rewindScrubber }
           default:
             break
           }
@@ -1286,13 +1272,11 @@ struct PlayerView: View {
       if streamRewindEnabled {
         RewindTransportBar(
           readout: rewindReadout,
-          showFromStart: currentBroadcastVOD != nil,
           focus: $focus,
-          onBack: { rewindStep(-rewindStepSeconds) },
-          onPlayPause: { toggleRewindPlayPause() },
-          onForward: { rewindStep(rewindStepSeconds) },
-          onLive: { backToLive() },
-          onFromStart: { presentBroadcastFromStart() }
+          onScrubBack: { rewindStep(-rewindStepSeconds) },
+          onScrubForward: { rewindStep(rewindStepSeconds) },
+          onTogglePause: { toggleRewindPlayPause() },
+          onLeave: { focus = .quality }
         )
         .focusSection()
         .frame(maxWidth: .infinity)
@@ -1713,8 +1697,7 @@ struct PlayerView: View {
 
   private func isControlFocus(_ focus: Focusable) -> Bool {
     switch focus {
-    case .streamInfo, .quality, .chatToggle, .chatInput,
-      .rewindBack, .rewindPlayPause, .rewindForward, .rewindLive, .rewindFromStart:
+    case .streamInfo, .quality, .chatToggle, .chatInput, .rewindScrubber:
       return true
     default:
       return false
@@ -2045,7 +2028,7 @@ struct PlayerView: View {
         }
 
         Text(
-          "Low-Latency Mode rewrites Twitch prefetch segments to reduce delay. Stream Rewind keeps recent video buffered so you can pause and rewind live — press play/pause or open the on-screen controls to scrub, jump back to live, or watch from the start. Diagnostics shows live render/bitrate/buffer and freeze/jump events."
+          "Low-Latency Mode rewrites Twitch prefetch segments to reduce delay. Stream Rewind keeps recent video buffered so you can pause and rewind live — focus the scrub bar, then swipe or press left/right to jump back or forward 10s and click or press play/pause to pause. Diagnostics shows live render/bitrate/buffer and freeze/jump events."
         )
         .font(.caption2)
         .foregroundStyle(.white.opacity(0.6))
@@ -3822,10 +3805,14 @@ struct PlayerView: View {
       isAtLiveEdge: atLive)
   }
 
-  /// Seeks relative to the current playhead, clamped to the retained window.
+  /// Seeks relative to the current playhead. Forward seeks clamp to a safe live
+  /// point (the proxy inflates the seekable edge with the promoted prefetch tail,
+  /// and seeking onto that inflated edge can freeze), so swiping right repeatedly
+  /// lands cleanly back at live.
   private func rewindStep(_ delta: Double) {
     guard let window = currentSeekWindow() else { return }
-    let target = min(max(window.now + delta, window.start), window.end - 0.5)
+    let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
+    let target = min(max(window.now + delta, window.start), liveCap)
     seekRewind(to: target)
   }
 
@@ -3842,21 +3829,6 @@ struct PlayerView: View {
     scheduleHide()
   }
 
-  /// Jumps back to the live edge. The proxy inflates the seekable edge with the
-  /// promoted prefetch tail, and a zero-tolerance seek to that inflated edge can
-  /// freeze, so target a small offset behind the edge with default tolerance.
-  private func backToLive() {
-    guard let window = currentSeekWindow() else { return }
-    let target = max(window.end - targetLiveEdgeSeconds, window.start)
-    isUserPaused = false
-    let time = CMTime(seconds: target, preferredTimescale: 600)
-    player.currentItem?.seek(to: time, completionHandler: { [player] _ in
-      player.play()
-    })
-    updateRewindReadout()
-    scheduleHide()
-  }
-
   /// Seeks to an absolute position on the player timeline (default tolerance so
   /// the seek lands on a real segment boundary inside the retained window).
   private func seekRewind(to seconds: Double) {
@@ -3867,22 +3839,6 @@ struct PlayerView: View {
     })
     updateRewindReadout()
     scheduleHide()
-  }
-
-  /// Opens the in-progress broadcast VOD ("From Start") in the native on-demand
-  /// player for rewind deeper than the retained live window.
-  private func presentBroadcastFromStart() {
-    guard let vod = currentBroadcastVOD else { return }
-    rewindVODItem = .vod(id: vod.id, title: vod.title)
-  }
-
-  /// Fetches the channel's in-progress broadcast VOD so "From Start" can offer
-  /// deep rewind. `nil` (no stored broadcasts) hides the affordance.
-  private func refreshCurrentBroadcastVOD() async {
-    let login = activeChannel
-    let vod = await PlaybackService.currentBroadcastVOD(login: login)
-    guard login == activeChannel else { return }
-    currentBroadcastVOD = vod
   }
 
   // MARK: - Offline empty state
@@ -4701,18 +4657,19 @@ private final class RewindReadout {
   }
 }
 
-/// Custom DVR transport bar shown along the bottom of the live player. The native
-/// `AVPlayerViewController` controls are disabled (the player surface is passive),
-/// so all seeking is driven through these focusable SwiftUI controls.
+/// Single focusable DVR scrub bar shown along the bottom of the live player,
+/// modeled on YouTube's live transport bar. The native `AVPlayerViewController`
+/// controls are disabled (the player surface is passive), so the whole bar is one
+/// focus target: left/right (Siri Remote buttons or trackpad swipes) step ±10s,
+/// clicking it (or the remote play/pause button) toggles pause, and swiping right
+/// repeatedly returns to the live edge.
 private struct RewindTransportBar: View {
   @Bindable var readout: RewindReadout
-  let showFromStart: Bool
   @FocusState.Binding var focus: PlayerView.Focusable?
-  let onBack: () -> Void
-  let onPlayPause: () -> Void
-  let onForward: () -> Void
-  let onLive: () -> Void
-  let onFromStart: () -> Void
+  let onScrubBack: () -> Void
+  let onScrubForward: () -> Void
+  let onTogglePause: () -> Void
+  let onLeave: () -> Void
 
   private func behindLabel() -> String {
     if readout.isAtLiveEdge { return "LIVE" }
@@ -4723,122 +4680,80 @@ private struct RewindTransportBar: View {
   }
 
   var body: some View {
+    let isFocused = focus == .rewindScrubber
     let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-    return VStack(spacing: 12) {
-      // Position track: oldest retained moment (left) -> live edge (right).
-      HStack(spacing: 12) {
-        GeometryReader { geo in
-          ZStack(alignment: .leading) {
-            Capsule().fill(.white.opacity(0.22))
-            Capsule()
-              .fill(readout.isAtLiveEdge ? Color.red : Color.white)
-              .frame(width: max(6, geo.size.width * readout.positionFraction))
+    let trackHeight: CGFloat = isFocused ? 8 : 5
+    let handleHeight: CGFloat = isFocused ? 34 : 22
+    let fillColor = readout.isAtLiveEdge ? Color.red : Color.white
+
+    return HStack(spacing: 16) {
+      GeometryReader { geo in
+        let width = geo.size.width
+        let x = max(0, min(width, width * readout.positionFraction))
+        ZStack(alignment: .leading) {
+          // Full track (retained window).
+          Capsule()
+            .fill(.white.opacity(0.22))
+            .frame(height: trackHeight)
+          // Played / behind-to-live portion.
+          Capsule()
+            .fill(fillColor)
+            .frame(width: x, height: trackHeight)
+          // Vertical playhead indicator that slides as you scrub.
+          RoundedRectangle(cornerRadius: 3, style: .continuous)
+            .fill(.white)
+            .frame(width: 6, height: handleHeight)
+            .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
+            .offset(x: x - 3)
+          // Pause glyph rides the playhead while paused.
+          if readout.isPaused {
+            Image(systemName: "pause.fill")
+              .font(.caption2)
+              .foregroundStyle(.black)
+              .frame(width: 18, height: 18)
+              .background(Circle().fill(.white))
+              .offset(x: x - 9)
           }
         }
-        .frame(height: 6)
-
-        HStack(spacing: 6) {
-          if readout.isAtLiveEdge {
-            Circle().fill(.red).frame(width: 8, height: 8)
-          }
-          Text(behindLabel())
-            .font(.caption)
-            .fontWeight(.semibold)
-            .foregroundStyle(.white)
-            .monospacedDigit()
-        }
-        .frame(minWidth: 64, alignment: .trailing)
+        .frame(height: handleHeight)
+        .frame(maxHeight: .infinity, alignment: .center)
       }
+      .frame(height: 40)
+      .animation(.easeInOut(duration: 0.15), value: isFocused)
 
-      HStack(spacing: 18) {
-        controlButton(
-          system: "gobackward.10", tag: .rewindBack, action: onBack,
-          left: nil, right: .rewindPlayPause)
-
-        controlButton(
-          system: readout.isPaused ? "play.fill" : "pause.fill",
-          tag: .rewindPlayPause, action: onPlayPause,
-          left: .rewindBack, right: .rewindForward)
-
-        controlButton(
-          system: "goforward.10", tag: .rewindForward, action: onForward,
-          left: .rewindPlayPause, right: .rewindLive)
-
-        liveButton
-
-        if showFromStart {
-          fromStartButton
+      HStack(spacing: 6) {
+        if readout.isAtLiveEdge {
+          Circle().fill(.red).frame(width: 8, height: 8)
         }
+        Text(behindLabel())
+          .font(.callout)
+          .fontWeight(.semibold)
+          .foregroundStyle(.white)
+          .monospacedDigit()
       }
+      .frame(minWidth: 72, alignment: .trailing)
     }
     .padding(.horizontal, 26)
-    .padding(.vertical, 18)
+    .padding(.vertical, 16)
     .background(.ultraThinMaterial, in: shape)
-    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    .overlay(
+      shape.strokeBorder(
+        isFocused ? .white.opacity(0.85) : .white.opacity(0.12),
+        lineWidth: isFocused ? 2 : 1)
+    )
     .clipShape(shape)
-  }
-
-  private func controlButton(
-    system: String,
-    tag: PlayerView.Focusable,
-    action: @escaping () -> Void,
-    left: PlayerView.Focusable?,
-    right: PlayerView.Focusable?
-  ) -> some View {
-    Button(action: action) {
-      Image(systemName: system)
-        .font(.title3)
-        .frame(width: 44, height: 44)
-    }
-    .buttonStyle(.card)
-    .focused($focus, equals: tag)
+    .animation(.easeInOut(duration: 0.15), value: isFocused)
+    .focusable(true)
+    .focused($focus, equals: .rewindScrubber)
     .onMoveCommand { dir in
       switch dir {
-      case .left: if let left { focus = left }
-      case .right: if let right { focus = right }
-      case .up: focus = .quality
+      case .left: onScrubBack()
+      case .right: onScrubForward()
+      case .up: onLeave()
       default: break
       }
     }
-  }
-
-  private var liveButton: some View {
-    Button(action: onLive) {
-      Text("LIVE")
-        .font(.callout)
-        .fontWeight(.bold)
-        .padding(.horizontal, 14)
-        .frame(height: 44)
-    }
-    .buttonStyle(.card)
-    .focused($focus, equals: .rewindLive)
-    .onMoveCommand { dir in
-      switch dir {
-      case .left: focus = .rewindForward
-      case .right: if showFromStart { focus = .rewindFromStart }
-      case .up: focus = .quality
-      default: break
-      }
-    }
-  }
-
-  private var fromStartButton: some View {
-    Button(action: onFromStart) {
-      Label("From Start", systemImage: "backward.end.fill")
-        .font(.callout)
-        .fontWeight(.semibold)
-        .padding(.horizontal, 14)
-        .frame(height: 44)
-    }
-    .buttonStyle(.card)
-    .focused($focus, equals: .rewindFromStart)
-    .onMoveCommand { dir in
-      switch dir {
-      case .left: focus = .rewindLive
-      case .up: focus = .quality
-      default: break
-      }
-    }
+    .onTapGesture { onTogglePause() }
   }
 }
 
