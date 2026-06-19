@@ -43,6 +43,10 @@ fastlane/Preview.html
 fastlane/test_output/
 fastlane/screenshots/**/*.png
 
+# Personal/maintainer-local agent instructions — never commit
+# (real personal instructions live in ~/.copilot/copilot-instructions.md)
+AGENTS.local.md
+
 # Misc
 *.log
 
