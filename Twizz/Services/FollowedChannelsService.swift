@@ -20,14 +20,19 @@ final class FollowedChannelsService {
   /// used to guarantee recommendations never include someone they already follow —
   /// even a live follow beyond the first page of `/streams/followed`.
   private(set) var followedLogins: Set<String> = []
-  /// Every channel the viewer follows (online **and** offline), sorted by display
-  /// name. Drives the go-live alert per-channel picker, which needs the whole
-  /// follow list — not just whoever happens to be live in `channels`.
-  private(set) var followedBroadcasters: [FollowedBroadcasterSummary] = []
   private(set) var isLoading = false
   private(set) var isUsingDemoData = false
   private(set) var errorMessage: String?
   private(set) var lastUpdatedAt: Date?
+
+  /// The full "Following" directory — every channel the viewer follows, live
+  /// **and** offline — sorted live-first. Populated lazily by `loadDirectory`
+  /// when the directory screen opens, so its heavier multi-batch fetch never
+  /// runs as part of the Home refresh.
+  private(set) var directory: [FollowedChannel] = []
+  private(set) var isLoadingDirectory = false
+  private(set) var directoryErrorMessage: String?
+  private(set) var directoryLoadedAt: Date?
 
   func refresh(using auth: TwitchAuthSession) async {
     isLoading = true
@@ -125,11 +130,238 @@ final class FollowedChannelsService {
     } else {
       followedCategories = [:]
       followedLogins = []
-      followedBroadcasters = channels.map {
-        FollowedBroadcasterSummary(id: $0.id, login: $0.login, displayName: $0.displayName)
-      }
-      .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
+  }
+
+  /// Loads the full Following directory — every followed channel, live and
+  /// offline — into `directory`, sorted live-first. Lazy and idempotent: a cached
+  /// result is reused unless `force` is set. Requires a real authenticated
+  /// session (the directory has no demo/trending equivalent).
+  func loadDirectory(using auth: TwitchAuthSession, force: Bool = false) async {
+    guard auth.isAuthenticated, let userID = auth.userID else { return }
+    guard let clientID = resolveClientID(),
+          !Self.disallowedClientIDs.contains(clientID.lowercased())
+    else { return }
+
+    if !force, directoryLoadedAt != nil { return }
+    if isLoadingDirectory { return }
+
+    isLoadingDirectory = true
+    directoryErrorMessage = nil
+    defer { isLoadingDirectory = false }
+
+    let accessToken: String
+    if let token = auth.accessToken {
+      accessToken = token
+    } else {
+      do {
+        accessToken = try await auth.refreshAccessTokenIfNeeded(force: true)
+      } catch {
+        directoryErrorMessage =
+          "Could not load your follows (\(describe(error)))."
+        return
+      }
+    }
+
+    do {
+      directory = try await fetchFollowingDirectory(
+        clientID: clientID, accessToken: accessToken, userID: userID)
+      directoryLoadedAt = Date()
+    } catch let error as TwitchHelixRequestError where error.status == 401 {
+      do {
+        let refreshed = try await auth.refreshAccessTokenIfNeeded(force: true)
+        directory = try await fetchFollowingDirectory(
+          clientID: clientID, accessToken: refreshed, userID: userID)
+        directoryLoadedAt = Date()
+      } catch {
+        directoryErrorMessage = "Could not load your follows (\(describe(error)))."
+      }
+    } catch {
+      directoryErrorMessage = "Could not load your follows (\(describe(error)))."
+    }
+  }
+
+  /// Assembles the full directory: every followed broadcaster (paginated),
+  /// enriched with live status + viewer counts (`/streams`), identity + profile
+  /// and offline images (`/users`), and last/current title + game (`/channels`),
+  /// all batched at 100 IDs per request, then sorted live-first.
+  private func fetchFollowingDirectory(clientID: String, accessToken: String, userID: String)
+    async throws -> [FollowedChannel]
+  {
+    let broadcasters = try await fetchAllFollowedBroadcasters(
+      clientID: clientID, accessToken: accessToken, userID: userID)
+    guard !broadcasters.isEmpty else { return [] }
+
+    let ids = broadcasters.map(\.broadcasterID)
+    let liveByID = try await fetchLiveStreamsForBroadcasterIDs(
+      clientID: clientID, accessToken: accessToken, broadcasterIDs: ids)
+    let usersByID = try await fetchUsersByID(
+      clientID: clientID, accessToken: accessToken, userIDs: ids)
+    let infoByID = try await fetchChannelInfoByID(
+      clientID: clientID, accessToken: accessToken, broadcasterIDs: ids)
+
+    let channels: [FollowedChannel] = broadcasters.map { broadcaster in
+      let user = usersByID[broadcaster.broadcasterID]
+      if let stream = liveByID[broadcaster.broadcasterID] {
+        return mapStream(stream, profileImageURL: user?.profileImageURL)
+      }
+      let info = infoByID[broadcaster.broadcasterID]
+      let login = user?.login ?? broadcaster.broadcasterLogin ?? ""
+      let name =
+        user?.displayName ?? broadcaster.broadcasterName ?? broadcaster.broadcasterLogin ?? login
+      return FollowedChannel(
+        id: broadcaster.broadcasterID,
+        login: login,
+        displayName: name,
+        title: info?.title ?? "",
+        gameName: info?.gameName ?? "",
+        viewerCount: nil,
+        thumbnailURL: user?.offlineImageURL,
+        profileImageURL: user?.profileImageURL,
+        isLive: false
+      )
+    }
+
+    return channels.sorted { lhs, rhs in
+      if lhs.isLive != rhs.isLive { return lhs.isLive }
+      if lhs.isLive && rhs.isLive {
+        return (lhs.viewerCount ?? 0) > (rhs.viewerCount ?? 0)
+      }
+      return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+    }
+  }
+
+  /// Pages through `/channels/followed` (cursor) so the directory includes every
+  /// follow, not just the first 100.
+  private func fetchAllFollowedBroadcasters(clientID: String, accessToken: String, userID: String)
+    async throws -> [FollowedBroadcaster]
+  {
+    var all: [FollowedBroadcaster] = []
+    var cursor: String?
+
+    repeat {
+      var components = URLComponents(string: "https://api.twitch.tv/helix/channels/followed")!
+      components.queryItems = [
+        URLQueryItem(name: "user_id", value: userID),
+        URLQueryItem(name: "first", value: "100"),
+      ]
+      if let cursor {
+        components.queryItems?.append(URLQueryItem(name: "after", value: cursor))
+      }
+
+      let req = TwitchAPIClient.helixRequest(
+        url: components.url!, accessToken: accessToken, clientID: clientID,
+        accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
+
+      let (data, status) = try await performHelixRequest(req)
+      guard (200...299).contains(status) else {
+        throw makeHelixError(context: "loading followed channels", status: status, data: data)
+      }
+
+      let envelope = try JSONDecoder().decode(FollowedChannelsEnvelope.self, from: data)
+      all.append(contentsOf: envelope.data)
+      let next = envelope.pagination?.cursor?.trimmingCharacters(in: .whitespacesAndNewlines)
+      cursor = (next?.isEmpty == false) ? next : nil
+    } while cursor != nil
+
+    return all
+  }
+
+  /// Live stream lookup for an arbitrary number of broadcasters, batched at 100
+  /// IDs per `/streams` request (the existing single-batch helper caps at 100).
+  private func fetchLiveStreamsForBroadcasterIDs(
+    clientID: String, accessToken: String, broadcasterIDs: [String]
+  ) async throws -> [String: HelixStream] {
+    var result: [String: HelixStream] = [:]
+    let uniqueIDs = Array(Set(broadcasterIDs))
+
+    for chunk in stride(from: 0, to: uniqueIDs.count, by: 100) {
+      let batch = Array(uniqueIDs[chunk..<min(chunk + 100, uniqueIDs.count)])
+      var components = URLComponents(string: "https://api.twitch.tv/helix/streams")!
+      components.queryItems = [URLQueryItem(name: "first", value: "100")]
+      components.queryItems?.append(
+        contentsOf: batch.map { URLQueryItem(name: "user_id", value: $0) })
+
+      let req = TwitchAPIClient.helixRequest(
+        url: components.url!, accessToken: accessToken, clientID: clientID,
+        accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
+
+      let (data, status) = try await performHelixRequest(req)
+      guard (200...299).contains(status) else {
+        throw makeHelixError(context: "loading live stream statuses", status: status, data: data)
+      }
+
+      let streams = try JSONDecoder().decode(FollowedStreamsEnvelope.self, from: data).data
+      for stream in streams {
+        result[stream.userID] = stream
+      }
+    }
+
+    return result
+  }
+
+  /// Identity + profile/offline images for an arbitrary number of users, batched
+  /// at 100 IDs per `/users` request.
+  private func fetchUsersByID(
+    clientID: String, accessToken: String, userIDs: [String]
+  ) async throws -> [String: HelixUser] {
+    var result: [String: HelixUser] = [:]
+    let uniqueIDs = Array(Set(userIDs))
+
+    for chunk in stride(from: 0, to: uniqueIDs.count, by: 100) {
+      let batch = Array(uniqueIDs[chunk..<min(chunk + 100, uniqueIDs.count)])
+      var components = URLComponents(string: "https://api.twitch.tv/helix/users")!
+      components.queryItems = batch.map { URLQueryItem(name: "id", value: $0) }
+
+      let req = TwitchAPIClient.helixRequest(
+        url: components.url!, accessToken: accessToken, clientID: clientID,
+        accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
+
+      let (data, status) = try await performHelixRequest(req)
+      guard (200...299).contains(status) else {
+        throw makeHelixError(context: "loading followed user profiles", status: status, data: data)
+      }
+
+      let payload = try JSONDecoder().decode(HelixUsersEnvelope.self, from: data)
+      for user in payload.data {
+        result[user.id] = user
+      }
+    }
+
+    return result
+  }
+
+  /// Last/current broadcast title + game for an arbitrary number of broadcasters,
+  /// batched at 100 IDs per `/channels` request. Drives offline card metadata.
+  private func fetchChannelInfoByID(
+    clientID: String, accessToken: String, broadcasterIDs: [String]
+  ) async throws -> [String: ChannelInformation] {
+    var result: [String: ChannelInformation] = [:]
+    let uniqueIDs = Array(Set(broadcasterIDs))
+
+    for chunk in stride(from: 0, to: uniqueIDs.count, by: 100) {
+      let batch = Array(uniqueIDs[chunk..<min(chunk + 100, uniqueIDs.count)])
+      var components = URLComponents(string: "https://api.twitch.tv/helix/channels")!
+      components.queryItems = batch.map { URLQueryItem(name: "broadcaster_id", value: $0) }
+
+      let req = TwitchAPIClient.helixRequest(
+        url: components.url!, accessToken: accessToken, clientID: clientID,
+        accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
+
+      let (data, status) = try await performHelixRequest(req)
+      guard (200...299).contains(status) else {
+        throw makeHelixError(context: "loading followed channel info", status: status, data: data)
+      }
+
+      let payload = try JSONDecoder().decode(ChannelInformationEnvelope.self, from: data)
+      for channel in payload.data {
+        if let id = channel.broadcasterID {
+          result[id] = channel
+        }
+      }
+    }
+
+    return result
   }
 
   /// Loads the categories of every channel the viewer follows (online and offline)
@@ -143,7 +375,6 @@ final class FollowedChannelsService {
       guard !ids.isEmpty else {
         followedCategories = [:]
         followedLogins = []
-        followedBroadcasters = []
         return
       }
       followedLogins = Set(
@@ -151,16 +382,6 @@ final class FollowedChannelsService {
           let login = $0.broadcasterLogin?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
           return (login?.isEmpty == false) ? login : nil
         })
-      followedBroadcasters = follows.compactMap { broadcaster in
-        let login = broadcaster.broadcasterLogin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !login.isEmpty else { return nil }
-        let name = broadcaster.broadcasterName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return FollowedBroadcasterSummary(
-          id: broadcaster.broadcasterID,
-          login: login,
-          displayName: (name?.isEmpty == false) ? name! : login)
-      }
-      .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
       followedCategories = try await fetchChannelCategoryCounts(
         clientID: clientID, accessToken: accessToken, broadcasterIDs: ids)
     } catch {
@@ -341,37 +562,22 @@ final class FollowedChannelsService {
   private func fetchFollowedBroadcasters(clientID: String, accessToken: String, userID: String)
     async throws -> [FollowedBroadcaster]
   {
-    var all: [FollowedBroadcaster] = []
-    var cursor: String?
+    var components = URLComponents(string: "https://api.twitch.tv/helix/channels/followed")!
+    components.queryItems = [
+      URLQueryItem(name: "user_id", value: userID),
+      URLQueryItem(name: "first", value: "100"),
+    ]
 
-    // Page through the whole follow list (Helix caps each page at 100) so the
-    // alert picker and the recommendation profile see every channel, not just
-    // the first page.
-    repeat {
-      var components = URLComponents(string: "https://api.twitch.tv/helix/channels/followed")!
-      components.queryItems = [
-        URLQueryItem(name: "user_id", value: userID),
-        URLQueryItem(name: "first", value: "100"),
-      ]
-      if let cursor, !cursor.isEmpty {
-        components.queryItems?.append(URLQueryItem(name: "after", value: cursor))
-      }
+    let req = TwitchAPIClient.helixRequest(
+      url: components.url!, accessToken: accessToken, clientID: clientID,
+      accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
-      let req = TwitchAPIClient.helixRequest(
-        url: components.url!, accessToken: accessToken, clientID: clientID,
-        accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
+    let (data, status) = try await performHelixRequest(req)
+    guard (200...299).contains(status) else {
+      throw makeHelixError(context: "loading followed channels", status: status, data: data)
+    }
 
-      let (data, status) = try await performHelixRequest(req)
-      guard (200...299).contains(status) else {
-        throw makeHelixError(context: "loading followed channels", status: status, data: data)
-      }
-
-      let envelope = try JSONDecoder().decode(FollowedChannelsEnvelope.self, from: data)
-      all.append(contentsOf: envelope.data)
-      cursor = envelope.pagination?.cursor
-    } while cursor?.isEmpty == false
-
-    return all
+    return try JSONDecoder().decode(FollowedChannelsEnvelope.self, from: data).data
   }
 
   private func fetchLiveStreamsByBroadcasterID(
@@ -419,10 +625,7 @@ final class FollowedChannelsService {
     let payload = try JSONDecoder().decode(HelixUsersEnvelope.self, from: data)
     return Dictionary(
       uniqueKeysWithValues: payload.data.compactMap { user in
-        guard let rawProfileURL = user.profileImageURL,
-              !rawProfileURL.isEmpty,
-              let profileURL = URL(string: rawProfileURL)
-        else {
+        guard let profileURL = user.profileImageURL else {
           return nil
         }
         return (user.id, profileURL)
@@ -666,10 +869,14 @@ private struct ChannelInformationEnvelope: Decodable {
 }
 
 private struct ChannelInformation: Decodable {
+  let broadcasterID: String?
   let gameName: String?
+  let title: String?
 
   private enum CodingKeys: String, CodingKey {
+    case broadcasterID = "broadcaster_id"
     case gameName = "game_name"
+    case title
   }
 }
 
@@ -679,11 +886,34 @@ private struct HelixUsersEnvelope: Decodable {
 
 private struct HelixUser: Decodable {
   let id: String
-  let profileImageURL: String?
+  let login: String?
+  let displayName: String?
+  let profileImageURL: URL?
+  let offlineImageURL: URL?
 
   private enum CodingKeys: String, CodingKey {
     case id
+    case login
+    case displayName = "display_name"
     case profileImageURL = "profile_image_url"
+    case offlineImageURL = "offline_image_url"
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(String.self, forKey: .id)
+    login = try container.decodeIfPresent(String.self, forKey: .login)
+    displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+    profileImageURL = Self.url(in: container, forKey: .profileImageURL)
+    offlineImageURL = Self.url(in: container, forKey: .offlineImageURL)
+  }
+
+  private static func url(
+    in container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys
+  ) -> URL? {
+    let raw = try? container.decodeIfPresent(String.self, forKey: key)
+    guard let raw, !raw.isEmpty else { return nil }
+    return URL(string: raw)
   }
 }
 
@@ -697,14 +927,6 @@ private struct FollowedBroadcaster: Decodable {
     case broadcasterLogin = "broadcaster_login"
     case broadcasterName = "broadcaster_name"
   }
-}
-
-/// Lightweight identity for a followed channel (online or offline), used by the
-/// go-live alert per-channel picker.
-struct FollowedBroadcasterSummary: Identifiable, Hashable {
-  let id: String
-  let login: String
-  let displayName: String
 }
 
 private struct TwitchHelixErrorPayload: Decodable {

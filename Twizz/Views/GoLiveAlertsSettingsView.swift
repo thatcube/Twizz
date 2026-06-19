@@ -10,11 +10,19 @@ import SwiftUI
 struct GoLiveAlertsSettingsView: View {
   var follows: FollowedChannelsService
   let settings: GoLiveNotificationSettings
+  let auth: TwitchAuthSession
 
   @Environment(\.themePalette) private var palette
   @AppStorage(GoLiveNotificationPreferences.enabledKey) private var alertsEnabled = true
 
-  private var broadcasters: [FollowedBroadcasterSummary] { follows.followedBroadcasters }
+  /// The full follow list (live + offline) from the shared Following directory,
+  /// sorted by name so the picker is easy to scan. Reuses `loadDirectory` rather
+  /// than fetching the follow list a second time.
+  private var broadcasters: [FollowedChannel] {
+    follows.directory.sorted {
+      $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+    }
+  }
 
   var body: some View {
     ZStack {
@@ -31,6 +39,7 @@ struct GoLiveAlertsSettingsView: View {
       }
     }
     .navigationTitle("Go Live Alerts")
+    .task { await follows.loadDirectory(using: auth) }
   }
 
   private var masterSection: some View {
@@ -59,7 +68,11 @@ struct GoLiveAlertsSettingsView: View {
   private var channelsSection: some View {
     Section {
       if broadcasters.isEmpty {
-        emptyState
+        if follows.isLoadingDirectory {
+          loadingState
+        } else {
+          emptyState
+        }
       } else {
         ForEach(broadcasters) { channel in
           Toggle(isOn: binding(for: channel)) {
@@ -82,6 +95,16 @@ struct GoLiveAlertsSettingsView: View {
     .opacity(alertsEnabled ? 1 : 0.4)
   }
 
+  private var loadingState: some View {
+    HStack(spacing: 16) {
+      ProgressView()
+      Text("Loading your follows…")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    }
+    .padding(.vertical, 8)
+  }
+
   private var emptyState: some View {
     HStack(spacing: 16) {
       Icon(glyph: .userCircle, size: 30)
@@ -96,7 +119,7 @@ struct GoLiveAlertsSettingsView: View {
 
   /// Per-channel switch. Reading `settings.isMuted` registers an observation so
   /// the row reflects changes; writing goes through the store, which persists.
-  private func binding(for channel: FollowedBroadcasterSummary) -> Binding<Bool> {
+  private func binding(for channel: FollowedChannel) -> Binding<Bool> {
     Binding(
       get: { !settings.isMuted(login: channel.login) },
       set: { settings.setAlerting($0, login: channel.login) }

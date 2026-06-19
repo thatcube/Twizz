@@ -228,7 +228,7 @@ struct SettingsView: View {
       }
 
       NavigationLink {
-        GoLiveAlertsSettingsView(follows: follows, settings: goLiveSettings)
+        GoLiveAlertsSettingsView(follows: follows, settings: goLiveSettings, auth: auth)
       } label: {
         SettingPill(title: "Choose Channels", isSelected: false)
       }
