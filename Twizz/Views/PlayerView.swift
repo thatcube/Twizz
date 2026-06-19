@@ -107,6 +107,10 @@ struct PlayerView: View {
 
   let channel: String
   var auth: TwitchAuthSession
+  /// Shared go-live watcher. Optional because VOD playback (`OnDemandPlayerView`)
+  /// has no live-follow context. When present, the player surfaces "just went
+  /// live" toasts and suppresses the channel currently on screen.
+  var goLive: GoLiveWatcher? = nil
   /// When set, the player runs in VOD mode: it plays the recorded broadcast,
   /// drives `replay` for chat, exposes a full-duration seek bar + playback speed,
   /// and gates off all live-only machinery (latency, low-latency proxy, EventSub,
@@ -756,11 +760,18 @@ struct PlayerView: View {
           .zIndex(12)
       }
 
+      if let goLive, let event = goLive.pending {
+        goLiveToast(goLive, event: event)
+          .transition(.move(edge: .top).combined(with: .opacity))
+          .zIndex(13)
+      }
+
       if isSleeping {
         sleepingOverlay
           .transition(.opacity)
       }
     }
+    .animation(.easeOut(duration: 0.25), value: goLive?.pending)
     .onChange(of: chat.pendingRaid) { _, newRaid in
       // Incoming raids (someone raiding the channel you're watching) are purely
       // informational: show a passive banner and auto-dismiss it. We never steal
@@ -807,6 +818,8 @@ struct PlayerView: View {
       if isVOD {
         await startVOD()
       } else {
+        // Don't toast the channel we're already watching.
+        goLive?.suppressedLogin = activeChannel
         configurePlayerForLive()
         resetDiagnostics()
         applyExperimentalYouTubeSettings()
@@ -864,6 +877,8 @@ struct PlayerView: View {
       player.pause()
       chat.disconnect()
       eventSub.stop()
+      // Hand go-live suppression back to Home now that no channel is on screen.
+      goLive?.suppressedLogin = nil
       setIdleTimer(disabled: false)
     }
     .onExitCommand {
@@ -1027,6 +1042,8 @@ struct PlayerView: View {
       // The rewind window is per-stream: drop the previous channel's DVR history.
       lowLatencyProxy.resetDVR()
       isUserPaused = false
+      // Keep the go-live watcher from toasting whatever we just switched to.
+      goLive?.suppressedLogin = activeChannel
     }
     .task(id: activeChannel) {
       await refreshYouTubeAutoTarget()
