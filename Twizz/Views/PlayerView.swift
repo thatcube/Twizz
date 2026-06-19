@@ -1860,8 +1860,17 @@ struct PlayerView: View {
   private let controlsBottomPadding: CGFloat = 8
   /// How far above the screen bottom the floating settings panel must start so it
   /// floats *above* the control row rather than behind/under it. Control row
-  /// bottom inset plus its approximate height plus a small gap.
-  private var chatSettingsBottomClearance: CGFloat { controlsBottomPadding + 88 }
+  /// bottom inset plus its approximate height plus a small gap. When the rewind
+  /// scrub bar is present it sits *below* the control row in the same VStack, so
+  /// the panel has to clear that extra element too (bar height + the VStack's
+  /// 18pt spacing) or it overlaps the seek bar and the buttons beneath it.
+  private var chatSettingsBottomClearance: CGFloat {
+    let base = controlsBottomPadding + 88
+    return streamRewindEnabled ? base + scrubBarClusterHeight : base
+  }
+  /// Approximate on-screen height the rewind scrub bar adds beneath the control
+  /// row: the bar's own height (~68pt) plus the control VStack's 18pt spacing.
+  private let scrubBarClusterHeight: CGFloat = 86
 
   // MARK: - Floating chat settings
 
