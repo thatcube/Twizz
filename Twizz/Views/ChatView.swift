@@ -190,14 +190,17 @@ struct ChatView: View {
       }
       .lineLimit(1)
       .fixedSize()
+      // Floor both states to the ring's layout height so the "Scrolling" pill is
+      // exactly as tall as the "Chat paused" one.
+      .frame(minHeight: 24)
       // Dark content to read against the white-tinted "focused" glass, mirroring
       // the chat composer field when it is the focused element.
       .foregroundStyle(.black.opacity(0.8))
       // Tuck the countdown ring into the capsule's left cap so its gap from the
       // left edge matches its (small) gap from the top/bottom.
-      .padding(.leading, softPauseRemaining != nil ? 5 : 22)
-      .padding(.trailing, 22)
-      .padding(.vertical, 10)
+      .padding(.leading, softPauseRemaining != nil ? 7 : 24)
+      .padding(.trailing, 24)
+      .padding(.vertical, 12)
       .modifier(PausedPillGlassStyle())
     }
     .padding(.bottom, 12)
