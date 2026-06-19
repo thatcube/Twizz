@@ -42,7 +42,7 @@ struct GoLiveToastView: View {
           Text("Watch")
         }
         .font(.headline)
-        .frame(maxHeight: .infinity)
+        .frame(height: avatarSize)
       }
       .buttonStyle(.borderedProminent)
       .focused($watchFocused)
