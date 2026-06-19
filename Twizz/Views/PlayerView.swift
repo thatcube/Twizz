@@ -185,6 +185,10 @@ struct PlayerView: View {
   @State var vodTimeObserver: Any?
   /// Detects *outgoing* raids (the watched channel raiding away) via EventSub.
   @State var eventSub = EventSubService()
+
+  /// Surfaces live polls / predictions / hype trains / goals for the watched
+  /// channel via Twitch's private Hermes WebSocket (read-only).
+  @State var hermes = HermesEventService()
   @State var player = AVPlayer()
   /// Drives the audio-only visualizer orb. Reacts to real audio when the player
   /// item exposes a tappable audio track (best effort on live HLS), otherwise
@@ -756,11 +760,21 @@ struct PlayerView: View {
           .zIndex(12)
       }
 
+      // Passive heads-up for live polls / predictions / hype trains / goals.
+      // Shown only while the transport controls are hidden (i.e. during relaxed
+      // viewing), so it never competes with the player UI. Read-only.
+      if let moment = hermes.currentMoment, !showControls, !isSleeping {
+        interactiveMomentBanner(moment)
+          .transition(.move(edge: .top).combined(with: .opacity))
+          .zIndex(9)
+      }
+
       if isSleeping {
         sleepingOverlay
           .transition(.opacity)
       }
     }
+    .animation(.easeInOut(duration: 0.35), value: hermes.currentMoment)
     .onChange(of: chat.pendingRaid) { _, newRaid in
       // Incoming raids (someone raiding the channel you're watching) are purely
       // informational: show a passive banner and auto-dismiss it. We never steal
@@ -812,6 +826,7 @@ struct PlayerView: View {
         applyExperimentalYouTubeSettings()
         chat.connect(to: activeChannel)
         eventSub.start(forChannel: activeChannel, auth: auth)
+        hermes.start(forChannel: activeChannel)
         async let metadataTask: Void = refreshChannelMetadata()
         await load()
         _ = await metadataTask
@@ -864,6 +879,7 @@ struct PlayerView: View {
       player.pause()
       chat.disconnect()
       eventSub.stop()
+      hermes.stop()
       setIdleTimer(disabled: false)
     }
     .onExitCommand {
