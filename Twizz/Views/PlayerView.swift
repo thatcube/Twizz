@@ -961,21 +961,6 @@ struct PlayerView: View {
         .padding(.trailing, 40)
       }
 
-      // Remote debug HUD: visible whenever diagnostics is on, independent of the
-      // control overlay (so it stays up while chat is being scrolled/held).
-      if showLatencyDiagnostics {
-        VStack {
-          HStack {
-            Spacer()
-            TrackpadDebugHUD(trackpad: trackpad)
-          }
-          Spacer()
-        }
-        .padding(.top, 36)
-        .padding(.trailing, 40)
-        .allowsHitTesting(false)
-      }
-
       // Only expose the video focus target while controls are hidden.
       // Otherwise, left-edge movement from the control cluster can escape
       // into this invisible target and appear as lost focus.
@@ -5161,46 +5146,5 @@ final class RemoteTrackpadMonitor {
     micro.dpad.down.pressedChangedHandler = { [weak self] _, _, pressed in
       self?.dpadDownPressed = pressed
     }
-  }
-}
-
-/// Live, ~60 Hz readout of what the Siri Remote actually reports, so we can see
-/// which signal (if any) brackets a *held* directional click. Only shown when
-/// the diagnostics overlay is enabled. Throwaway debug aid.
-struct TrackpadDebugHUD: View {
-  let trackpad: RemoteTrackpadMonitor
-
-  var body: some View {
-    let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-    return TimelineView(.animation) { _ in
-      VStack(alignment: .leading, spacing: 4) {
-        Text("REMOTE")
-          .font(.system(size: 13, weight: .heavy).monospaced())
-          .foregroundStyle(.white.opacity(0.6))
-        row("controller", trackpad.hasController ? "yes" : "NO")
-        row("click(A)", trackpad.clickPressed ? "DOWN" : "up")
-        row("dpadUp", trackpad.dpadUpPressed ? "DOWN" : "up")
-        row("dpadDown", trackpad.dpadDownPressed ? "DOWN" : "up")
-        row("y", String(format: "%+.2f", trackpad.verticalValue))
-        row("x", String(format: "%+.2f", trackpad.horizontalValue))
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 12)
-      .frame(maxWidth: 320, alignment: .leading)
-      .background(.black.opacity(0.55), in: shape)
-      .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
-      .clipShape(shape)
-    }
-  }
-
-  private func row(_ label: String, _ value: String) -> some View {
-    HStack(spacing: 8) {
-      Text(label)
-        .foregroundStyle(.white.opacity(0.7))
-      Spacer(minLength: 12)
-      Text(value)
-        .foregroundStyle(.white)
-    }
-    .font(.system(size: 14, weight: .semibold).monospaced())
   }
 }
