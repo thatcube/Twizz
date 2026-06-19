@@ -4484,8 +4484,8 @@ private struct SleepingScreen: View {
       SleepStar(
         x: Double.random(in: 0...1, using: &rng),
         y: Double.random(in: 0...1, using: &rng),
-        size: Double.random(in: 1.4...3.6, using: &rng),
-        baseOpacity: Double.random(in: 0.18...0.62, using: &rng),
+        size: Double.random(in: 1.5...3.8, using: &rng),
+        baseOpacity: Double.random(in: 0.26...0.78, using: &rng),
         twinkleSpeed: Double.random(in: 0.4...1.5, using: &rng),
         phase: Double.random(in: 0...(2 * .pi), using: &rng),
         warmth: Double.random(in: 0...1, using: &rng)
@@ -4517,33 +4517,56 @@ private struct SleepingScreen: View {
   var body: some View {
     TimelineView(.animation) { timeline in
       let t = timeline.date.timeIntervalSinceReferenceDate
+      // Slowly drifting glow centers give the scene a gentle, living motion.
+      let driftA = UnitPoint(x: 0.30 + 0.14 * sin(t * 0.043),
+                             y: 0.34 + 0.10 * cos(t * 0.037))
+      let driftB = UnitPoint(x: 0.72 + 0.12 * cos(t * 0.031),
+                             y: 0.64 + 0.13 * sin(t * 0.049))
       ZStack {
+        // Blur whatever is paused behind (stream frame + chat), then bank it
+        // way down into a dark, warm night so it stays easy on the eyes.
+        Rectangle()
+          .fill(.ultraThinMaterial)
+          .ignoresSafeArea()
+
         LinearGradient(
-          colors: [skyTop, skyBottom, Color.black],
+          colors: [skyTop.opacity(0.92), skyBottom.opacity(0.88), Color.black.opacity(0.9)],
           startPoint: .top,
           endPoint: .bottom
         )
-        .overlay(
-          RadialGradient(
-            colors: [emberLow.opacity(0.22), .clear],
-            center: .init(x: 0.5, y: 0.62),
-            startRadius: 10,
-            endRadius: 720
-          )
+        .ignoresSafeArea()
+
+        RadialGradient(
+          colors: [emberLow.opacity(0.30), .clear],
+          center: driftA, startRadius: 10, endRadius: 620
         )
+        .blendMode(.screen)
+        .ignoresSafeArea()
+
+        RadialGradient(
+          colors: [ember.opacity(0.16), .clear],
+          center: driftB, startRadius: 10, endRadius: 540
+        )
+        .blendMode(.screen)
+        .ignoresSafeArea()
 
         Canvas { context, size in
           for star in stars {
             let twinkle = 0.5 + 0.5 * sin(t * star.twinkleSpeed + star.phase)
-            let opacity = star.baseOpacity * (0.35 + 0.65 * twinkle)
+            let opacity = star.baseOpacity * (0.45 + 0.55 * twinkle)
             let d = star.size
-            let rect = CGRect(
-              x: star.x * size.width - d / 2,
-              y: star.y * size.height - d / 2,
-              width: d, height: d
+            let cx = star.x * size.width
+            let cy = star.y * size.height
+            // Soft halo for a touch more presence without getting harsh.
+            let halo = d * 3.0
+            context.fill(
+              Path(ellipseIn: CGRect(x: cx - halo / 2, y: cy - halo / 2,
+                                     width: halo, height: halo)),
+              with: .color(starColor(star.warmth, opacity: opacity * 0.22))
             )
             context.fill(
-              Path(ellipseIn: rect),
+              Path(ellipseIn: CGRect(x: cx - d / 2, y: cy - d / 2,
+                                     width: d, height: d)),
               with: .color(starColor(star.warmth, opacity: opacity))
             )
           }
@@ -4585,11 +4608,14 @@ private struct SleepingScreen: View {
   }
 
   private func centerContent(pulse: Double) -> some View {
-    VStack(spacing: 20) {
-      Image(systemName: "moon.stars.fill")
-        .font(.system(size: 70, weight: .regular))
-        .foregroundStyle(emberSoft.opacity(0.55 + 0.25 * pulse))
-        .shadow(color: ember.opacity(0.35), radius: 18)
+    VStack(spacing: 22) {
+      Image("TwizzPixelLogo")
+        .resizable()
+        .interpolation(.none)
+        .scaledToFit()
+        .frame(width: 132, height: 132)
+        .opacity(0.80 + 0.15 * pulse)
+        .shadow(color: ember.opacity(0.45), radius: 22)
 
       Text("Sleeping")
         .font(.system(size: 46, weight: .semibold, design: .rounded))
