@@ -1638,9 +1638,14 @@ struct PlayerView: View {
     let isGlass = chatLayoutMode == .glass
     let useLighterOverlayBackground = chatLayoutMode == .overlay
     return VStack(spacing: 0) {
-      ChatView(
+      // ChatView is wrapped so the live `chat.messages` read happens inside the
+      // wrapper's body, not PlayerView's. Otherwise every incoming chat message
+      // (several per second on busy channels) re-executes the whole PlayerView
+      // body and flashes the focused Quality menu while it's open.
+      ChatMessagesColumn(
+        chat: chat,
         channel: channel,
-        messages: visibleChatMessages,
+        replayStartMessageID: chatReplayStartMessageID,
         textSize: chatTextSize,
         emoteSize: chatEmoteSize,
         messageSpacing: chatMessageSpacing,
@@ -1648,9 +1653,6 @@ struct PlayerView: View {
         animatedEmotes: chatAnimatedEmotes,
         fontDesign: chatFontStyle.design,
         showBadges: chatShowBadges,
-        isConnected: chat.isConnected,
-        emoteURLs: chat.emoteURLs,
-        badgeURLs: chat.badgeURLs,
         useGlassBackground: isGlass,
         useLighterOverlayBackground: useLighterOverlayBackground,
         autoScroll: !(isChatScrolling || chatSoftPauseRemaining != nil),
@@ -2907,7 +2909,7 @@ struct PlayerView: View {
       labels.insert(short)
       labels.insert("Auto (\(short))")
     }
-    return Array(labels)
+    return labels.sorted()
   }
 
   /// Drops the "(Source)" suffix so the button reads "1080p60", not
@@ -3912,6 +3914,60 @@ private struct ChatGlassFieldStyle: ViewModifier {
           color: .black.opacity(isFocused ? 0.22 : 0.18),
           radius: isFocused ? 10 : 5, x: 0, y: isFocused ? 4 : 2)
     }
+  }
+}
+
+/// Wraps `ChatView` and reads the live `ChatService` itself. New chat messages
+/// mutate `chat.messages`; doing that read inside this small view (instead of in
+/// the giant PlayerView body) means only the chat column re-renders per message.
+/// Previously the PlayerView body observed `chat.messages`, so every incoming
+/// message re-executed the whole body and flashed the open Quality menu's focus
+/// many times a second on busy channels.
+private struct ChatMessagesColumn: View {
+  let chat: ChatService
+  let channel: String
+  let replayStartMessageID: ChatMessage.ID?
+  let textSize: CGFloat
+  let emoteSize: CGFloat
+  let messageSpacing: CGFloat
+  let lineHeight: CGFloat
+  let animatedEmotes: Bool
+  let fontDesign: Font.Design
+  let showBadges: Bool
+  let useGlassBackground: Bool
+  let useLighterOverlayBackground: Bool
+  let autoScroll: Bool
+  let softPauseRemaining: Int?
+  let scrollTarget: ChatScrollTarget?
+
+  private var visibleMessages: [ChatMessage] {
+    guard let startID = replayStartMessageID else { return chat.messages }
+    guard let startIndex = chat.messages.firstIndex(where: { $0.id == startID }) else {
+      return chat.messages
+    }
+    return Array(chat.messages[startIndex...])
+  }
+
+  var body: some View {
+    ChatView(
+      channel: channel,
+      messages: visibleMessages,
+      textSize: textSize,
+      emoteSize: emoteSize,
+      messageSpacing: messageSpacing,
+      lineHeight: lineHeight,
+      animatedEmotes: animatedEmotes,
+      fontDesign: fontDesign,
+      showBadges: showBadges,
+      isConnected: chat.isConnected,
+      emoteURLs: chat.emoteURLs,
+      badgeURLs: chat.badgeURLs,
+      useGlassBackground: useGlassBackground,
+      useLighterOverlayBackground: useLighterOverlayBackground,
+      autoScroll: autoScroll,
+      softPauseRemaining: softPauseRemaining,
+      scrollTarget: scrollTarget
+    )
   }
 }
 
