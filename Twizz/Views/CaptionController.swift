@@ -23,6 +23,11 @@ final class CaptionController {
 
     private var engine: Any?
     private var startTask: Task<Void, Never>?
+    /// Samples the player playhead on the main actor and forwards it into the
+    /// (Sendable-safe) engine. The clock closure captures `AVPlayer`, which isn't
+    /// Sendable, so it must only ever be called here on the MainActor.
+    private var playerClock: (() -> Date?)?
+    private var playheadTimer: Timer?
     /// Identity of the currently-running configuration, so repeated `sync` calls
     /// with unchanged inputs don't tear down and restart the engine.
     private var activeKey: String?
@@ -43,10 +48,14 @@ final class CaptionController {
         playlistURL: URL?,
         headers: [String: String],
         isLive: Bool,
-        isReady: Bool
+        isReady: Bool,
+        playerClock: (() -> Date?)? = nil
     ) {
         let shouldRun = enabled && isLive && isReady && playlistURL != nil && Self.isSupported
         let key = shouldRun ? playlistURL?.absoluteString : nil
+        // Keep the latest clock even when the config key is unchanged, so the
+        // playhead sampler always reads the current player.
+        self.playerClock = shouldRun ? playerClock : nil
         if key == activeKey { return }
         activeKey = key
 
@@ -60,11 +69,15 @@ final class CaptionController {
         guard #available(tvOS 26.0, *) else { return }
 
         failed = false
-        let engine = LiveCaptionEngine(playlistURL: url, headers: headers) { [weak self] line in
+        let engine = LiveCaptionEngine(
+            playlistURL: url,
+            headers: headers
+        ) { [weak self] line in
             Task { @MainActor in self?.apply(line) }
         }
         self.engine = engine
         isActive = true
+        startPlayheadTimer()
         startTask = Task { [weak self] in
             do {
                 try await engine.start()
@@ -80,6 +93,7 @@ final class CaptionController {
     /// Fully stop captioning and clear any displayed text (channel exit/teardown).
     func stop() {
         activeKey = nil
+        playerClock = nil
         stopEngine()
         clearText()
     }
@@ -87,11 +101,29 @@ final class CaptionController {
     private func stopEngine() {
         startTask?.cancel()
         startTask = nil
+        playheadTimer?.invalidate()
+        playheadTimer = nil
         isActive = false
         if #available(tvOS 26.0, *), let engine = engine as? LiveCaptionEngine {
             Task { await engine.stop() }
         }
         engine = nil
+    }
+
+    /// Samples the player playhead ~4x/sec on the main actor and pushes the plain
+    /// `Date` into the engine, which uses it to release buffered audio in step
+    /// with playback (so captions don't run ahead of the visible frame).
+    private func startPlayheadTimer() {
+        playheadTimer?.invalidate()
+        guard #available(tvOS 26.0, *), let engine = engine as? LiveCaptionEngine else { return }
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                let date = self?.playerClock?()
+                Task { await engine.setPlayhead(date) }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        playheadTimer = timer
     }
 
     private func apply(_ line: CaptionLine) {

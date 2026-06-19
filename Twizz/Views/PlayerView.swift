@@ -1336,7 +1336,8 @@ struct PlayerView: View {
       playlistURL: audioOnlyPlaylistURL,
       headers: PlaybackService.streamHeaders,
       isLive: !isVOD,
-      isReady: !isLoading && errorMessage == nil && !isOffline
+      isReady: !isLoading && errorMessage == nil && !isOffline,
+      playerClock: { [weak player] in player?.currentItem?.currentDate() }
     )
   }
 

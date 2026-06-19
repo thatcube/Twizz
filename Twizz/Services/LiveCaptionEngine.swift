@@ -57,6 +57,29 @@ actor LiveCaptionEngine {
     private var processedSegments: Set<String> = []
     private let fallbackSegmentDuration: Double = 2.0
 
+    /// Decoded segments held until the player's playhead reaches them, so the
+    /// recognizer transcribes audio in lockstep with what's on screen rather than
+    /// racing ahead at the live edge (which made captions appear before the video).
+    private struct PendingAudio {
+        let date: Date?
+        let buffer: AVAudioPCMBuffer
+    }
+    private var pending: [PendingAudio] = []
+    /// Cap on buffered-but-unfed audio (decoded segments) so a paused/rewound
+    /// playhead can't grow the queue without bound. 16 kHz mono is tiny per second.
+    private let maxPending = 30
+    /// Player playhead (the on-screen frame's PROGRAM-DATE-TIME), pushed in from
+    /// the MainActor. `AVPlayer` isn't Sendable, so the controller samples it on
+    /// the main actor and forwards the plain `Date` here rather than us reaching
+    /// into the player from this actor.
+    private var latestPlayhead: Date?
+
+    /// Update the playhead used to gate caption playout. Called periodically from
+    /// the MainActor controller.
+    func setPlayhead(_ date: Date?) {
+        latestPlayhead = date
+    }
+
     init(
         playlistURL: URL,
         headers: [String: String],
@@ -131,6 +154,7 @@ actor LiveCaptionEngine {
         analyzer = nil
         transcriber = nil
         processedSegments.removeAll()
+        pending.removeAll()
     }
 
     /// A result is "volatile" while playback hasn't been finalized past its end —
@@ -169,19 +193,28 @@ actor LiveCaptionEngine {
     // MARK: - Audio polling + feeding
 
     private func runPollLoop() async {
+        var nextPollAt = Date()
         while !Task.isCancelled {
-            let pace: Double
-            do {
-                pace = try await pollOnce()
-            } catch {
-                pace = fallbackSegmentDuration
+            if Date() >= nextPollAt {
+                let pace: Double
+                do {
+                    pace = try await pollOnce()
+                } catch {
+                    pace = fallbackSegmentDuration
+                }
+                nextPollAt = Date().addingTimeInterval(min(max(pace, 0.5), 4.0))
             }
-            try? await Task.sleep(for: .seconds(min(max(pace, 0.5), 4.0)))
+            // Release buffered audio into the recognizer as the playhead reaches
+            // it. Ticks faster than the poll cadence so captions track playback
+            // smoothly instead of in coarse, segment-sized jumps.
+            drainPending()
+            try? await Task.sleep(for: .seconds(0.25))
         }
     }
 
-    /// Fetches the playlist, feeds every newly-seen segment's audio into the
-    /// recognizer in order, and returns how long to wait before the next poll.
+    /// Fetches the playlist and buffers every newly-seen segment's decoded audio
+    /// (tagged with its PROGRAM-DATE-TIME). Returns how long to wait before the
+    /// next poll. Feeding into the recognizer is deferred to `drainPending`.
     private func pollOnce() async throws -> Double {
         let text = try await fetchText(playlistURL)
         let segments = parseSegments(text, relativeTo: playlistURL)
@@ -201,14 +234,38 @@ actor LiveCaptionEngine {
             do {
                 let data = try await fetchData(seg.url)
                 if let buffer = try await pcmBuffer(from: data) {
-                    feed(buffer)
+                    pending.append(PendingAudio(date: seg.startDate, buffer: buffer))
                 }
                 lastDuration = seg.duration
             } catch {
                 continue
             }
         }
+        if pending.count > maxPending {
+            pending.removeFirst(pending.count - maxPending)
+        }
         return lastDuration
+    }
+
+    /// Feeds buffered audio into the recognizer once the player's playhead has
+    /// reached it (by PROGRAM-DATE-TIME), keeping captions aligned to the visible
+    /// frame. Falls back to feeding immediately when no playhead clock or no
+    /// segment date is available.
+    private func drainPending() {
+        guard !pending.isEmpty else { return }
+        let playhead = latestPlayhead
+        while let first = pending.first {
+            let due: Bool
+            if let date = first.date, let playhead {
+                due = date <= playhead
+            } else {
+                // Undated segment or no playhead clock — no basis to hold it.
+                due = true
+            }
+            guard due else { break }
+            pending.removeFirst()
+            feed(first.buffer)
+        }
     }
 
     /// Demuxes a Twitch audio segment to ADTS AAC, decodes it to PCM, converts it
@@ -289,20 +346,51 @@ actor LiveCaptionEngine {
     private struct Segment {
         let url: URL
         let duration: Double
+        let startDate: Date?
+    }
+
+    private let dateParser: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private let plainDateParser: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    private func parseDate(_ string: String) -> Date? {
+        dateParser.date(from: string) ?? plainDateParser.date(from: string)
     }
 
     private func parseSegments(_ text: String, relativeTo base: URL) -> [Segment] {
         var segments: [Segment] = []
         var pendingDuration = fallbackSegmentDuration
+        // PROGRAM-DATE-TIME may be stated once then implied per segment, so carry
+        // a running clock and advance it by each segment's duration.
+        var runningDate: Date?
+        var pendingDate: Date?
         for raw in text.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("#EXTINF:") {
+            if line.hasPrefix("#EXT-X-PROGRAM-DATE-TIME:") {
+                let value = String(line.dropFirst("#EXT-X-PROGRAM-DATE-TIME:".count))
+                let date = parseDate(value)
+                runningDate = date
+                pendingDate = date
+            } else if line.hasPrefix("#EXTINF:") {
                 let value = line.dropFirst("#EXTINF:".count)
                 let number = value.prefix { $0.isNumber || $0 == "." }
                 pendingDuration = Double(number) ?? fallbackSegmentDuration
             } else if !line.isEmpty, !line.hasPrefix("#"),
                       let url = URL(string: line, relativeTo: base)?.absoluteURL {
-                segments.append(Segment(url: url, duration: pendingDuration))
+                let start = pendingDate ?? runningDate
+                segments.append(Segment(url: url, duration: pendingDuration, startDate: start))
+                if let rd = runningDate {
+                    runningDate = rd.addingTimeInterval(pendingDuration)
+                }
+                pendingDate = nil
                 pendingDuration = fallbackSegmentDuration
             }
         }
