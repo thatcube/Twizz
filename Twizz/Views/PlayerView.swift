@@ -4638,7 +4638,7 @@ private struct SleepingScreen: View {
         .shadow(color: ember.opacity(0.35), radius: 14)
 
       Text("Sleeping")
-        .font(.system(size: 48, weight: .bold, design: .rounded))
+        .font(.system(size: 48, weight: .bold))
         .foregroundStyle(
           LinearGradient(
             colors: [emberSoft.opacity(0.85 + 0.15 * pulse),
@@ -4649,7 +4649,7 @@ private struct SleepingScreen: View {
         )
 
       Text("Press to resume")
-        .font(.system(size: 22, weight: .medium, design: .rounded))
+        .font(.system(size: 22, weight: .medium))
         .foregroundStyle(emberSoft.opacity(0.5))
     }
   }
