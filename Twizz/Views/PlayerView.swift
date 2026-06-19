@@ -1562,7 +1562,7 @@ struct PlayerView: View {
   /// How far above the screen bottom the floating settings panel must start so it
   /// floats *above* the control row rather than behind/under it. Control row
   /// bottom inset plus its approximate height plus a small gap.
-  private var chatSettingsBottomClearance: CGFloat { controlsBottomPadding + 88 }
+  private var chatSettingsBottomClearance: CGFloat { controlsBottomPadding + 104 }
 
   // MARK: - Floating chat settings
 
