@@ -148,14 +148,14 @@ struct ChatView: View {
   private var pausedPill: some View {
     HStack(spacing: 8) {
       if let remaining = softPauseRemaining {
-        Image(systemName: "chevron.up")
+        Image(systemName: "pause.fill")
           .font(.caption.weight(.bold))
-          .symbolEffect(.bounce.up, options: .repeating)
+          .symbolEffect(.pulse, options: .repeating)
         Text("Chat paused · \(remaining)s")
           .font(.caption.weight(.semibold))
           .contentTransition(.numericText())
       } else {
-        Image(systemName: "chevron.up.chevron.down")
+        Image(systemName: "arrow.up.and.down")
           .font(.caption.weight(.bold))
         Text("Scrolling")
           .font(.caption.weight(.semibold))
@@ -163,7 +163,9 @@ struct ChatView: View {
     }
     .lineLimit(1)
     .fixedSize()
-    .foregroundStyle(.white)
+    // Dark content to read against the white-tinted "focused" glass, mirroring
+    // the chat composer field when it is the focused element.
+    .foregroundStyle(.black.opacity(0.8))
     .padding(.horizontal, 22)
     .padding(.vertical, 10)
     .modifier(PausedPillGlassStyle())
@@ -229,17 +231,24 @@ extension String {
   }
 }
 
-/// Liquid Glass surface for the paused/scroll indicator pill. Falls back to a
-/// translucent material on tvOS versions before Liquid Glass is available.
+/// Liquid Glass surface for the paused/scroll indicator pill. These pills are
+/// shown only while the viewer is actively holding chat (reading or scrolling),
+/// so they *are* the focused element — render them with the same white-tinted,
+/// lifted glass the chat composer uses when focused so they read as interactive.
+/// Falls back to a solid white capsule on tvOS versions before Liquid Glass.
 private struct PausedPillGlassStyle: ViewModifier {
+  private var shape: Capsule { Capsule(style: .continuous) }
+
   @ViewBuilder
   func body(content: Content) -> some View {
     if #available(tvOS 26.0, *) {
-      content.glassEffect(.regular, in: Capsule())
+      content
+        .glassEffect(.regular.tint(.white), in: shape)
+        .shadow(color: .black.opacity(0.22), radius: 10, x: 0, y: 4)
     } else {
       content
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+        .background(.white, in: shape)
+        .shadow(color: .black.opacity(0.22), radius: 10, x: 0, y: 4)
     }
   }
 }
