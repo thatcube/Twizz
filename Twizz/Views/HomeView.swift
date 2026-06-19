@@ -292,6 +292,7 @@ struct HomeView: View {
       HStack {
         Text(follows.isUsingDemoData ? "Trending" : "Following")
           .font(.system(size: 32, weight: .bold))
+          .accessibilityAddTraits(.isHeader)
 
         if follows.isLoading {
           ProgressView()
@@ -370,6 +371,7 @@ struct HomeView: View {
         HStack {
           Text("Recommended for you")
             .font(.system(size: 32, weight: .bold))
+            .accessibilityAddTraits(.isHeader)
 
           if personalized.isLoading {
             ProgressView()
@@ -438,6 +440,7 @@ struct HomeView: View {
         HStack {
           Text("Top streams")
             .font(.system(size: 32, weight: .bold))
+            .accessibilityAddTraits(.isHeader)
 
           if recommendations.isLoading {
             ProgressView()
@@ -497,6 +500,7 @@ struct HomeView: View {
       VStack(alignment: .leading, spacing: 2) {
         Text("Recommended categories")
           .font(.system(size: 32, weight: .bold))
+          .accessibilityAddTraits(.isHeader)
 
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: rail.spacing) {
