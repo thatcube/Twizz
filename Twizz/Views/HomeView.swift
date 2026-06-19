@@ -26,10 +26,12 @@ struct HomeView: View {
   /// Categories opened from the Home tab are pushed one level deep here, so the
   /// category view is genuinely L2 of Home rather than a tab switch into Browse.
   @State private var homePath: [TwitchCategory] = []
+  @State private var showingFollowingDirectory = false
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
   @State private var refreshToast: RefreshToastState?
   @State private var goLive = GoLiveWatcher()
+  @State private var goLiveSettings = GoLiveNotificationSettings()
   /// "Top streams" recommendations with already-followed and personalized
   /// channels filtered out. Cached here and recomputed only when one of the
   /// source lists changes, so we don't rebuild the lookup sets and refilter on
@@ -41,6 +43,8 @@ struct HomeView: View {
   @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
 
   @Environment(\.colorScheme) private var systemColorScheme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.glassDisabled) private var glassDisabled
   @FocusState private var focusedItemID: String?
 
   private let firstLaunchSignInPromptKey = "hasPromptedFirstLaunchSignIn"
@@ -97,6 +101,14 @@ struct HomeView: View {
                 channelPageTarget: $channelPageTarget
               )
             }
+            .navigationDestination(isPresented: $showingFollowingDirectory) {
+              FollowingDirectoryView(
+                follows: follows,
+                auth: auth,
+                selectedChannel: $selectedChannel,
+                channelPageTarget: $channelPageTarget
+              )
+            }
         }
       }
         .tag(SidebarTab.home)
@@ -131,6 +143,8 @@ struct HomeView: View {
         SettingsView(
           themeManager: themeManager,
           auth: auth,
+          follows: follows,
+          goLiveSettings: goLiveSettings,
           onRequestSignIn: { showSignIn = true },
           onClearWatchHistory: {
             watchHistory.clear()
@@ -158,7 +172,7 @@ struct HomeView: View {
       if let refreshToast {
         RefreshToastView(state: refreshToast)
           .padding(.top, 48)
-          .transition(.move(edge: .top).combined(with: .opacity))
+          .transition(.motionAware(.move(edge: .top).combined(with: .opacity), reduceMotion: reduceMotion))
       }
     }
     .overlay(alignment: .topTrailing) {
@@ -169,12 +183,13 @@ struct HomeView: View {
         )
         .padding(.top, 48)
         .padding(.trailing, 48)
-        .transition(.move(edge: .top).combined(with: .opacity))
+        .transition(.motionAware(.move(edge: .top).combined(with: .opacity), reduceMotion: reduceMotion))
       }
     }
-    .animation(.easeOut(duration: 0.25), value: goLive.pending)
+    .animation(.motionAware(.easeOut(duration: 0.25), reduceMotion: reduceMotion), value: goLive.pending)
     .task {
       auth.restore()
+      goLive.notificationSettings = goLiveSettings
       goLive.start(using: auth)
       promptFirstLaunchSignInIfNeeded()
       await refreshFollowedChannelsIfNeeded(force: true)
@@ -292,6 +307,7 @@ struct HomeView: View {
       HStack {
         Text(follows.isUsingDemoData ? "Trending" : "Following")
           .font(.system(size: 32, weight: .bold))
+          .accessibilityAddTraits(.isHeader)
 
         if follows.isLoading {
           ProgressView()
@@ -299,6 +315,16 @@ struct HomeView: View {
         }
 
         Spacer()
+
+        if !follows.isUsingDemoData {
+          Button {
+            showingFollowingDirectory = true
+          } label: {
+            Text("See All")
+              .font(.system(size: 24, weight: .semibold))
+          }
+          .accessibilityLabel("See all followed channels")
+        }
 
         Button {
           performManualRefresh()
@@ -370,6 +396,7 @@ struct HomeView: View {
         HStack {
           Text("Recommended for you")
             .font(.system(size: 32, weight: .bold))
+            .accessibilityAddTraits(.isHeader)
 
           if personalized.isLoading {
             ProgressView()
@@ -438,6 +465,7 @@ struct HomeView: View {
         HStack {
           Text("Top streams")
             .font(.system(size: 32, weight: .bold))
+            .accessibilityAddTraits(.isHeader)
 
           if recommendations.isLoading {
             ProgressView()
@@ -497,6 +525,7 @@ struct HomeView: View {
       VStack(alignment: .leading, spacing: 2) {
         Text("Recommended categories")
           .font(.system(size: 32, weight: .bold))
+          .accessibilityAddTraits(.isHeader)
 
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: rail.spacing) {
@@ -587,7 +616,7 @@ struct HomeView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(
         RoundedRectangle(cornerRadius: 28)
-          .fill(.ultraThinMaterial)
+          .fill(glassDisabled ? AnyShapeStyle(Color.twizzOpaqueGlass) : AnyShapeStyle(.ultraThinMaterial))
       )
       .overlay(
         RoundedRectangle(cornerRadius: 28)
@@ -765,6 +794,7 @@ enum RefreshToastState {
 /// re-tap of the Home tab gives the viewer visible feedback.
 private struct RefreshToastView: View {
   let state: RefreshToastState
+  @Environment(\.glassDisabled) private var glassDisabled
 
   var body: some View {
     HStack(spacing: 14) {
@@ -783,7 +813,10 @@ private struct RefreshToastView: View {
     .padding(.horizontal, 30)
     .padding(.vertical, 18)
     .background {
-      if #available(tvOS 26.0, *) {
+      if glassDisabled {
+        Capsule().fill(Color.twizzOpaqueGlass)
+          .overlay(Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 1))
+      } else if #available(tvOS 26.0, *) {
         Capsule().glassEffect(.regular, in: Capsule())
       } else {
         Capsule().fill(.ultraThinMaterial)

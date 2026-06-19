@@ -23,6 +23,7 @@ struct TwizzApp: App {
         .onOpenURL { url in
           deepLinkRouter.handle(url)
         }
+        .resolveGlassDisabled()
         #if DEBUG
         .modifier(CaptionSpikeAutoStart())
         #endif

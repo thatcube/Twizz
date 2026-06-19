@@ -20,6 +20,7 @@ extension PlayerView {
           .foregroundStyle(.white.opacity(0.85))
       }
       .multilineTextAlignment(.center)
+      .accessibilityElement(children: .combine)
       .padding(.horizontal, 32)
       .padding(.vertical, 18)
       .background(.purple.opacity(0.85), in: Capsule())
@@ -72,6 +73,7 @@ extension PlayerView {
       HStack(spacing: 20) {
         Icon(glyph: .userPlus, size: 34)
           .foregroundStyle(.white)
+          .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 4) {
           Text("Raiding to \(raid.toDisplayName)")
             .font(.headline).bold()
@@ -80,9 +82,11 @@ extension PlayerView {
             .font(.subheadline)
             .foregroundStyle(.white.opacity(0.85))
         }
+        .accessibilityElement(children: .combine)
         Button("Cancel") {
           cancelOutgoingRaid()
         }
+        .accessibilityHint("Stay on this channel")
         .focused($focus, equals: .raidFollowCancel)
       }
       .padding(.horizontal, 36)

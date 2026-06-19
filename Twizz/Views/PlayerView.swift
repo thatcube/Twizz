@@ -136,6 +136,23 @@ struct PlayerView: View {
     return focus != .chatInput && focus != .chatSend
   }
 
+  /// Spoken value for the rewind/seek bar's `accessibilityValue`: VODs read
+  /// "elapsed of total", live reads "Live" at the edge or "N behind live".
+  var rewindAccessibilityValue: String {
+    func spoken(_ seconds: Double) -> String {
+      let total = max(0, Int(seconds.rounded()))
+      let m = total / 60
+      let s = total % 60
+      if m > 0 { return "\(m) minute\(m == 1 ? "" : "s") \(s) second\(s == 1 ? "" : "s")" }
+      return "\(s) second\(s == 1 ? "" : "s")"
+    }
+    if rewindReadout.isVOD {
+      return "\(spoken(rewindReadout.elapsedSeconds)) of \(spoken(rewindReadout.totalSeconds))"
+    }
+    if rewindReadout.isAtLiveEdge { return "Live" }
+    return "\(spoken(rewindReadout.behindLiveSeconds)) behind live"
+  }
+
   /// Selectable VOD playback rates, cycled by the speed control.
   var vodSpeedOptions: [Float] { [0.5, 1.0, 1.25, 1.5, 2.0] }
 
@@ -148,7 +165,13 @@ struct PlayerView: View {
 
   @Environment(\.dismiss) var dismiss
   @Environment(\.themePalette) var palette
+  @Environment(\.accessibilityReduceMotion) var reduceMotion
   @AppStorage("preferredQuality") var preferredQuality = "Auto"
+  /// Latency-vs-quality profile for the adaptive ("Auto") stream, surfaced as the
+  /// two Auto rows in the quality picker. Stored as the enum raw value; read it
+  /// through `livePlaybackProfile`.
+  @AppStorage("livePlaybackProfile") var livePlaybackProfileRaw = LivePlaybackProfile.default
+    .rawValue
   @AppStorage("chatTextSizeValue") var chatTextSizeValue = Double(
     ChatAppearance.defaultTextSize)
   @AppStorage("chatEmoteAuto") var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
@@ -166,6 +189,13 @@ struct PlayerView: View {
   @AppStorage("chatFontStyle") var chatFontStyleRaw = ChatAppearance.defaultFontStyle
     .rawValue
   @AppStorage("chatShowBadges") var chatShowBadges = ChatAppearance.defaultShowBadges
+  /// Global on/off for highlighting chat lines that mention the signed-in user
+  /// (and any user keywords below). On by default.
+  @AppStorage("chatHighlightMentionsEnabled") var chatHighlightMentionsEnabled = true
+  /// User-defined extra highlight keywords (other handles, "giveaway", a game
+  /// name…), stored as a single comma/newline-separated string and parsed into a
+  /// normalized list by `chatHighlightKeywordList`.
+  @AppStorage("chatHighlightKeywords") var chatHighlightKeywords = ""
   @AppStorage("chatLayoutMode") var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
   @AppStorage("chatSyncToStream") var chatSyncToStream = false
   @AppStorage("experimentalYouTubeMergeEnabled") var experimentalYouTubeMergeEnabled = false
@@ -246,6 +276,7 @@ struct PlayerView: View {
   @State var chatDraft: String = ""
   @State var chatInputActivationToken: Int = 0
   @State var youtubeInputActivationToken: Int = 0
+  @State var highlightKeywordsActivationToken: Int = 0
   @State var isSendingChat = false
   @State var chatSendError: String?
   /// When chat sync is active, a sent message is held until it appears in the
@@ -258,6 +289,10 @@ struct PlayerView: View {
   @State var isQualityMenuPresented = false
   @State var latencyTask: Task<Void, Never>?
   @State var playbackWatchdogTask: Task<Void, Never>?
+  /// Drives the adaptive playback-rate controller at a sub-second cadence — far
+  /// faster than the 1 Hz latency monitor — so the anti-stall slow-down can react
+  /// to a draining buffer before it empties into a hard stall.
+  @State var rateControlTask: Task<Void, Never>?
   // The live-latency and playback-watchdog tasks rewrite a large set of
   // bookkeeping values once per second. Storing them as `@State` re-executed the
   // entire (very large) PlayerView body every tick, which rebuilt the focused
@@ -324,6 +359,10 @@ struct PlayerView: View {
     get { mon.latencyStableCount }
     nonmutating set { mon.latencyStableCount = newValue }
   }
+  var latencyOutlierStreak: Int {
+    get { mon.latencyOutlierStreak }
+    nonmutating set { mon.latencyOutlierStreak = newValue }
+  }
   // The real (pre-proxy) source URL of the currently loaded item, so we can tell
   // whether a quality switch actually needs to replace the item. AVURLAsset.url
   // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
@@ -337,21 +376,9 @@ struct PlayerView: View {
     get { mon.didRequestPlayback }
     nonmutating set { mon.didRequestPlayback = newValue }
   }
-  var lastHardCatchUpJumpAt: Date {
-    get { mon.lastHardCatchUpJumpAt }
-    nonmutating set { mon.lastHardCatchUpJumpAt = newValue }
-  }
-  var lastWallClockCatchUpAt: Date {
-    get { mon.lastWallClockCatchUpAt }
-    nonmutating set { mon.lastWallClockCatchUpAt = newValue }
-  }
   var edgeLatencyLowConfidenceStreak: Int {
     get { mon.edgeLatencyLowConfidenceStreak }
     nonmutating set { mon.edgeLatencyLowConfidenceStreak = newValue }
-  }
-  var wallClockHighLatencyStreak: Int {
-    get { mon.wallClockHighLatencyStreak }
-    nonmutating set { mon.wallClockHighLatencyStreak = newValue }
   }
   var wallClockLowConfidenceStreak: Int {
     get { mon.wallClockLowConfidenceStreak }
@@ -381,9 +408,32 @@ struct PlayerView: View {
     get { mon.lastRecoveryAttemptAt }
     nonmutating set { mon.lastRecoveryAttemptAt = newValue }
   }
+  var lastLiveResyncAt: Date {
+    get { mon.lastLiveResyncAt }
+    nonmutating set { mon.lastLiveResyncAt = newValue }
+  }
+  var lastLiveEdgeSnapAt: Date {
+    get { mon.lastLiveEdgeSnapAt }
+    nonmutating set { mon.lastLiveEdgeSnapAt = newValue }
+  }
+  var liveResyncAttempts: Int {
+    get { mon.liveResyncAttempts }
+    nonmutating set { mon.liveResyncAttempts = newValue }
+  }
   var liveStallWaitingSince: Date? {
     get { mon.liveStallWaitingSince }
     nonmutating set { mon.liveStallWaitingSince = newValue }
+  }
+  /// Highest live seekable-edge position seen this session, and when it last
+  /// stopped advancing — used to detect an ended broadcast (the edge freezes)
+  /// independently of the flaky waiting/stall state.
+  var lastLiveEdgeSeconds: Double? {
+    get { mon.lastLiveEdgeSeconds }
+    nonmutating set { mon.lastLiveEdgeSeconds = newValue }
+  }
+  var liveEdgeFrozenSince: Date? {
+    get { mon.liveEdgeFrozenSince }
+    nonmutating set { mon.liveEdgeFrozenSince = newValue }
   }
   var offlineProbeInFlight: Bool {
     get { mon.offlineProbeInFlight }
@@ -393,6 +443,39 @@ struct PlayerView: View {
     get { mon.lastOfflineProbeAt }
     nonmutating set { mon.lastOfflineProbeAt = newValue }
   }
+  var recentInstabilityEvents: [Date] {
+    get { mon.recentInstabilityEvents }
+    nonmutating set { mon.recentInstabilityEvents = newValue }
+  }
+  var streamUnstableSince: Date? {
+    get { mon.streamUnstableSince }
+    nonmutating set { mon.streamUnstableSince = newValue }
+  }
+  var lastStallAt: Date? {
+    get { mon.lastStallAt }
+    nonmutating set { mon.lastStallAt = newValue }
+  }
+  var streamPlaybackStartedAt: Date? {
+    get { mon.streamPlaybackStartedAt }
+    nonmutating set { mon.streamPlaybackStartedAt = newValue }
+  }
+  /// When AVPlayer first parked in a "waiting despite a healthy buffer" soft-stall
+  /// deadlock, and when we last nudged it. Drives the playImmediately kick that
+  /// breaks `evaluatingBufferingRate`/`toMinimizeStalls` parks.
+  var softStallSince: Date? {
+    get { mon.softStallSince }
+    nonmutating set { mon.softStallSince = newValue }
+  }
+  var lastSoftStallNudgeAt: Date {
+    get { mon.lastSoftStallNudgeAt }
+    nonmutating set { mon.lastSoftStallNudgeAt = newValue }
+  }
+  var streamUnstableWasPredicted: Bool {
+    get { mon.streamUnstableWasPredicted }
+    nonmutating set { mon.streamUnstableWasPredicted = newValue }
+  }
+  /// True while the stream-stability watchdog has us in deep-buffer stability mode.
+  var isStreamUnstable: Bool { mon.streamUnstableSince != nil }
   @State var lastStallNotificationAt = Date.distantPast
   @State var suppressLowLatencyToggleReload = false
   @State var consecutiveLoadFailures = 0
@@ -525,28 +608,13 @@ struct PlayerView: View {
   /// just-arrived DVR window and a full 30-min one both feel the same instead of
   /// the small one being hypersensitive.
   let scrubFullWindowTravelUnits: Double = 4
-  // Latency tuning stays at the proven-stable baseline even in low-latency mode.
   // The latency win comes from the proxy promoting Twitch prefetch segments — not
   // from starving buffers or chasing the edge, both of which caused freezes and
-  // blur on-device. Freeze-free playback is the top priority, then sharpness.
+  // blur on-device. Per-mode buffer/ABR behavior lives in LivePlaybackPolicy;
+  // this is the shared target gap used by live-edge follow + drift recovery.
   let targetLiveEdgeSeconds: Double = 3.5
-  let softCatchUpThresholdSeconds: Double = 8
-  // In low-latency mode the proxy adds prefetch segments to the seekable window,
-  // which inflates the seekable-edge latency metric. A zero-tolerance hard seek
-  // against that inflated edge rebuffers and freezes, so disable hard seeks while
-  // low-latency mode is on and rely on gentle rate correction + a healthy buffer.
-  var hardCatchUpThresholdSeconds: Double {
-    lowLatencyProxyEnabled ? .greatestFiniteMagnitude : 14
-  }
-  let hardCatchUpCooldownSeconds: Double = 20
-  let maxCatchUpRate: Float = 1.04
   let edgeLatencyUnavailableEpsilonSeconds: Double = 0.2
   let edgeLatencyUnavailableSamples = 4
-  let wallClockSoftCatchUpThresholdSeconds: Double = 12
-  let wallClockHardCatchUpThresholdSeconds: Double = 16
-  let wallClockHardCatchUpRequiredSamples = 10
-  let wallClockHardCatchUpCooldownSeconds: Double = 90
-  let targetWallClockSeconds: Double = 6.5
   let wallClockUnavailableSamples = 4
   let wallClockStaleDateDeltaEpsilonSeconds: Double = 0.08
   let wallClockStalePlaybackAdvanceThresholdSeconds: Double = 0.6
@@ -564,10 +632,69 @@ struct PlayerView: View {
   let latencyStableSamplesRequired = 2
   let latencyPlausibleFloorSeconds: Double = 2
   let latencyStableDeltaSeconds: Double = 2
+  /// A single latency sample deviating from the smoothed value by at least this
+  /// much is treated as a suspect outlier and held back until corroborated.
+  let latencyOutlierSeconds: Double = 25
+  let latencyOutlierConfirmSamples = 2
   let playbackWatchdogIntervalSeconds: Double = 2
+  /// Cadence for the adaptive playback-rate controller. Sub-second so the
+  /// anti-stall slow-down can catch a fast buffer drain (a 1 Hz loop reacts too
+  /// late — the buffer can empty between samples).
+  let rateControlIntervalSeconds: Double = 0.25
   let hardStallRecoverySeconds: Double = 10
   let recoveryCooldownSeconds: Double = 15
+  /// Live-edge drift recovery. When the player is following live (`pinnedToLive`)
+  /// but the playhead has involuntarily fallen this far behind the seekable edge,
+  /// snap it back toward live with a lightweight seek instead of waiting for the
+  /// frozen-playhead watchdog (which a slow-playing-after-rewind player defeats).
+  /// The live *edge gap* (distance from the playhead to the seekable tail) sits
+  /// near 0 in normal playback and only a couple seconds during ordinary rebuffer
+  /// jitter, so a gap this large unambiguously means "rewound far back and stuck."
+  /// The gentle rate catch-up can't recover a hole this big (1.12× would take
+  /// minutes), so seek back directly. Kept well above the ~2s catch-up target so
+  /// it never fights ordinary drift.
+  let liveEdgeResyncThresholdSeconds: Double = 15
+  /// Minimum spacing between lightweight live-edge resync seeks.
+  let liveResyncCooldownSeconds: Double = 6
+  /// After this many resync seeks fail to hold the edge, escalate to a full reload.
+  let maxLiveResyncAttempts = 3
+  /// When the viewer returns to the live edge but the seekable window AVPlayer
+  /// holds trails the true broadcast by at least this much, a same-window seek
+  /// can't reach real live — so we force a fresh load that lands at the true edge.
+  /// Measured as wall-clock behind-live minus the in-window edge gap, so it only
+  /// fires when the cached playlist is genuinely stale (not for normal latency).
+  let staleLiveWindowSnapThresholdSeconds: Double = 10
+  /// Minimum spacing between snap-to-true-live reloads, so a single return-to-live
+  /// can never loop into repeated reloads.
+  let liveEdgeSnapCooldownSeconds: Double = 6
   let stallNotificationDebounceSeconds: Double = 2.5
+  /// Stream-stability watchdog. It counts destabilizing events — stalls plus
+  /// involuntary backward playhead jumps (an AVPlayer rewind we never request) —
+  /// within a rolling window. Reaching the threshold flags the stream as
+  /// chronically unstable and switches to deep-buffer stability mode (drop the
+  /// prefetch proxy and ride behind the edge instead of chasing it). A struggling
+  /// broadcaster encoder trips this; healthy streams effectively never do.
+  let unstableEventWindowSeconds: Double = 45
+  /// Steady-state: any two destabilizing events in the window trip it (so "2
+  /// stalls", "2 jumps", or "1 stall + 1 jump" all qualify).
+  let unstableEventThreshold = 2
+  /// During the opening seconds of a stream a single event trips it, so a stream
+  /// that stutters the moment you arrive is stabilized almost immediately instead
+  /// of making you watch it sort itself out.
+  let unstableStartupEventThreshold = 1
+  let unstableStartupGraceSeconds: Double = 12
+  /// On entering stability mode, seek back to roughly this far behind the live
+  /// edge to build a cushion (and skip past a stuck near-edge segment). Only used
+  /// when the proxy was already off; otherwise a reload repositions the timeline.
+  let stabilityTargetBehindEdgeSeconds: Double = 20
+  /// Predictive stability: the proxy (`LowLatencyHLSProxy`) analyzes each HLS
+  /// media-playlist refresh and latches a `predictedUnstable` verdict when a
+  /// struggling encoder's manifests show structural trouble (media-sequence
+  /// stalls, irregular `#EXTINF`, recurring discontinuities) in the opening
+  /// refreshes. The watchdog polls that verdict here and trips the same
+  /// `enterStreamStabilityMode()` path *before* the viewer sits through stalls.
+  /// The scoring thresholds live next to the data they score, as the
+  /// `static let`s on `LowLatencyHLSProxy`.
   /// How long the player may sit unable to play (waiting on a starved buffer)
   /// before we authoritatively ask Twitch whether the channel is still live.
   /// Short enough to surface an ended broadcast promptly, long enough that a
@@ -575,6 +702,41 @@ struct PlayerView: View {
   let offlineProbeStallSeconds: Double = 6
   /// Minimum spacing between authoritative offline probes while still stuck.
   let offlineProbeCooldownSeconds: Double = 8
+  /// End-of-stream detection by a frozen live edge. A live broadcast keeps
+  /// appending segments, so its seekable edge advances; an ended one freezes it.
+  /// Once the edge hasn't advanced for this long while we're trying to follow
+  /// live, ask Twitch whether the channel is still up (this is independent of the
+  /// waiting/stall state, which the anti-stall slow-down keeps flickering). A
+  /// merely-struggling stream still advances its edge, so it won't trip this.
+  let endOfStreamEdgeFrozenSeconds: Double = 12
+  /// Safety net for when Twitch's status lookup keeps returning `.unknown` for an
+  /// ended stream: if the edge has been frozen this long AND the buffer is empty,
+  /// surface the offline state anyway rather than sit on a dead frame forever.
+  let endOfStreamEdgeForceOfflineSeconds: Double = 30
+  /// Fast end-of-stream force-offline for the unambiguous "ended" signature: the
+  /// live edge has stopped advancing AND playback is hard-stalled on a starved
+  /// buffer. A struggling-but-live stream keeps advancing its edge (clearing the
+  /// freeze timer) and a deep-buffer stability ride stays non-starved, so neither
+  /// trips this. Kept below the hard-stall reload window so a dead stream surfaces
+  /// offline before a (futile) recovery reload can reset the freeze timer.
+  let endOfStreamStalledForceOfflineSeconds: Double = 8
+  /// Soft-stall deadlock recovery. AVPlayer can park in
+  /// `.waitingToPlayAtSpecifiedRate` (reason `.evaluatingBufferingRate` or
+  /// `.toMinimizeStalls`) even while it holds a perfectly healthy forward buffer:
+  /// it decides the network might not sustain the rate and then never re-evaluates
+  /// on its own, because our adaptive-rate controller only issues a play command
+  /// when the *target rate changes* (here it stays 1.0×). The playhead creeps,
+  /// behind-live grows without bound, yet no buffer-empty hard-stall path fires.
+  /// We detect "waiting despite a healthy buffer" and kick it with playImmediately.
+  /// Minimum forward buffer that makes a `.waitingToPlayAtSpecifiedRate` state a
+  /// deadlock to break rather than a legitimate rebuffer to wait out.
+  let softStallBufferFloorSeconds: Double = 1.5
+  /// How long the player may sit waiting-with-healthy-buffer before the first nudge
+  /// (a brief wait right after a seek/start is normal and shouldn't be kicked).
+  let softStallNudgeSeconds: Double = 3
+  /// If repeated nudges can't break the deadlock within this long, reload — which
+  /// also re-lands near live, recovering the latency that grew while we were stuck.
+  let softStallReloadSeconds: Double = 12
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
@@ -630,6 +792,8 @@ struct PlayerView: View {
     case chatAnimatedToggle
     case chatFontOption(Int)
     case chatBadgesToggle
+    case chatHighlightToggle
+    case chatHighlightKeywords
     case chatResetButton
   }
 
@@ -669,6 +833,19 @@ struct PlayerView: View {
 
   var chatMessageSpacing: CGFloat {
     CGFloat(chatMessageSpacingValue)
+  }
+
+  /// Normalized highlight keywords: split on commas/newlines, trimmed,
+  /// lowercased, de-duplicated, empties dropped.
+  var chatHighlightKeywordList: [String] {
+    var seen = Set<String>()
+    var out: [String] = []
+    for piece in chatHighlightKeywords.split(whereSeparator: { $0 == "," || $0 == "\n" }) {
+      let token = piece.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      guard !token.isEmpty, seen.insert(token).inserted else { continue }
+      out.append(token)
+    }
+    return out
   }
 
   /// Resolved emote height: derived from the text size in Auto mode, otherwise
@@ -779,19 +956,19 @@ struct PlayerView: View {
 
       if showRaidEvents, let raid = chat.pendingRaid {
         raidBanner(raid)
-          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .transition(.motionAware(.move(edge: .bottom).combined(with: .opacity), reduceMotion: reduceMotion))
           .zIndex(10)
       }
 
       if let raid = outgoingRaid {
         outgoingRaidBanner(raid)
-          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .transition(.motionAware(.move(edge: .bottom).combined(with: .opacity), reduceMotion: reduceMotion))
           .zIndex(11)
       }
 
       if showStillWatching, !isSleeping {
         stillWatchingBanner()
-          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .transition(.motionAware(.move(edge: .bottom).combined(with: .opacity), reduceMotion: reduceMotion))
           .zIndex(12)
       }
 
@@ -802,7 +979,7 @@ struct PlayerView: View {
 
       if let goLive, let event = goLive.pending {
         goLiveToast(goLive, event: event)
-          .transition(.move(edge: .top).combined(with: .opacity))
+          .transition(.motionAware(.move(edge: .top).combined(with: .opacity), reduceMotion: reduceMotion))
           .zIndex(13)
       }
 
@@ -811,8 +988,8 @@ struct PlayerView: View {
           .transition(.opacity)
       }
     }
-    .animation(.easeInOut(duration: 0.35), value: hermes.currentMoment)
-    .animation(.easeOut(duration: 0.25), value: goLive?.pending)
+    .animation(.motionAware(.easeInOut(duration: 0.35), reduceMotion: reduceMotion), value: hermes.currentMoment)
+    .animation(.motionAware(.easeOut(duration: 0.25), reduceMotion: reduceMotion), value: goLive?.pending)
     .onChange(of: chat.pendingRaid) { _, newRaid in
       // Incoming raids (someone raiding the channel you're watching) are purely
       // informational: show a passive banner and auto-dismiss it. We never steal
@@ -888,6 +1065,10 @@ struct PlayerView: View {
       else { return }
       lastStallNotificationAt = now
       markDiagnosticsStall(reason: "AVPlayerItemPlaybackStalled")
+      // Re-kick immediately. With automaticallyWaitsToMinimizeStalling the player
+      // usually self-resumes once buffered, but an explicit nudge shortens the
+      // gap and helps the player that has stalled without auto-resuming.
+      player.playImmediately(atRate: 1.0)
     }
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) {
       notification in
@@ -1403,6 +1584,8 @@ struct PlayerView: View {
         }
         .TwizzControlButtonStyle()
         .buttonBorderShape(.circle)
+        .accessibilityLabel("Channel info")
+        .accessibilityHint("Opens the channel page")
         .focused($focus, equals: .streamInfo)
         .onMoveCommand { direction in
           switch direction {
@@ -1447,7 +1630,7 @@ struct PlayerView: View {
         if !isVOD {
         QualityMenu(
           options: qualityOptions,
-          selectedOption: preferredQuality,
+          selectedOption: selectedQualityOption,
           buttonLabel: qualityButtonLabel,
           reservedWidthLabels: qualityButtonLabelCandidates,
           displayLabel: { qualityDisplayLabel($0) },
@@ -1617,6 +1800,17 @@ struct PlayerView: View {
         // focus flash, no after-the-fact reverts.
         .focusable(scrubberFocusable)
         .focused($focus, equals: .rewindScrubber)
+        .accessibilityLabel(rewindReadout.isVOD ? "Timeline" : "Live timeline")
+        .accessibilityValue(rewindAccessibilityValue)
+        .accessibilityHint("Swipe up or down to seek ten seconds")
+        .accessibilityAdjustableAction { direction in
+          guard !isScrubbing else { return }
+          switch direction {
+          case .increment: rewindStep(rewindStepSeconds)
+          case .decrement: rewindStep(-rewindStepSeconds)
+          @unknown default: break
+          }
+        }
         .onMoveCommand { direction in
           // Left/right step the timeline. Up is intentionally left to the focus
           // engine: forcing an explicit target here fought the engine's own
@@ -1664,9 +1858,33 @@ struct PlayerView: View {
   var diagnosticsLines: [String] {
     var lines: [String] = []
 
-    let mode = lowLatencyProxyEnabled ? "LL proxy ON" : "LL proxy off"
+    let mode: String
+    if lowLatencyProxyEnabled {
+      mode = isStreamUnstable ? "LL proxy auto-off (unstable)" : "LL proxy ON"
+    } else {
+      mode = "LL proxy off"
+    }
     let pin = preferredQuality == "Auto" ? "Auto/adaptive" : "\(preferredQuality) (pinned)"
     lines.append("Mode: \(mode) · \(pin)")
+    if isStreamUnstable {
+      let trigger = streamUnstableWasPredicted ? "predictive" : "observed"
+      lines.append(
+        "⚠︎ STABILITY MODE [\(trigger)] (proxy off, deep buffer, riding behind edge)")
+    }
+    // Surface the predictive instability score whenever the proxy is engaged —
+    // both before a trip (watch it climb) and after (the score it had reached when
+    // it tripped, so a near-miss "observed" trip is still visible for tuning).
+    if lowLatencyProxyEnabled, !isVOD {
+      let snap = lowLatencyProxy.instabilityDiagnostics
+      if snap.refreshes > 0 {
+        var line =
+          "Predict: score \(diagFormat(snap.score, decimals: 1))"
+          + "/\(diagFormat(LowLatencyHLSProxy.predictedUnstableScoreThreshold, decimals: 1))"
+          + " · \(snap.refreshes) refresh\(snap.refreshes == 1 ? "" : "es")"
+        if !snap.detail.isEmpty { line += " · \(snap.detail)" }
+        lines.append(line)
+      }
+    }
 
     if let item = player.currentItem {
       let size = item.presentationSize
@@ -1880,6 +2098,8 @@ struct PlayerView: View {
       .chatAnimatedToggle,
       .chatFontOption,
       .chatBadgesToggle,
+      .chatHighlightToggle,
+      .chatHighlightKeywords,
       .chatResetButton:
       return true
     default:
@@ -1925,6 +2145,10 @@ struct PlayerView: View {
         animatedEmotes: chatAnimatedEmotes,
         fontStyle: chatFontStyle,
         showBadges: chatShowBadges,
+        highlightEnabled: chatHighlightMentionsEnabled,
+        viewerLogin: auth.userLogin,
+        viewerDisplayName: auth.userDisplayName,
+        highlightKeywords: chatHighlightKeywordList,
         useGlassBackground: isGlass,
         useLighterOverlayBackground: useLighterOverlayBackground,
         autoScroll: !(isChatScrolling || chatSoftPauseRemaining != nil),
@@ -1963,7 +2187,7 @@ struct PlayerView: View {
       .overlay(alignment: .top) {
         if let moment = hermes.currentMoment, !isSleeping, isEventEnabled(moment) {
           dockedInteractiveMoment(moment, style: momentDockStyle(isGlass: isGlass))
-            .transition(.move(edge: .top).combined(with: .opacity))
+            .transition(.motionAware(.move(edge: .top).combined(with: .opacity), reduceMotion: reduceMotion))
         }
       }
 
@@ -2123,6 +2347,7 @@ struct PlayerView: View {
             // `.disabled` also doubles as the rewind-bar focus gate; see the
             // composer button above for why we avoid `.focusable` on a Button.
             .disabled(isSendingChat || focus == .rewindScrubber)
+            .accessibilityLabel("Send message")
             .focused($focus, equals: .chatSend)
             .transition(.opacity)
             .onMoveCommand { direction in
@@ -2236,10 +2461,15 @@ struct PlayerView: View {
     }
   }
 
+  /// Placeholder/value shown in the highlight-keywords settings field.
+  var highlightKeywordsDisplayText: String {
+    let trimmed = chatHighlightKeywords.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? "Add keywords (optional)" : trimmed
+  }
+
   /// The effective YouTube merge target shown in the settings input: the manual
   /// entry when present, otherwise the resolved default handle for the channel.
-  var youtubeMergeDisplayText: String {
-    let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(
+  var youtubeMergeDisplayText: String {    let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(
       in: .whitespacesAndNewlines)
     if !manual.isEmpty { return manual }
     return youtubeMergeDefaultTarget.isEmpty
@@ -2507,6 +2737,7 @@ struct ChatInputButtonStyle: ButtonStyle {
 /// element growing. Falls back to `.ultraThinMaterial` on systems older than tvOS 26.
 struct ChatGlassFieldStyle: ViewModifier {
   let isFocused: Bool
+  @Environment(\.glassDisabled) private var glassDisabled
 
   private var shape: Capsule {
     Capsule(style: .continuous)
@@ -2514,7 +2745,15 @@ struct ChatGlassFieldStyle: ViewModifier {
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .background(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(Color.twizzOpaqueGlass), in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.0 : 0.16), lineWidth: 0.75))
+        .scaleEffect(isFocused ? 1.05 : 1.0)
+        .shadow(
+          color: .black.opacity(isFocused ? 0.22 : 0.18),
+          radius: isFocused ? 10 : 5, x: 0, y: isFocused ? 4 : 2)
+    } else if #available(tvOS 26.0, *) {
       content
         .glassEffect(isFocused ? .regular.tint(.white) : .regular, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.0 : 0.10), lineWidth: 0.75))
@@ -2557,6 +2796,11 @@ private struct ChatMessagesColumn: View {
   let animatedEmotes: Bool
   let fontStyle: ChatFontStyle
   let showBadges: Bool
+  /// Highlight (mention) inputs, passed straight through to `ChatView`.
+  var highlightEnabled: Bool = true
+  var viewerLogin: String? = nil
+  var viewerDisplayName: String? = nil
+  var highlightKeywords: [String] = []
   let useGlassBackground: Bool
   let useLighterOverlayBackground: Bool
   let autoScroll: Bool
@@ -2595,6 +2839,10 @@ private struct ChatMessagesColumn: View {
       animatedEmotes: animatedEmotes,
       fontStyle: fontStyle,
       showBadges: showBadges,
+      highlightEnabled: highlightEnabled,
+      viewerLogin: viewerLogin,
+      viewerDisplayName: viewerDisplayName,
+      highlightKeywords: highlightKeywords,
       isConnected: isConnected,
       emoteURLs: emoteURLs,
       badgeURLs: badgeURLs,
@@ -2851,32 +3099,51 @@ struct ChatKeyboardHostField: UIViewRepresentable {
 private struct ChatSyncSendIndicator: View {
   let deadline: Date
   let total: Double
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    TimelineView(.animation) { context in
-      let remaining = max(0, deadline.timeIntervalSince(context.date))
-      let progress = total > 0 ? min(1, max(0, 1 - remaining / total)) : 1
-      HStack(spacing: 10) {
-        Icon(glyph: .clock, size: 16)
-          .foregroundStyle(.white.opacity(0.7))
-        VStack(alignment: .leading, spacing: 4) {
-          Text(
-            remaining > 0.5
-              ? "Sent — appears in \(Int(remaining.rounded()))s"
-              : "Appearing now…"
-          )
-          .font(.caption2)
-          .foregroundStyle(.white.opacity(0.82))
+    Group {
+      if reduceMotion {
+        // Reduce Motion: step the countdown once a second (no smooth 60fps
+        // progress fill) and drop the animated bar.
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          indicator(now: context.date)
+        }
+      } else {
+        TimelineView(.animation) { context in
+          indicator(now: context.date)
+        }
+      }
+    }
+  }
+
+  private func indicator(now: Date) -> some View {
+    let remaining = max(0, deadline.timeIntervalSince(now))
+    let progress = total > 0 ? min(1, max(0, 1 - remaining / total)) : 1
+    return HStack(spacing: 10) {
+      Icon(glyph: .clock, size: 16)
+        .foregroundStyle(.white.opacity(0.7))
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 4) {
+        Text(
+          remaining > 0.5
+            ? "Sent — appears in \(Int(remaining.rounded()))s"
+            : "Appearing now…"
+        )
+        .font(.caption2)
+        .foregroundStyle(.white.opacity(0.82))
+        if !reduceMotion {
           ProgressView(value: progress)
             .progressViewStyle(.linear)
             .tint(.purple)
+            .accessibilityHidden(true)
         }
       }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
   }
 }
 
@@ -2884,6 +3151,7 @@ private struct ChatSyncSendIndicator: View {
 /// otherwise leaves it as a full-height docked panel.
 private struct GlassChatPaneStyle: ViewModifier {
   let enabled: Bool
+  @Environment(\.glassDisabled) private var glassDisabled
 
   /// Inset between the glass panel and the screen edges.
   static let edgeInset: CGFloat = 24
@@ -2905,7 +3173,13 @@ private struct GlassChatPaneStyle: ViewModifier {
 
   @ViewBuilder
   private func glassBody(_ content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .frame(maxHeight: .infinity)
+        .background(Color.twizzOpaqueGlass, in: shape)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
+    } else if #available(tvOS 26.0, *) {
       content
         .frame(maxHeight: .infinity)
         .clipShape(shape)
@@ -2926,13 +3200,18 @@ private struct GlassChatPaneStyle: ViewModifier {
 /// hairline. Unlike `GlassChatPaneStyle` it does not clip or inset, so the
 /// panel can size to its content and its inner focus effects can lift freely.
 struct ChatSettingsPanelGlassStyle: ViewModifier {
+  @Environment(\.glassDisabled) private var glassDisabled
   private var shape: RoundedRectangle {
     RoundedRectangle(cornerRadius: 40, style: .continuous)
   }
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .background(Color.twizzOpaqueGlass, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
+    } else if #available(tvOS 26.0, *) {
       content
         // Same darkening scrim the Glass chat pane paints over its glass
         // (ChatView uses Color.black.opacity(0.22)); without it the panel's bare
@@ -2976,12 +3255,12 @@ final class PlaybackMonitorBox {
   /// Consecutive samples whose smoothed value barely moved — i.e. the reading
   /// has stopped climbing off the live edge and looks trustworthy.
   var latencyStableCount = 0
+  /// Consecutive samples deviating from the smoothed value by an outlier margin,
+  /// used to hold back a transient latency spike until it is corroborated.
+  var latencyOutlierStreak = 0
   var isPlaybackActive = false
   var didRequestPlayback = false
-  var lastHardCatchUpJumpAt = Date.distantPast
-  var lastWallClockCatchUpAt = Date.distantPast
   var edgeLatencyLowConfidenceStreak = 0
-  var wallClockHighLatencyStreak = 0
   var wallClockLowConfidenceStreak = 0
   var lastPlaybackDateSample: Date?
   var lastPlaybackTimeSampleSeconds: Double?
@@ -2989,12 +3268,45 @@ final class PlaybackMonitorBox {
   var stalledPlaybackSamples = 0
   var isRecoveringPlayback = false
   var lastRecoveryAttemptAt = Date.distantPast
+  /// Throttle + escalation state for the lightweight live-edge resync that pulls
+  /// the playhead back when AVPlayer involuntarily drifts far behind live (the
+  /// "rewound 120s and never recovered" failure). Escalates to a full reload only
+  /// after repeated resyncs fail to stick.
+  var lastLiveResyncAt = Date.distantPast
+  var liveResyncAttempts = 0
+  /// Throttles the snap-to-true-live reload that fires when the viewer returns to
+  /// the live edge atop a stale seekable window.
+  var lastLiveEdgeSnapAt = Date.distantPast
   /// When the player first entered a sustained "waiting with a starved buffer"
   /// state. Drives the authoritative end-of-stream (offline) probe.
   var liveStallWaitingSince: Date?
+  /// Highest live seekable-edge position seen, and when it stopped advancing.
+  /// An ended broadcast freezes the edge, which is a cleaner end-of-stream signal
+  /// than the waiting/stall state the anti-stall slow-down keeps flickering.
+  var lastLiveEdgeSeconds: Double?
+  var liveEdgeFrozenSince: Date?
   /// Guards against overlapping offline probes and rate-limits them.
   var offlineProbeInFlight = false
   var lastOfflineProbeAt = Date.distantPast
+  /// Timestamps of recent counted stalls, pruned to a rolling window, used to
+  /// detect a chronically-unstable stream (a struggling broadcaster encoder).
+  var recentInstabilityEvents: [Date] = []
+  /// Set when the stream-stability watchdog has switched into deep-buffer
+  /// stability mode; `nil` while the stream is behaving. Latched (sticky) for the
+  /// rest of the channel session.
+  var streamUnstableSince: Date?
+  /// When the most recent stall/jump was counted.
+  var lastStallAt: Date?
+  /// Set when the stability trip came from the proxy's predictive (manifest)
+  /// signal rather than from observed stalls/jumps. Drives the overlay readout.
+  var streamUnstableWasPredicted = false
+  /// When playback first started advancing for this stream session, used to apply
+  /// a more sensitive (single-event) instability trip during the opening seconds.
+  var streamPlaybackStartedAt: Date?
+  /// Soft-stall deadlock state: when AVPlayer first parked in "waiting despite a
+  /// healthy buffer", and when we last issued a play nudge to break it.
+  var softStallSince: Date?
+  var lastSoftStallNudgeAt = Date.distantPast
 }
 
 /// The only latency state SwiftUI observes for the on-screen badge. Updated once
@@ -3084,9 +3396,15 @@ private struct PlayerInfoBadge: View {
 /// the standard white hairline. Keeps every chip reading at the same darkness
 /// instead of the lighter bare-material look they had before.
 private struct HUDChipGlassStyle: ViewModifier {
+  @Environment(\.glassDisabled) private var glassDisabled
   func body(content: Content) -> some View {
     let shape = Capsule(style: .continuous)
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .background(Color.twizzOpaqueGlass, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
+        .clipShape(shape)
+    } else if #available(tvOS 26.0, *) {
       content
         .background(Color.black.opacity(0.22), in: shape)
         .glassEffect(.regular, in: shape)
@@ -3237,10 +3555,16 @@ private struct RewindScrubBar: View {
 private struct ScrubBarGlassBackground: ViewModifier {
   let shape: RoundedRectangle
   let isFocused: Bool
+  @Environment(\.glassDisabled) private var glassDisabled
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if glassDisabled {
+      content
+        .background(Color.twizzOpaqueGlass, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.30 : 0.16), lineWidth: 1))
+        .clipShape(shape)
+    } else if #available(tvOS 26.0, *) {
       content
         .glassEffect(isFocused ? .regular.tint(.white.opacity(0.10)) : .regular, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.22 : 0.10), lineWidth: 1))
@@ -3527,15 +3851,30 @@ struct SleepingScreen: View {
     return Color(red: c.r, green: c.g, blue: c.b).opacity(opacity)
   }
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   var body: some View {
-    TimelineView(.animation) { timeline in
-      let t = timeline.date.timeIntervalSinceReferenceDate
-      // Slowly drifting glow centers give the scene a gentle, living motion.
-      let driftA = UnitPoint(x: 0.30 + 0.14 * sin(t * 0.043),
-                             y: 0.34 + 0.10 * cos(t * 0.037))
-      let driftB = UnitPoint(x: 0.72 + 0.12 * cos(t * 0.031),
-                             y: 0.64 + 0.13 * sin(t * 0.049))
-      ZStack {
+    Group {
+      if reduceMotion {
+        // Reduce Motion: render a single static frame — no twinkle, drift,
+        // shooting stars, or logo pulse.
+        scene(t: 0)
+      } else {
+        TimelineView(.animation) { timeline in
+          scene(t: timeline.date.timeIntervalSinceReferenceDate)
+        }
+      }
+    }
+    .environment(\.colorScheme, .dark)
+  }
+
+  private func scene(t: Double) -> some View {
+    // Slowly drifting glow centers give the scene a gentle, living motion.
+    let driftA = UnitPoint(x: 0.30 + 0.14 * sin(t * 0.043),
+                           y: 0.34 + 0.10 * cos(t * 0.037))
+    let driftB = UnitPoint(x: 0.72 + 0.12 * cos(t * 0.031),
+                           y: 0.64 + 0.13 * sin(t * 0.049))
+    return ZStack {
         // Blur whatever is paused behind (stream frame + chat), then bank it
         // way down into a dark, warm night so it stays easy on the eyes.
         Rectangle()
@@ -3616,8 +3955,6 @@ struct SleepingScreen: View {
         centerContent(pulse: 0.5 + 0.5 * sin(t * 0.6))
       }
       .ignoresSafeArea()
-    }
-    .environment(\.colorScheme, .dark)
   }
 
   private func centerContent(pulse: Double) -> some View {

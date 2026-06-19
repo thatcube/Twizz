@@ -31,11 +31,13 @@ struct MediaContentCard: View {
           .font(.subheadline.weight(.semibold))
           .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
           .lineLimit(1)
+          .minimumScaleFactor(0.7)
 
         Text(subtitle.isEmpty ? " " : subtitle)
           .font(.footnote)
           .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
           .lineLimit(2, reservesSpace: true)
+          .minimumScaleFactor(0.8)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -49,6 +51,21 @@ struct MediaContentCard: View {
       palette: palette
     )
     .shadow(color: Color.black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(accessibilityLabel)
+  }
+
+  /// One spoken description per tile: title, subtitle, and duration — so
+  /// VoiceOver reads a clip/VOD as a single coherent element.
+  private var accessibilityLabel: Text {
+    var parts: [String] = [title]
+    if !subtitle.isEmpty {
+      parts.append(subtitle)
+    }
+    if let durationText {
+      parts.append(durationText)
+    }
+    return Text(parts.joined(separator: ", "))
   }
 
   private var media: some View {

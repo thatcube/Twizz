@@ -11,6 +11,8 @@ import UIKit
 struct SettingsView: View {
   @Bindable var themeManager: ThemeManager
   let auth: TwitchAuthSession
+  var follows: FollowedChannelsService
+  var goLiveSettings: GoLiveNotificationSettings
   var onRequestSignIn: () -> Void = {}
   var onClearWatchHistory: () -> Void = {}
   var onAccountChanged: () -> Void = {}
@@ -30,36 +32,43 @@ struct SettingsView: View {
   @AppStorage("showChatByDefault") private var showChatByDefault = true
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedRecommendationsEnabled = true
   @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
+  @AppStorage(GoLiveNotificationPreferences.enabledKey) private var goLiveAlertsEnabled = true
+  @AppStorage("disableLiquidGlass") private var disableLiquidGlass = false
+  @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   private let labelColumnWidth: CGFloat = 420
 
   var body: some View {
-    ZStack {
-      LinearGradient(
-        colors: palette.backgroundColors,
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
+    NavigationStack {
+      ZStack {
+        LinearGradient(
+          colors: palette.backgroundColors,
+          startPoint: .top,
+          endPoint: .bottom
+        )
+        .ignoresSafeArea()
 
-      ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 28) {
-          Text("Settings")
-            .font(.system(size: 38, weight: .bold))
+        ScrollView(.vertical, showsIndicators: false) {
+          VStack(alignment: .leading, spacing: 28) {
+            Text("Settings")
+              .font(.system(size: 38, weight: .bold))
+              .accessibilityAddTraits(.isHeader)
 
-          preferencesGroup
-          accountSection
-          topShelfSection
-          AboutSection()
-          #if DEBUG
-          captionSpikeSection
-          #endif
+            preferencesGroup
+            accountSection
+            topShelfSection
+            AboutSection()
+            #if DEBUG
+            captionSpikeSection
+            #endif
+          }
+          .frame(maxWidth: .infinity, alignment: .topLeading)
+          .padding(.horizontal, AppLayout.horizontalPadding)
+          .padding(.vertical, 32)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.horizontal, AppLayout.horizontalPadding)
-        .padding(.vertical, 32)
+        .scrollClipDisabled()
       }
-      .scrollClipDisabled()
     }
     #if DEBUG
     .fullScreenCover(isPresented: $showCaptionSpike) {
@@ -119,9 +128,19 @@ struct SettingsView: View {
 
       recommendationsRow
         .padding(.vertical, 16)
+
+      groupDivider
+
+      goLiveAlertsRow
+        .padding(.vertical, 16)
+
+      groupDivider
+
+      reduceTransparencyRow
+        .padding(.vertical, 16)
     }
     .padding(.horizontal, 28)
-    .glassPanel()
+    .glassPanel(disabled: glassDisabled)
   }
 
   private var groupDivider: some View {
@@ -239,6 +258,54 @@ struct SettingsView: View {
 
   /// A single preference row: fixed-width label column on the left, a
   /// horizontal run of selectable pills on the right.
+  private var goLiveAlertsRow: some View {
+    settingRow(
+      title: "Go Live Alerts",
+      subtitle: "In-app pop-up on this Apple TV when a channel you follow goes live. Doesn't change Twitch notifications on your other devices."
+    ) {
+      ForEach([true, false], id: \.self) { on in
+        Button {
+          goLiveAlertsEnabled = on
+        } label: {
+          SettingPill(title: on ? "On" : "Off", isSelected: goLiveAlertsEnabled == on)
+        }
+        .settingPillStyle(isSelected: goLiveAlertsEnabled == on)
+      }
+
+      NavigationLink {
+        GoLiveAlertsSettingsView(follows: follows, settings: goLiveSettings, auth: auth)
+      } label: {
+        SettingPill(title: "Choose Channels", isSelected: false)
+      }
+      .settingPillStyle(isSelected: false)
+      .disabled(!goLiveAlertsEnabled)
+      .opacity(goLiveAlertsEnabled ? 1 : 0.4)
+    }
+  }
+
+  /// Reduce Transparency toggle: swaps translucent Liquid Glass surfaces for
+  /// opaque, high-contrast fills app-wide. The OS "Reduce Transparency"
+  /// accessibility setting forces this on regardless of the in-app choice.
+  private var reduceTransparencyRow: some View {
+    settingRow(
+      title: "Reduce Transparency",
+      subtitle: reduceTransparency
+        ? "Translucent panels are replaced with solid, high-contrast fills. Forced on by the system Reduce Transparency setting."
+        : "Replace translucent Liquid Glass panels with solid, high-contrast fills for better legibility."
+    ) {
+      ForEach([true, false], id: \.self) { on in
+        Button {
+          disableLiquidGlass = on
+        } label: {
+          SettingPill(title: on ? "On" : "Off", isSelected: disableLiquidGlass == on)
+        }
+        .settingPillStyle(isSelected: disableLiquidGlass == on)
+        .disabled(reduceTransparency)
+        .opacity(reduceTransparency ? 0.4 : 1)
+      }
+    }
+  }
+
   private func settingRow<Content: View>(
     title: String,
     subtitle: String?,
@@ -298,7 +365,7 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassPanel()
+        .glassPanel(disabled: glassDisabled)
         .focusSection()
         .confirmationDialog(
           "Sign out of Twitch?",
@@ -334,7 +401,7 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassPanel()
+        .glassPanel(disabled: glassDisabled)
         .focusSection()
       }
     }
@@ -347,6 +414,7 @@ struct SettingsView: View {
       VStack(alignment: .leading, spacing: 6) {
         Text("Top Shelf")
           .font(.system(size: 32, weight: .bold))
+          .accessibilityAddTraits(.isHeader)
           .foregroundStyle(.secondary)
 
         Text("Diagnostics for the stream cards shown above the app on the Home screen.")
@@ -401,6 +469,7 @@ struct SettingsView: View {
 /// can scroll it into view at the bottom of the list.
 private struct AboutSection: View {
   @FocusState private var isFocused: Bool
+  @Environment(\.glassDisabled) private var glassDisabled
 
   private static let repoURL = "https://github.com/thatcube/Twizz"
 
@@ -423,6 +492,7 @@ private struct AboutSection: View {
 
         Text("About")
           .font(.system(size: 32, weight: .bold))
+          .accessibilityAddTraits(.isHeader)
 
         VStack(alignment: .leading, spacing: 10) {
           infoRow("Name", "Twizz")
@@ -448,7 +518,7 @@ private struct AboutSection: View {
       }
     }
     .padding(28)
-    .glassPanel()
+    .glassPanel(disabled: glassDisabled)
     .overlay(
       RoundedRectangle(cornerRadius: 24, style: .continuous)
         .stroke(Color.primary.opacity(isFocused ? 0.45 : 0), lineWidth: 2)
@@ -555,12 +625,18 @@ private struct SettingPill: View {
 extension View {
   /// Frosted Liquid Glass panel (tvOS 26+) with a material fallback.
   @ViewBuilder
-  fileprivate func glassPanel() -> some View {
+  fileprivate func glassPanel(disabled: Bool) -> some View {
     let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
-    if #available(tvOS 26.0, *) {
-      self.glassEffect(.regular, in: shape)
-    } else {
-      self.background(.ultraThinMaterial, in: shape)
+    return Group {
+      if disabled {
+        self
+          .background(Color.twizzOpaqueGlass, in: shape)
+          .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
+      } else if #available(tvOS 26.0, *) {
+        self.glassEffect(.regular, in: shape)
+      } else {
+        self.background(.ultraThinMaterial, in: shape)
+      }
     }
   }
 

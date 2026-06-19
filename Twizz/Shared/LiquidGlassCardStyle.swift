@@ -7,6 +7,7 @@ struct TwizzLiquidGlassCardModifier: ViewModifier {
   let cornerRadius: CGFloat
   let isFocused: Bool
   let palette: ThemePalette
+  @Environment(\.glassDisabled) private var glassDisabled
   /// When false, the live Liquid Glass material is rendered only while the card
   /// is focused; unfocused cards fall back to a cheap translucent fill. Each
   /// `.glassEffect` is a real-time backdrop sample, so on dense screens (e.g. the
@@ -19,7 +20,17 @@ struct TwizzLiquidGlassCardModifier: ViewModifier {
   func body(content: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
-    if #available(tvOS 26.0, *), isFocused || glassWhenUnfocused {
+    if glassDisabled {
+      // Reduce Transparency: opaque, high-contrast fill instead of glass.
+      content
+        .background {
+          shape.fill(isFocused ? palette.liftSurface : Color.twizzOpaqueGlass)
+        }
+        .overlay {
+          shape.strokeBorder(Color.white.opacity(isFocused ? 0.0 : 0.16), lineWidth: 1)
+        }
+        .clipShape(shape)
+    } else if #available(tvOS 26.0, *), isFocused || glassWhenUnfocused {
       content
         .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
         .clipShape(shape)

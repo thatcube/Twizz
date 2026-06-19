@@ -129,11 +129,13 @@ struct StreamChannelCard: View {
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
             .lineLimit(1)
+            .minimumScaleFactor(0.7)
 
           Text(channel.title.isEmpty ? "No title" : channel.title)
             .font(.footnote)
             .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
             .lineLimit(2, reservesSpace: true)
+            .minimumScaleFactor(0.8)
             .frame(maxWidth: .infinity, alignment: .leading)
 
           if showsGameName {
@@ -141,6 +143,7 @@ struct StreamChannelCard: View {
               .font(.caption2)
               .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
               .lineLimit(1)
+              .minimumScaleFactor(0.7)
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -174,6 +177,26 @@ struct StreamChannelCard: View {
       onWatch: onWatch,
       onGoToChannel: onGoToChannel
     )
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(accessibilityLabel)
+  }
+
+  /// A single spoken description per card: name, live/offline state, title,
+  /// game, and (when live) the viewer count — so VoiceOver reads one coherent
+  /// sentence instead of disconnected avatar/name/title fragments.
+  private var accessibilityLabel: Text {
+    var parts: [String] = [channel.displayName]
+    parts.append(channel.isLive ? "Live" : "Offline")
+    if !channel.title.isEmpty {
+      parts.append(channel.title)
+    }
+    if !channel.gameName.isEmpty {
+      parts.append(channel.gameName)
+    }
+    if channel.isLive, let viewerCount = channel.viewerCount {
+      parts.append("\(viewerCount) watching")
+    }
+    return Text(parts.joined(separator: ", "))
   }
 
   @ViewBuilder
@@ -203,10 +226,25 @@ struct StreamChannelCard: View {
         Circle()
           .fill(channel.isLive ? Color.red : Color.gray)
           .frame(width: 8, height: 8)
+        // A textual "LIVE" tag so the live/offline state never reads by color
+        // alone — the red dot conveys it visually, this conveys it in words.
+        if channel.isLive {
+          Text("LIVE")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(Color.white)
+            .lineLimit(1)
+        }
         if let viewerCount = channel.viewerCount {
           Text("\(viewerCount) watching")
             .font(.caption2)
-            .foregroundStyle(Color.white.opacity(0.78))
+            .foregroundStyle(Color.white.opacity(0.92))
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+        } else if !channel.isLive {
+          Text("Offline")
+            .font(.caption2)
+            .foregroundStyle(Color.white.opacity(0.92))
+            .lineLimit(1)
         }
       }
       .padding(12)
