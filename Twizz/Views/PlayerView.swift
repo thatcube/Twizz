@@ -136,6 +136,23 @@ struct PlayerView: View {
     return focus != .chatInput && focus != .chatSend
   }
 
+  /// Spoken value for the rewind/seek bar's `accessibilityValue`: VODs read
+  /// "elapsed of total", live reads "Live" at the edge or "N behind live".
+  var rewindAccessibilityValue: String {
+    func spoken(_ seconds: Double) -> String {
+      let total = max(0, Int(seconds.rounded()))
+      let m = total / 60
+      let s = total % 60
+      if m > 0 { return "\(m) minute\(m == 1 ? "" : "s") \(s) second\(s == 1 ? "" : "s")" }
+      return "\(s) second\(s == 1 ? "" : "s")"
+    }
+    if rewindReadout.isVOD {
+      return "\(spoken(rewindReadout.elapsedSeconds)) of \(spoken(rewindReadout.totalSeconds))"
+    }
+    if rewindReadout.isAtLiveEdge { return "Live" }
+    return "\(spoken(rewindReadout.behindLiveSeconds)) behind live"
+  }
+
   /// Selectable VOD playback rates, cycled by the speed control.
   var vodSpeedOptions: [Float] { [0.5, 1.0, 1.25, 1.5, 2.0] }
 
@@ -1566,6 +1583,8 @@ struct PlayerView: View {
         }
         .TwizzControlButtonStyle()
         .buttonBorderShape(.circle)
+        .accessibilityLabel("Channel info")
+        .accessibilityHint("Opens the channel page")
         .focused($focus, equals: .streamInfo)
         .onMoveCommand { direction in
           switch direction {
@@ -1780,6 +1799,17 @@ struct PlayerView: View {
         // focus flash, no after-the-fact reverts.
         .focusable(scrubberFocusable)
         .focused($focus, equals: .rewindScrubber)
+        .accessibilityLabel(rewindReadout.isVOD ? "Timeline" : "Live timeline")
+        .accessibilityValue(rewindAccessibilityValue)
+        .accessibilityHint("Swipe up or down to seek ten seconds")
+        .accessibilityAdjustableAction { direction in
+          guard !isScrubbing else { return }
+          switch direction {
+          case .increment: rewindStep(rewindStepSeconds)
+          case .decrement: rewindStep(-rewindStepSeconds)
+          @unknown default: break
+          }
+        }
         .onMoveCommand { direction in
           // Left/right step the timeline. Up is intentionally left to the focus
           // engine: forcing an explicit target here fought the engine's own
@@ -2316,6 +2346,7 @@ struct PlayerView: View {
             // `.disabled` also doubles as the rewind-bar focus gate; see the
             // composer button above for why we avoid `.focusable` on a Button.
             .disabled(isSendingChat || focus == .rewindScrubber)
+            .accessibilityLabel("Send message")
             .focused($focus, equals: .chatSend)
             .transition(.opacity)
             .onMoveCommand { direction in
@@ -3066,6 +3097,7 @@ private struct ChatSyncSendIndicator: View {
       HStack(spacing: 10) {
         Icon(glyph: .clock, size: 16)
           .foregroundStyle(.white.opacity(0.7))
+          .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 4) {
           Text(
             remaining > 0.5
@@ -3077,6 +3109,7 @@ private struct ChatSyncSendIndicator: View {
           ProgressView(value: progress)
             .progressViewStyle(.linear)
             .tint(.purple)
+            .accessibilityHidden(true)
         }
       }
       .padding(.horizontal, 12)
