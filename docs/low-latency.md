@@ -128,7 +128,14 @@ broadcaster can never produce a false trip):**
    a 2s-target segment shorter than 1.0s or longer than 3.0s). A steady encoder
    emits near-exact target-length segments; a struggling one does not. The final
    listed segment is excluded (a live tail can be a legitimate partial) and at
-   least `minSegmentsForDurationCheck` (3) segments are required
+   least `minSegmentsForDurationCheck` (3) segments are required. A refresh is
+   only judged irregular when **at least `minOffCadenceSegmentsForIrregular` (2)
+   body segments are off-cadence** — a healthy encoder occasionally emits a *lone*
+   long/short segment at a scene cut or keyframe boundary, so a single outlier is
+   treated as noise; a genuinely struggling encoder is *broadly* off-cadence.
+   (This ≥2 requirement was added after a good stream false-tripped: its
+   occasional single outlier landed on consecutive refreshes and escalated the
+   streak tier past the threshold, dropping low latency on a flawless stream.)
    (`irregularRefreshPoints = 1.0`). **Streak escalation (the primary bad-encoder
    signal — shxtou's dominant manifest reason on-device):** the *second and each
    subsequent consecutive* off-cadence refresh scores `irregularStreakRefreshPoints`

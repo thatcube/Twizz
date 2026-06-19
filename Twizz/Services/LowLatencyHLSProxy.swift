@@ -135,6 +135,15 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     static let segmentDurationToleranceFraction = 0.5
     /// Don't assess duration regularity on a sparse playlist.
     static let minSegmentsForDurationCheck = 3
+    /// How many *body* segments must be off-cadence in a single refresh before
+    /// that refresh is judged "irregular". A healthy encoder occasionally emits a
+    /// lone long/short segment (a scene cut or keyframe-aligned boundary), so one
+    /// outlier is treated as noise; a genuinely struggling encoder is *broadly*
+    /// off-cadence, emitting several off-cadence segments per refresh. Requiring
+    /// ≥2 (rather than an implicit ≥1) closes a false trip where a clean stream's
+    /// occasional single outlier, landing on consecutive refreshes, escalated the
+    /// streak tier past the threshold and dropped low latency on a good stream.
+    static let minOffCadenceSegmentsForIrregular = 2
 
     /// A point-in-time read of the predictor, safe to read from any thread.
     struct InstabilitySnapshot: Sendable {
@@ -599,9 +608,15 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
             let target = targetDurationSeconds(parsed)
             if target > 0 {
                 let body = parsed.segments.dropLast()
-                let offCadence = body.contains { seg in
-                    abs(seg.duration - target) / target > Self.segmentDurationToleranceFraction
+                let offCadenceCount = body.reduce(into: 0) { count, seg in
+                    if abs(seg.duration - target) / target > Self.segmentDurationToleranceFraction {
+                        count += 1
+                    }
                 }
+                // A lone outlier segment is noise; only a refresh that is broadly
+                // off-cadence (≥ minOffCadenceSegmentsForIrregular) counts as a
+                // struggling-encoder signal.
+                let offCadence = offCadenceCount >= Self.minOffCadenceSegmentsForIrregular
                 if offCadence {
                     state.irregularStreak += 1
                     if state.irregularStreak >= 2 {

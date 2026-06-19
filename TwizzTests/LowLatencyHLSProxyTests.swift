@@ -175,6 +175,34 @@ final class LowLatencyHLSProxyTests: XCTestCase {
     XCTAssertEqual(proxy.instabilityDiagnostics.score, 0, accuracy: 0.0001)
   }
 
+  /// A healthy stream that occasionally emits a *single* off-cadence segment per
+  /// refresh (a scene cut / keyframe-aligned boundary) must NOT be judged
+  /// irregular — even if it happens on every refresh across the whole window.
+  /// One outlier is noise; only a *broadly* off-cadence refresh (≥2 off-cadence
+  /// body segments) signals a struggling encoder. This is the regression guard
+  /// for the false trip where a good stream dropped low latency.
+  func testSingleOutlierSegmentDoesNotFalseTrip() {
+    let proxy = makeProxy()
+    // Each refresh has exactly one long (4s) body segment; the rest are on
+    // cadence. (`dropLast()` excludes the live tail, so the 4s segment is in the
+    // assessed body.) Sequence advances; no discontinuities.
+    let playlists = (0..<12).map { i in
+      instabilityPlaylist(
+        mediaSequence: 100 + i,
+        segments: [
+          (name: "a\(i)", duration: 2, discontinuity: false),
+          (name: "b\(i)", duration: 4, discontinuity: false),
+          (name: "c\(i)", duration: 2, discontinuity: false),
+        ])
+    }
+    feedRefreshes(proxy, playlists)
+
+    XCTAssertFalse(
+      proxy.predictedUnstable,
+      "a single off-cadence segment per refresh is noise and must not trip the predictor")
+    XCTAssertEqual(proxy.instabilityDiagnostics.score, 0, accuracy: 0.0001)
+  }
+
   /// A stalled encoder — the media sequence (and segment list) never advances
   /// across refreshes — should trip the predictor.
   func testStalledMediaSequenceIsPredictedUnstable() {
