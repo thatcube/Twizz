@@ -108,6 +108,7 @@ struct PlayerView: View {
   @AppStorage("chatEmoteAuto") private var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
   @AppStorage("chatEmoteSizeValue") private var chatEmoteSizeValue = Double(ChatAppearance.defaultEmoteSize)
   @AppStorage("chatLineHeightValue") private var chatLineHeightValue = Double(ChatAppearance.defaultLineHeight)
+  @AppStorage("chatLetterSpacingValue") private var chatLetterSpacingValue = Double(ChatAppearance.defaultLetterSpacing)
   @AppStorage("chatMessageSpacingValue") private var chatMessageSpacingValue = Double(ChatAppearance.defaultMessageSpacing)
   @AppStorage("chatWidthValue") private var chatWidthValue = Double(ChatAppearance.defaultWidth)
   @AppStorage("chatAnimatedEmotes") private var chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
@@ -235,6 +236,10 @@ struct PlayerView: View {
     isChatScrolling || chatSoftPauseRemaining != nil
   }
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
+  /// A just-activated settings control to briefly defend against tvOS's
+  /// transient focus jump when toggling an option resizes the panel.
+  @State private var chatFocusPin: Focusable?
+  @State private var chatFocusPinTask: Task<Void, Never>?
   @State private var raidBannerDismissTask: Task<Void, Never>?
   /// The outgoing raid currently being followed (with a cancel window).
   @State private var outgoingRaid: OutgoingRaidEvent?
@@ -354,6 +359,7 @@ struct PlayerView: View {
     case text
     case emote
     case lineHeight
+    case letterSpacing
     case messageSpacing
     case width
   }
@@ -364,6 +370,10 @@ struct PlayerView: View {
 
   private var chatLineHeight: CGFloat {
     CGFloat(chatLineHeightValue)
+  }
+
+  private var chatLetterSpacing: CGFloat {
+    CGFloat(chatLetterSpacingValue)
   }
 
   private var chatMessageSpacing: CGFloat {
@@ -596,8 +606,22 @@ struct PlayerView: View {
 
       if showChatSettings {
         guard let newFocus else {
-          focus = lastChatSettingsFocus
+          focus = chatFocusPin ?? lastChatSettingsFocus
           return
+        }
+
+        // A control was just activated: defend it against the transient focus
+        // jump tvOS performs when toggling an option resizes the panel, which
+        // dumps focus onto the section's first focusable (the back button). We
+        // only revert that specific spurious target so deliberate navigation to
+        // any other control is never fought, and consume the pin after one move.
+        if let pin = chatFocusPin, newFocus != pin {
+          chatFocusPin = nil
+          chatFocusPinTask?.cancel()
+          if newFocus == firstChatSettingsFocus {
+            focus = pin
+            return
+          }
         }
 
         if isChatSettingsFocus(newFocus) {
@@ -1509,8 +1533,9 @@ struct PlayerView: View {
         emoteSize: chatEmoteSize,
         messageSpacing: chatMessageSpacing,
         lineHeight: chatLineHeight,
+        letterSpacing: chatLetterSpacing,
         animatedEmotes: chatAnimatedEmotes,
-        fontDesign: chatFontStyle.design,
+        fontStyle: chatFontStyle,
         showBadges: chatShowBadges,
         isConnected: chat.isConnected,
         emoteURLs: chat.emoteURLs,
@@ -1617,7 +1642,7 @@ struct PlayerView: View {
     // or bottom edge are hidden inside the menu instead of bleeding out over the
     // chat. tvOS auto-scrolls a focused row fully into view, and the content's
     // generous interior padding keeps focus halos off this clip edge.
-    .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+    .clipShape(RoundedRectangle(cornerRadius: 40, style: .continuous))
     // Match the chat pane's real Liquid Glass (`.glassEffect(.regular)`) so the
     // panel reads the same as the Glass chat layout, instead of a flatter
     // frosted material.
@@ -1862,6 +1887,7 @@ struct PlayerView: View {
 
         settingsStepperRow(.text)
         settingsStepperRow(.lineHeight)
+        settingsStepperRow(.letterSpacing)
         settingsStepperRow(.messageSpacing)
       }
 
@@ -1968,7 +1994,10 @@ struct PlayerView: View {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
-    Button(action: action) {
+    Button {
+      pinChatFocus(focusTag)
+      action()
+    } label: {
       HStack(spacing: 8) {
         if let icon {
           Icon(glyph: icon, size: 22)
@@ -2111,13 +2140,32 @@ struct PlayerView: View {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
-    Button(action: action) {
+    Button {
+      pinChatFocus(focusTag)
+      action()
+    } label: {
       Icon(glyph: glyph, size: 22)
         .opacity(enabled ? 1.0 : 0.35)
     }
     .chatSettingsGlassButton()
     .buttonBorderShape(.circle)
     .focused($focus, equals: focusTag)
+  }
+
+  /// Briefly "pin" focus to a just-activated settings control. Toggling an
+  /// option can resize the panel, and tvOS responds by yanking focus to the
+  /// section's first focusable (the back button). For a short window the focus
+  /// handler reverts any such unsolicited jump back to the control the user
+  /// actually used; the timer is only a safety net since the pin is consumed on
+  /// the first reverted move.
+  private func pinChatFocus(_ tag: Focusable) {
+    chatFocusPin = tag
+    chatFocusPinTask?.cancel()
+    chatFocusPinTask = Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(600))
+      guard !Task.isCancelled else { return }
+      chatFocusPin = nil
+    }
   }
 
   private func chatStepperConfig(
@@ -2130,6 +2178,8 @@ struct PlayerView: View {
       return ("Emote Size", ChatAppearance.emoteSizeRange, ChatAppearance.emoteSizeStep, CGFloat(chatEmoteSizeValue))
     case .lineHeight:
       return ("Line Height", ChatAppearance.lineHeightRange, ChatAppearance.lineHeightStep, chatLineHeight)
+    case .letterSpacing:
+      return ("Letter Spacing", ChatAppearance.letterSpacingRange, ChatAppearance.letterSpacingStep, chatLetterSpacing)
     case .messageSpacing:
       return ("Message Spacing", ChatAppearance.messageSpacingRange, ChatAppearance.messageSpacingStep, chatMessageSpacing)
     case .width:
@@ -2152,6 +2202,8 @@ struct PlayerView: View {
       chatEmoteSizeValue = Double(next)
     case .lineHeight:
       chatLineHeightValue = Double(next)
+    case .letterSpacing:
+      chatLetterSpacingValue = Double(next)
     case .messageSpacing:
       chatMessageSpacingValue = Double(next)
     case .width:
@@ -2170,6 +2222,7 @@ struct PlayerView: View {
   private func resetChatAppearance() {
     applyChatPreset(.normal)
     chatEmoteSizeValue = Double(ChatAppearance.defaultEmoteSize)
+    chatLetterSpacingValue = Double(ChatAppearance.defaultLetterSpacing)
     chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
   }
 
@@ -2350,7 +2403,10 @@ struct PlayerView: View {
       }
     }
     .padding(.horizontal, 16)
-    .padding(.vertical, 12)
+    .padding(.top, 12)
+    // Match the composer's bottom gap to the 16pt left/right inset so it sits
+    // evenly inside the glass pane's rounded corners.
+    .padding(.bottom, 16)
     .background(
       chatLayoutMode == .glass
         ? AnyShapeStyle(Color.black.opacity(0.22))
@@ -3801,7 +3857,7 @@ private struct GlassChatPaneStyle: ViewModifier {
   static let edgeInset: CGFloat = 24
 
   private var shape: RoundedRectangle {
-    RoundedRectangle(cornerRadius: 32, style: .continuous)
+    RoundedRectangle(cornerRadius: 40, style: .continuous)
   }
 
   @ViewBuilder
@@ -3839,7 +3895,7 @@ private struct GlassChatPaneStyle: ViewModifier {
 /// panel can size to its content and its inner focus effects can lift freely.
 private struct ChatSettingsPanelGlassStyle: ViewModifier {
   private var shape: RoundedRectangle {
-    RoundedRectangle(cornerRadius: 32, style: .continuous)
+    RoundedRectangle(cornerRadius: 40, style: .continuous)
   }
 
   @ViewBuilder
