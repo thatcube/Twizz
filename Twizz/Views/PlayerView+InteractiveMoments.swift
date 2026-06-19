@@ -199,7 +199,7 @@ extension PlayerView {
     .padding(.horizontal, 20)
     .padding(.vertical, 16)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .modifier(MomentDockSurface(tint: tint, style: style))
+    .modifier(MomentDockSurface(style: style))
   }
 
   // MARK: - Formatting helpers
@@ -329,58 +329,39 @@ private struct MomentBar: View {
   }
 }
 
-/// Gives a docked interactive-moment card a surface that matches the chat list
-/// beneath it: real Liquid Glass over a dark scrim for Glass chat, a dark
-/// translucent panel for Overlay chat, and the themed solid surface for Side
-/// chat (which is light only under the light theme). A thin tinted accent border
-/// keeps each moment type's color identity on every surface.
+/// Gives a docked interactive-moment card the natural Liquid Glass treatment for
+/// every chat variant (Glass / Overlay / Side), matching the chat pane and
+/// settings panel: `.glassEffect(.regular)` over a light/dark scrim with a plain
+/// neutral hairline. The scrim and hairline only go light when the chat itself
+/// is light (Side layout under the light theme); otherwise the glass stays dark.
+/// No tinted border — the glass is left to read naturally.
 private struct MomentDockSurface: ViewModifier {
-  let tint: Color
   let style: MomentDockStyle
 
   private var shape: RoundedRectangle {
-    RoundedRectangle(cornerRadius: 22, style: .continuous)
+    RoundedRectangle(cornerRadius: 30, style: .continuous)
   }
 
-  private var accentOpacity: Double { style.isLight ? 0.55 : 0.35 }
-  private var hairlineColor: Color {
-    style.isLight ? .black.opacity(0.08) : .white.opacity(0.10)
+  /// Subtle scrim under the glass so card text stays legible over busy chat.
+  private var scrim: Color {
+    style.isLight ? .white.opacity(0.35) : .black.opacity(0.22)
+  }
+  private var hairline: Color {
+    style.isLight ? .black.opacity(0.08) : .white.opacity(0.12)
   }
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    switch style.surface {
-    case .glass:
-      glassSurface(content)
-    case .darkOverlay:
-      content
-        .background(Color(white: 0.13).opacity(0.92), in: shape)
-        .overlay(shape.strokeBorder(hairlineColor, lineWidth: 1))
-        .overlay(shape.strokeBorder(tint.opacity(accentOpacity), lineWidth: 1))
-        .shadow(color: .black.opacity(0.3), radius: 14, y: 6)
-    case let .side(surface, _):
-      content
-        .background(surface, in: shape)
-        .overlay(shape.strokeBorder(hairlineColor, lineWidth: 1))
-        .overlay(shape.strokeBorder(tint.opacity(accentOpacity), lineWidth: 1))
-        .shadow(color: .black.opacity(style.isLight ? 0.18 : 0.3), radius: 14, y: 6)
-    }
-  }
-
-  @ViewBuilder
-  private func glassSurface(_ content: Content) -> some View {
     if #available(tvOS 26.0, *) {
       content
-        .background(Color.black.opacity(0.22), in: shape)
+        .background(scrim, in: shape)
         .glassEffect(.regular, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 1))
-        .overlay(shape.strokeBorder(tint.opacity(0.35), lineWidth: 1))
+        .overlay(shape.strokeBorder(hairline, lineWidth: 1))
     } else {
       content
         .background(.ultraThinMaterial, in: shape)
-        .background(Color.black.opacity(0.22), in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 1))
-        .overlay(shape.strokeBorder(tint.opacity(0.35), lineWidth: 1))
+        .background(scrim, in: shape)
+        .overlay(shape.strokeBorder(hairline, lineWidth: 1))
     }
   }
 }
