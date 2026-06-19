@@ -185,6 +185,33 @@ struct ThemePalette: Equatable {
 
   /// Twitch brand purple (#9146FF).
   static let brandPurple = Color(red: 0.569, green: 0.275, blue: 1.0)
+
+  // MARK: Player-chrome appearance (translucent / glass-enabled path)
+
+  /// Whether this is a light-appearance palette (the Light theme). Drives the
+  /// player chrome's color scheme so native Liquid Glass, materials, and
+  /// `.buttonStyle(.glass)` pills render light-but-translucent in Light mode
+  /// instead of their default dark treatment — even with transparency on.
+  var isLight: Bool { self == .light }
+
+  /// Color scheme handed to the player view tree so the native translucent
+  /// chrome adapts to the app theme rather than always rendering dark.
+  var chromeColorScheme: ColorScheme { isLight ? .light : .dark }
+
+  /// Tint painted *under* translucent chrome glass (and as the fill of
+  /// translucent non-glass chrome boxes). Dark themes darken; Light lightens,
+  /// so chrome reads light-but-translucent in Light mode. A no-op vs. the prior
+  /// hardcoded `Color.black.opacity(_)` in dark/OLED.
+  func chromeGlassTint(_ opacity: Double) -> Color {
+    (isLight ? Color.white : Color.black).opacity(opacity)
+  }
+
+  /// Hairline stroke for translucent chrome glass (theme-aware so it stays
+  /// visible against light glass in Light mode). Matches the prior
+  /// `Color.white.opacity(0.12)` in dark/OLED.
+  var chromeGlassHairline: Color {
+    isLight ? .black.opacity(0.12) : .white.opacity(0.12)
+  }
 }
 
 // MARK: - App background
