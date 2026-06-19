@@ -29,7 +29,12 @@ struct RichChatLineView: View {
     }
 
     private var bodyColor: Color {
-        if message.isAction { return nameColor }
+        // Render the message body in the normal readable color even for action
+        // (/me) messages. Twitch tints the whole /me line in the sender's color,
+        // but bots (e.g. Fossabot) post long ad messages as actions, so that dim
+        // sender color over the translucent chat panel — which shows the bright
+        // video behind it — becomes barely legible. The username stays colored
+        // for identity; only the body uses the high-contrast body color.
         return bodyColorOverride ?? .white
     }
 
