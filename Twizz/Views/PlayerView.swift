@@ -2110,6 +2110,7 @@ struct PlayerView: View {
       .chatViewerCountToggle,
       .chatLatencyToggle,
       .chatDiagnosticsToggle,
+      .chatCaptionsToggle,
       .chatEventsButton,
       .chatRaidEventToggle,
       .chatHypeTrainEventToggle,
