@@ -30,7 +30,7 @@ final class LivePlaybackPolicyTests: XCTestCase {
     let policy = LivePlaybackPolicy.live(profile: .lowerLatency, isPinned: false)
     XCTAssertEqual(policy.minPlaybackRate, 0.90, accuracy: 0.0001)
     XCTAssertEqual(policy.slowdownBufferFloorSeconds, 1.5)
-    XCTAssertEqual(policy.catchUpHealthyBufferSeconds, 3)
+    XCTAssertEqual(policy.catchUpHealthyBufferSeconds, 2.5)
   }
 
   func testHigherQualityDisablesRateGames() {

@@ -43,12 +43,15 @@ concrete tuning lives in `Twizz/Models/LivePlaybackProfile.swift`:
 
 - **Auto · Low Latency** (default) — shallow forward buffer (~4s) to sit near
   the edge, plus a **bidirectional adaptive playback-rate controller** (see
-  `desiredLivePlaybackRate`). As the forward buffer drains under ~1.5s it eases
-  the rate down toward **0.90×** (anti-stall: playing slightly slow lets the
-  buffer refill so a transient dip is absorbed instead of a hard stall); when the
-  buffer is healthy (>~3s) *and* the edge gap exceeds ~8s it nudges up to
-  **1.04×** to drift back toward live. ABR is also free to drop resolution to
-  avoid a stall; degraded quality is acceptable, stutter is not.
+  `desiredLivePlaybackRate`) that runs on its own **sub-second loop**
+  (`rateControlIntervalSeconds`, ~4 Hz) — far faster than the 1 Hz latency
+  monitor — so it can react to a draining buffer before it empties. As the
+  forward buffer drains under ~1.5s it eases the rate down toward **0.90×**
+  (anti-stall: playing slightly slow lets the buffer refill so a transient dip is
+  absorbed instead of a hard stall); once the buffer clears ~2.5s *and* the edge
+  gap exceeds ~8s it nudges up to **1.04×** to drift back toward live. ABR is
+  also free to drop resolution to avoid a stall; degraded quality is acceptable,
+  stutter is not.
 - **Auto · High Quality** — deeper forward buffer (~8s) so ABR has the runway to
   settle on and hold the best stable resolution, accepting a little more
   latency. No rate games (always 1.0×); it never sacrifices quality on its own.

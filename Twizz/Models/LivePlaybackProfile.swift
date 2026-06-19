@@ -95,7 +95,9 @@ struct LivePlaybackPolicy: Equatable {
         // dip is absorbed by playing slightly slow instead of a hard stall.
         minPlaybackRate: 0.90,
         slowdownBufferFloorSeconds: 1.5,
-        catchUpHealthyBufferSeconds: 3
+        // Catch up once the buffer clears the slow-down floor (small dead-band
+        // above it to avoid flapping between the two arms).
+        catchUpHealthyBufferSeconds: 2.5
       )
     case .higherQuality:
       return LivePlaybackPolicy(

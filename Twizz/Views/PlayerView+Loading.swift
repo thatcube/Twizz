@@ -292,11 +292,32 @@ extension PlayerView {
         try? await Task.sleep(for: .seconds(1))
       }
     }
+    startRateController()
+  }
+
+  /// Runs the adaptive playback-rate controller on its own fast cadence so the
+  /// anti-stall slow-down reacts to a draining buffer well before it empties.
+  func startRateController() {
+    stopRateController()
+    rateControlTask = Task {
+      while !Task.isCancelled {
+        await MainActor.run {
+          applyLiveLatencyCorrection()
+        }
+        try? await Task.sleep(for: .seconds(rateControlIntervalSeconds))
+      }
+    }
+  }
+
+  func stopRateController() {
+    rateControlTask?.cancel()
+    rateControlTask = nil
   }
 
   func stopLatencyMonitor() {
     latencyTask?.cancel()
     latencyTask = nil
+    stopRateController()
     latencyReadout.update(color: .gray, label: "Waiting for playback")
     wallClockLatencySeconds = nil
     liveEdgeLatencySeconds = nil
@@ -849,9 +870,22 @@ extension PlayerView {
     guard isPlaybackActive else { return }
     guard !isUserPaused, !isScrubbing, !isVOD else { return }
 
+    let previousRate = player.rate
     let targetRate = desiredLivePlaybackRate(policy: activeLivePlaybackPolicy)
-    if abs(player.rate - targetRate) > 0.01 {
-      player.playImmediately(atRate: targetRate)
+    guard abs(previousRate - targetRate) > 0.01 else { return }
+    player.playImmediately(atRate: targetRate)
+
+    // Log only when an arm engages/releases (crosses the 1.0 boundary), not on
+    // every small ramp step, so the event log stays readable.
+    if showLatencyDiagnostics {
+      let buffer = bufferAheadSeconds(player.currentItem).map { diagFormat($0, decimals: 1) } ?? "—"
+      if previousRate >= 0.99, targetRate < 0.99 {
+        logDiagnosticsEvent("slow-down \(diagFormat(Double(targetRate), decimals: 2))× (buf \(buffer)s)")
+      } else if previousRate <= 1.0, targetRate > 1.0 {
+        logDiagnosticsEvent("catch-up \(diagFormat(Double(targetRate), decimals: 2))× (buf \(buffer)s)")
+      } else if previousRate < 0.99, targetRate >= 0.99 {
+        logDiagnosticsEvent("rate normal (buf \(buffer)s)")
+      }
     }
   }
 

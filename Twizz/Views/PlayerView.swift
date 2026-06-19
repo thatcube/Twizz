@@ -263,6 +263,10 @@ struct PlayerView: View {
   @State var isQualityMenuPresented = false
   @State var latencyTask: Task<Void, Never>?
   @State var playbackWatchdogTask: Task<Void, Never>?
+  /// Drives the adaptive playback-rate controller at a sub-second cadence — far
+  /// faster than the 1 Hz latency monitor — so the anti-stall slow-down can react
+  /// to a draining buffer before it empties into a hard stall.
+  @State var rateControlTask: Task<Void, Never>?
   // The live-latency and playback-watchdog tasks rewrite a large set of
   // bookkeeping values once per second. Storing them as `@State` re-executed the
   // entire (very large) PlayerView body every tick, which rebuilt the focused
@@ -563,6 +567,10 @@ struct PlayerView: View {
   let latencyOutlierSeconds: Double = 25
   let latencyOutlierConfirmSamples = 2
   let playbackWatchdogIntervalSeconds: Double = 2
+  /// Cadence for the adaptive playback-rate controller. Sub-second so the
+  /// anti-stall slow-down can catch a fast buffer drain (a 1 Hz loop reacts too
+  /// late — the buffer can empty between samples).
+  let rateControlIntervalSeconds: Double = 0.25
   let hardStallRecoverySeconds: Double = 10
   let recoveryCooldownSeconds: Double = 15
   /// Live-edge drift recovery. When the player is following live (`pinnedToLive`)
