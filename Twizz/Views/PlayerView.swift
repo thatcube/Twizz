@@ -180,6 +180,9 @@ struct PlayerView: View {
   @AppStorage(LowLatencyHLSProxy.settingsKey) var lowLatencyProxyEnabled = true
   @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) var streamRewindEnabled = true
   @AppStorage("showLatencyDiagnostics") var showLatencyDiagnostics = false
+  /// Live viewer count badge in the top-left HUD. On by default — a glanceable,
+  /// non-diagnostic stat most viewers want while watching.
+  @AppStorage("showViewerCount") var showViewerCount = true
 
   @State var chat = ChatService()
   /// Drives chat replay when in VOD mode (reveals comments up to the playhead).
@@ -594,6 +597,7 @@ struct PlayerView: View {
     case chatSyncToggle
     case chatLowLatencyToggle
     case chatRewindToggle
+    case chatViewerCountToggle
     case chatDiagnosticsToggle
     case youtubeMergeToggle
     case youtubeMergeURL
@@ -1134,7 +1138,12 @@ struct PlayerView: View {
         VStack {
           HStack {
             if !isVOD {
-              LatencyBadge(readout: latencyReadout)
+              PlayerInfoBadge(
+                latency: latencyReadout,
+                hermes: hermes,
+                showLatency: showLatencyDiagnostics,
+                showViewerCount: showViewerCount
+              )
             }
             Spacer()
             if let remaining = sleepRemainingSeconds {
@@ -1334,26 +1343,6 @@ struct PlayerView: View {
     }
   }
 
-  /// Twitch-style live viewer count shown under the stream title: a red people
-  /// glyph plus the current count. Live-only; the number animates as updates
-  /// arrive (~every 20-30s) via `.numericText()` content transitions.
-  @ViewBuilder
-  func liveViewerBadge(_ count: Int) -> some View {
-    HStack(spacing: 6) {
-      Icon(glyph: .users, size: 18)
-        .foregroundStyle(.red)
-      Text(count.formatted(.number))
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(.white)
-        .monospacedDigit()
-        .contentTransition(.numericText())
-    }
-    .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
-    .transition(.opacity)
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(count.formatted(.number)) watching")
-  }
-
   var bottomOverlay: some View {
     VStack(spacing: 18) {
       HStack(alignment: .center, spacing: 24) {
@@ -1405,27 +1394,18 @@ struct PlayerView: View {
           }
         }
 
-        VStack(alignment: .leading, spacing: 2) {
-          Text(streamTitle.isEmpty ? channelDisplayName : streamTitle)
-            .font(.headline)
-            .foregroundStyle(.white)
-            .lineLimit(2)
-            .minimumScaleFactor(0.5)
-            .truncationMode(.tail)
-            .fixedSize(horizontal: false, vertical: true)
-            .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
-
-          // Live-only viewer count (VODs have no live audience). Seeded from
-          // channel metadata on open, then driven live by Hermes pubsub.
-          if !isVOD, let viewers = hermes.viewerCount {
-            liveViewerBadge(viewers)
-          }
-        }
-        // Cap the block to the buttons' height so a tall title centers against
-        // the buttons instead of growing the bottom-pinned row and pushing the
-        // buttons upward off their fixed position.
-        .frame(maxWidth: .infinity, maxHeight: controlButtonsHeight > 0 ? controlButtonsHeight : nil, alignment: .leading)
-        .animation(.easeInOut(duration: 0.25), value: hermes.viewerCount)
+        Text(streamTitle.isEmpty ? channelDisplayName : streamTitle)
+          .font(.headline)
+          .foregroundStyle(.white)
+          .lineLimit(2)
+          .minimumScaleFactor(0.5)
+          .truncationMode(.tail)
+          .fixedSize(horizontal: false, vertical: true)
+          .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
+          // Cap the title to the buttons' height so a tall title centers against
+          // the buttons instead of growing the bottom-pinned row and pushing the
+          // buttons upward off their fixed position.
+          .frame(maxWidth: .infinity, maxHeight: controlButtonsHeight > 0 ? controlButtonsHeight : nil, alignment: .leading)
       }
 
       Spacer(minLength: 18)
@@ -1855,6 +1835,7 @@ struct PlayerView: View {
       .chatSyncToggle,
       .chatLowLatencyToggle,
       .chatRewindToggle,
+      .chatViewerCountToggle,
       .chatDiagnosticsToggle,
       .simulateRaidButton,
       .simulateOfflineButton,
@@ -3001,28 +2982,72 @@ final class LatencyReadout {
   }
 }
 
-private struct LatencyBadge: View {
-  @Bindable var readout: LatencyReadout
+/// Top-left HUD info chip. Holds the live viewer count and/or the latency
+/// readout in a single frosted Liquid-Glass capsule (matching the player's other
+/// passive chips). Both segments are live-only and independently toggleable:
+/// viewer count is on by default, latency rides the Diagnostics Overlay setting.
+/// Reads `hermes.viewerCount` and `latency` here (not in the player body) so this
+/// leaf re-renders in isolation as those values tick.
+private struct PlayerInfoBadge: View {
+  @Bindable var latency: LatencyReadout
+  let hermes: HermesEventService
+  let showLatency: Bool
+  let showViewerCount: Bool
+
+  /// Brick red from the requested reference, nudged just bright enough to stay
+  /// legible against the frosted material.
+  private static let viewerTint = Color(red: 0.74, green: 0.20, blue: 0.16)
 
   var body: some View {
     let shape = Capsule(style: .continuous)
-    return HStack(spacing: 8) {
-      Circle()
-        .fill(readout.color)
-        .frame(width: 8, height: 8)
+    let viewers = showViewerCount ? hermes.viewerCount : nil
 
-      Text(readout.label)
-        .font(.caption)
-        .fontWeight(.semibold)
-        .foregroundStyle(.white)
+    return Group {
+      if viewers != nil || showLatency {
+        HStack(spacing: 12) {
+          if let viewers {
+            HStack(spacing: 7) {
+              Icon(glyph: .user, size: 22)
+                .foregroundStyle(Self.viewerTint)
+              Text(viewers.formatted(.number))
+                .font(.callout)
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .monospacedDigit()
+                .contentTransition(.numericText())
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(viewers.formatted(.number)) watching")
+          }
+
+          if viewers != nil && showLatency {
+            Capsule()
+              .fill(.white.opacity(0.18))
+              .frame(width: 1, height: 16)
+          }
+
+          if showLatency {
+            HStack(spacing: 8) {
+              Circle()
+                .fill(latency.color)
+                .frame(width: 8, height: 8)
+              Text(latency.label)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
+            }
+          }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        // Frosted material rather than focusable Liquid Glass: this is a passive
+        // HUD readout, so it should read as an info chip, not a pressable control.
+        .background(.ultraThinMaterial, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+        .clipShape(shape)
+        .animation(.easeInOut(duration: 0.25), value: viewers)
+      }
     }
-    .padding(.horizontal, 14)
-    .padding(.vertical, 9)
-    // Frosted material rather than focusable Liquid Glass: this is a passive
-    // HUD readout, so it should read as an info chip, not a pressable control.
-    .background(.ultraThinMaterial, in: shape)
-    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
-    .clipShape(shape)
   }
 }
 

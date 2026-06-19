@@ -1,6 +1,6 @@
 {
   "images" : [
-    { "filename" : "tb-users.svg", "idiom" : "universal" }
+    { "filename" : "tb-user.svg", "idiom" : "universal" }
   ],
   "info" : { "author" : "xcode", "version" : 1 },
   "properties" : {

@@ -187,6 +187,15 @@ extension PlayerView {
         .frame(maxWidth: .infinity, alignment: .leading)
 
         settingsPill(
+          title: showViewerCount ? "Viewer Count On" : "Viewer Count Off",
+          isSelected: showViewerCount,
+          focusTag: .chatViewerCountToggle
+        ) {
+          showViewerCount.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        settingsPill(
           title: showLatencyDiagnostics ? "Diagnostics Overlay On" : "Diagnostics Overlay Off",
           isSelected: showLatencyDiagnostics,
           focusTag: .chatDiagnosticsToggle
