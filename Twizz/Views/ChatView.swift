@@ -6,6 +6,9 @@ struct ChatScrollTarget: Equatable {
   var id: ChatMessage.ID
   var anchor: UnitPoint
   var nonce: Int
+  /// Continuous gesture scrolling sends un-animated targets so the rapid 60 Hz
+  /// updates read as a smooth drag rather than a stutter of spring animations.
+  var animated: Bool = true
 }
 
 /// A read-only chat panel that auto-scrolls to the newest message.
@@ -85,11 +88,16 @@ struct ChatView: View {
       }
       .scrollIndicators(.hidden)
       .onChange(of: scrollTarget) { _, target in
-        // Manual scroll: jump to the requested message with a quick, snappy
-        // animation so multi-message steps feel responsive rather than draggy.
+        // Manual scroll: jump to the requested message. Discrete swipes animate
+        // for a snappy feel; continuous gesture scrolling sends un-animated
+        // targets so the stream of updates reads as a smooth drag.
         guard let target else { return }
         pendingScrollWork?.cancel()
-        withAnimation(.easeOut(duration: 0.12)) {
+        if target.animated {
+          withAnimation(.easeOut(duration: 0.12)) {
+            proxy.scrollTo(target.id, anchor: target.anchor)
+          }
+        } else {
           proxy.scrollTo(target.id, anchor: target.anchor)
         }
       }

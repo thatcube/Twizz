@@ -1,4 +1,5 @@
 import AVKit
+import GameController
 import Observation
 import SwiftUI
 import UIKit
@@ -299,6 +300,21 @@ struct PlayerView: View {
   @State private var chatScrollNonce = 0
   /// Messages to advance per up/down swipe while scrolling.
   private let chatScrollStep = 6
+  /// Gesture-following scroll (Siri Remote trackpad) state. The monitor reports
+  /// the finger's vertical position; a 60 Hz loop integrates it into a scroll
+  /// speed so dragging/holding scrolls continuously and proportionally instead
+  /// of in fixed hops.
+  @State private var trackpad = RemoteTrackpadMonitor()
+  @State private var trackpadScrollTask: Task<Void, Never>?
+  @State private var trackpadScrollIndex: Double = 0
+  @State private var lastSentScrollIndex: Int = -1
+  /// Finger displacement below this (|y|) is treated as centered (no scroll).
+  private let chatScrollDeadZone: Double = 0.12
+  /// Top scroll speed in messages/second at full finger deflection.
+  private let chatScrollMaxMessagesPerSecond: Double = 22
+  /// Sustained |y| needed to promote a soft pause into live scrolling, so a
+  /// quick flick still just opens the read pause.
+  private let chatScrollPromoteThreshold: Double = 0.3
   /// When the composer last became focused, used to ignore a stray up-swipe that
   /// rides in on a diagonal move from the chat-toggle button (accidental pause).
   @State private var chatInputFocusedAt = Date.distantPast
@@ -656,6 +672,7 @@ struct PlayerView: View {
     }
     .onAppear {
       setIdleTimer(disabled: true)
+      trackpad.start()
     }
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) {
       notification in
@@ -673,6 +690,8 @@ struct PlayerView: View {
       chatSyncSendClearTask?.cancel()
       outgoingRaidFollowTask?.cancel()
       softPauseTask?.cancel()
+      trackpadScrollTask?.cancel()
+      trackpad.stop()
       sleepTimerTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
@@ -1568,12 +1587,20 @@ struct PlayerView: View {
   }
 
   /// Up press while chat is open. First press soft-pauses (read mode with a
-  /// countdown). A second press promotes to manual scroll mode and scrolls up;
-  /// further up presses keep scrolling toward older messages.
+  /// countdown). With a Siri Remote the continuous trackpad loop then takes over
+  /// promotion + scrolling; without one (e.g. Simulator) a second press promotes
+  /// to manual scroll mode and further presses step through history.
   private func handleChatUpPress() {
     if isChatScrolling {
+      // The gesture loop owns scrolling while a controller is connected, so the
+      // discrete focus-move events that ride along with a trackpad drag are
+      // ignored to avoid double-stepping.
+      guard !trackpad.hasController else { return }
       stepChatScroll(up: true)
     } else if chatSoftPauseRemaining != nil {
+      // With a controller the loop promotes on a sustained drag; otherwise the
+      // second discrete press promotes.
+      guard !trackpad.hasController else { return }
       beginChatScrolling()
       stepChatScroll(up: true)
     } else {
@@ -1589,6 +1616,7 @@ struct PlayerView: View {
   /// once it reaches the bottom; from a plain soft pause it resumes immediately.
   private func handleChatDownPress() {
     if isChatScrolling {
+      guard !trackpad.hasController else { return }
       stepChatScroll(up: false)
     } else if chatSoftPauseRemaining != nil {
       resumeChatLive()
@@ -1611,6 +1639,9 @@ struct PlayerView: View {
         }
       }
     }
+    // Arm the gesture loop so a sustained drag/hold promotes straight into
+    // scrolling without needing a second discrete press.
+    startTrackpadScrollLoop()
   }
 
   private func cancelSoftPause() {
@@ -1623,8 +1654,76 @@ struct PlayerView: View {
   private func beginChatScrolling() {
     cancelSoftPause()
     isChatScrolling = true
-    chatScrollAnchorID = visibleChatMessages.last?.id
+    let msgs = visibleChatMessages
+    chatScrollAnchorID = msgs.last?.id
+    trackpadScrollIndex = Double(max(0, msgs.count - 1))
+    lastSentScrollIndex = msgs.count - 1
     scheduleHide()
+    startTrackpadScrollLoop()
+  }
+
+  /// Drive continuous, gesture-following chat scrolling from the Siri Remote
+  /// trackpad. Runs at ~60 Hz while chat is held: it promotes a soft pause once
+  /// the finger is held clearly up/down, then integrates the finger's distance
+  /// from center into a scroll speed so holding scrolls further and a bigger
+  /// drag scrolls faster.
+  private func startTrackpadScrollLoop() {
+    guard trackpad.hasController, trackpadScrollTask == nil else { return }
+    trackpadScrollTask = Task { @MainActor in
+      var lastTick = Date()
+      var aboveThresholdFrames = 0
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(16))
+        if Task.isCancelled { break }
+        // Stop once chat is no longer held (e.g. the soft pause auto-resumed).
+        guard isChatScrolling || chatSoftPauseRemaining != nil else { break }
+
+        let now = Date()
+        let dt = min(0.05, now.timeIntervalSince(lastTick))
+        lastTick = now
+        let y = Double(trackpad.verticalValue)
+
+        if !isChatScrolling {
+          // Soft pause: promote to scrolling only on a sustained displacement so
+          // a quick flick still just opens the read pause.
+          if abs(y) > chatScrollPromoteThreshold {
+            aboveThresholdFrames += 1
+            if aboveThresholdFrames >= 6 { beginChatScrolling() }
+          } else {
+            aboveThresholdFrames = 0
+          }
+          continue
+        }
+
+        guard abs(y) > chatScrollDeadZone else { continue }
+        let msgs = visibleChatMessages
+        guard !msgs.isEmpty else { continue }
+        let lastIndex = Double(msgs.count - 1)
+        let norm = min(1, (abs(y) - chatScrollDeadZone) / (1 - chatScrollDeadZone))
+        let rate = pow(norm, 1.5) * chatScrollMaxMessagesPerSecond
+        // Finger toward the top (y > 0) scrolls toward older messages (lower
+        // index); toward the bottom scrolls back toward the live feed.
+        trackpadScrollIndex -= (y > 0 ? 1 : -1) * rate * dt
+        if trackpadScrollIndex >= lastIndex {
+          resumeChatLive()
+          break
+        }
+        trackpadScrollIndex = max(0, trackpadScrollIndex)
+        let target = Int(trackpadScrollIndex.rounded())
+        if target != lastSentScrollIndex, target >= 0, target < msgs.count {
+          lastSentScrollIndex = target
+          chatScrollAnchorID = msgs[target].id
+          sendChatScroll(to: msgs[target].id, animated: false)
+        }
+      }
+      trackpadScrollTask = nil
+    }
+  }
+
+  private func stopTrackpadScrollLoop() {
+    trackpadScrollTask?.cancel()
+    trackpadScrollTask = nil
+    lastSentScrollIndex = -1
   }
 
   /// Advance the scroll anchor by `chatScrollStep` messages and tell ChatView to
@@ -1656,12 +1755,13 @@ struct PlayerView: View {
     scheduleHide()
   }
 
-  private func sendChatScroll(to id: ChatMessage.ID) {
+  private func sendChatScroll(to id: ChatMessage.ID, animated: Bool = true) {
     chatScrollNonce += 1
     // Anchor the target at the bottom of the viewport. A `.top` anchor clamps
     // hard near the live bottom (where every scroll starts), so the first swipes
     // barely move; `.bottom` reveals a full step of older messages immediately.
-    chatScrollTarget = ChatScrollTarget(id: id, anchor: .bottom, nonce: chatScrollNonce)
+    chatScrollTarget = ChatScrollTarget(
+      id: id, anchor: .bottom, nonce: chatScrollNonce, animated: animated)
   }
 
   /// Leave any frozen state and let chat snap back to the live, newest message.
@@ -1669,6 +1769,7 @@ struct PlayerView: View {
     cancelSoftPause()
     isChatScrolling = false
     chatScrollAnchorID = nil
+    stopTrackpadScrollLoop()
     scheduleHide()
   }
 
@@ -4809,5 +4910,51 @@ private struct DiagnosticsPanel: View {
   private static func eventLine(_ event: DiagnosticsEvent) -> String {
     let ago = max(0, Int(Date().timeIntervalSince(event.at).rounded()))
     return "• \(event.text)  (\(ago)s ago)"
+  }
+}
+
+/// Reads the Siri Remote trackpad's absolute finger position so chat can be
+/// scrolled by gesture (and held). tvOS only delivers discrete focus-move
+/// events to SwiftUI, which makes scrolling feel like fixed little hops; for
+/// continuous, gesture-following scrolling we read the remote's micro-gamepad
+/// directly. `verticalValue` is +1 at the top of the trackpad, -1 at the
+/// bottom, and 0 when the finger is centered or lifted.
+final class RemoteTrackpadMonitor {
+  private(set) var verticalValue: Float = 0
+  private(set) var hasController = false
+  private var observers: [NSObjectProtocol] = []
+
+  func start() {
+    for controller in GCController.controllers() { configure(controller) }
+    observers.append(
+      NotificationCenter.default.addObserver(
+        forName: .GCControllerDidConnect, object: nil, queue: .main
+      ) { [weak self] note in
+        if let controller = note.object as? GCController { self?.configure(controller) }
+      })
+    observers.append(
+      NotificationCenter.default.addObserver(
+        forName: .GCControllerDidDisconnect, object: nil, queue: .main
+      ) { [weak self] _ in
+        self?.hasController = !GCController.controllers().isEmpty
+        self?.verticalValue = 0
+      })
+  }
+
+  func stop() {
+    observers.forEach { NotificationCenter.default.removeObserver($0) }
+    observers.removeAll()
+    verticalValue = 0
+  }
+
+  private func configure(_ controller: GCController) {
+    guard let micro = controller.microGamepad else { return }
+    hasController = true
+    // Absolute values report where the finger *is* on the pad rather than a
+    // relative nudge, so we can map finger position straight to scroll speed.
+    micro.reportsAbsoluteDpadValues = true
+    micro.dpad.valueChangedHandler = { [weak self] _, _, y in
+      self?.verticalValue = y
+    }
   }
 }
