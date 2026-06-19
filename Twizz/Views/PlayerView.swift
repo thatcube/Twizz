@@ -2124,6 +2124,7 @@ struct PlayerView: View {
         useLighterOverlayBackground: useLighterOverlayBackground,
         autoScroll: !(isChatScrolling || chatSoftPauseRemaining != nil),
         softPauseRemaining: chatSoftPauseRemaining,
+        softPauseTotal: softPauseSeconds,
         scrollTarget: chatScrollTarget
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2944,8 +2945,14 @@ struct PlayerView: View {
           .focusEffectDisabled()
           // Mirror of the scrubber's gate: while the rewind bar is focused the
           // composer leaves the focus engine so a right-swipe/press on the bar
-          // can't fling focus over here.
-          .focusable(focus != .rewindScrubber)
+          // can't fling focus over here. We use `.disabled` rather than
+          // `.focusable(_:)` because applying `.focusable` to a Button on tvOS
+          // hijacks the Select press and stops the button's own action from
+          // firing (which broke opening the keyboard). A disabled button is
+          // likewise dropped from the focus engine, but only ever while the bar
+          // is focused — never while the composer itself is focused — so focus
+          // is never dropped.
+          .disabled(focus == .rewindScrubber)
           .focused($focus, equals: .chatInput)
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput && !chatIsFrozen)
           .onMoveCommand { direction in
@@ -2977,8 +2984,9 @@ struct PlayerView: View {
             }
             .TwizzControlButtonStyle()
             .frame(width: chatComposerRowHeight, height: chatComposerRowHeight)
-            .disabled(isSendingChat)
-            .focusable(focus != .rewindScrubber)
+            // `.disabled` also doubles as the rewind-bar focus gate; see the
+            // composer button above for why we avoid `.focusable` on a Button.
+            .disabled(isSendingChat || focus == .rewindScrubber)
             .focused($focus, equals: .chatSend)
             .transition(.opacity)
             .onMoveCommand { direction in
@@ -3016,7 +3024,10 @@ struct PlayerView: View {
         }
         .buttonStyle(ChatInputButtonStyle())
         .focusEffectDisabled()
-        .focusable(focus != .rewindScrubber)
+        // Rewind-bar focus gate, expressed via `.disabled` rather than
+        // `.focusable` so the Button's Select action still fires on tvOS (see
+        // the signed-in composer button for the full rationale).
+        .disabled(focus == .rewindScrubber)
         .focused($focus, equals: .chatInput)
         .onMoveCommand { direction in
           switch direction {
@@ -4767,6 +4778,7 @@ private struct ChatMessagesColumn: View {
   let useLighterOverlayBackground: Bool
   let autoScroll: Bool
   let softPauseRemaining: Int?
+  let softPauseTotal: Int
   let scrollTarget: ChatScrollTarget?
 
   private var visibleMessages: [ChatMessage] {
@@ -4796,6 +4808,7 @@ private struct ChatMessagesColumn: View {
       useLighterOverlayBackground: useLighterOverlayBackground,
       autoScroll: autoScroll,
       softPauseRemaining: softPauseRemaining,
+      softPauseTotal: softPauseTotal,
       scrollTarget: scrollTarget
     )
   }
