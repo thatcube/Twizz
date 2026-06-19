@@ -314,16 +314,17 @@ struct PlayerView: View {
   /// Finger position magnitude below this reads as "not touching" (lifted).
   private let chatScrollTouchEpsilon: Double = 0.02
   /// Per-frame finger movement below this reads as "resting" (no swipe), so a
-  /// held/pressing finger doesn't fight discrete presses.
-  private let chatScrollMoveEpsilon: Double = 0.003
+  /// held/pressing finger's natural jitter doesn't register as a swipe — which
+  /// would otherwise keep resetting the gesture timer and block press-and-hold.
+  private let chatScrollMoveEpsilon: Double = 0.012
   /// Messages scrolled per unit of finger travel across the trackpad.
   private let chatScrollSwipeSensitivity: Double = 16
   /// Per-frame velocity decay once the finger lifts, giving swipes momentum so
   /// the chat coasts and eases to a stop instead of halting dead.
-  private let chatScrollFriction: Double = 0.92
+  private let chatScrollFriction: Double = 0.94
   /// Below this coasting speed (index-units per frame) momentum is considered
   /// spent and stops.
-  private let chatScrollMomentumMin: Double = 0.05
+  private let chatScrollMomentumMin: Double = 0.04
   /// Press-and-hold auto-repeat. tvOS won't emit system key-repeat here because
   /// focus is trapped on the composer, so we drive an accelerating repeat
   /// ourselves while the finger stays pressed/down on the pad.
