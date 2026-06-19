@@ -387,10 +387,10 @@ struct PlayerView: View {
   private let rewindWindowSeconds: Double = 1800
   /// Seconds the rewind step buttons jump per press.
   private let rewindStepSeconds: Double = 10
-  /// Maximum precision-scrub rate (timeline seconds per real second) at full
-  /// trackpad deflection. The response curve is shaped so small touches near the
-  /// center scrub slowly (frame-accurate) and a firm glide ramps up to this.
-  private let scrubMaxRate: Double = 75
+  /// Trackpad swipe sensitivity: timeline-seconds moved per unit of finger travel
+  /// on the trackpad (the surface spans roughly -1...1, so a full edge-to-edge
+  /// swipe ≈ 2 units). Higher = a given swipe covers more of the rewind window.
+  private let scrubGainSecondsPerUnit: Double = 55
   // Latency tuning stays at the proven-stable baseline even in low-latency mode.
   // The latency win comes from the proxy promoting Twitch prefetch segments — not
   // from starving buffers or chasing the edge, both of which caused freezes and
@@ -3883,51 +3883,58 @@ struct PlayerView: View {
 
   // MARK: - Precision (analog) scrubbing
 
-  /// Begins listening to the Siri Remote trackpad as an analog jog wheel while the
-  /// rewind bar is focused. Each display frame the coordinator reports a shaped
-  /// horizontal velocity; we translate it into a smooth, frame-accurate scrub.
+  /// Begins reading the Siri Remote trackpad as a relative swipe surface while the
+  /// rewind bar is focused. The coordinator integrates how far/fast the finger
+  /// actually moves (not where it rests) and reports per-frame displacement plus a
+  /// momentum tail on release, which we translate into a smooth scrub.
   private func startScrubInput() {
     guard streamRewindEnabled else { return }
-    scrubInput.maxRate = scrubMaxRate
-    scrubInput.onJogChanged = { [self] active in
-      handleJogChanged(active)
+    scrubInput.gain = scrubGainSecondsPerUnit
+    scrubInput.onScrubBegan = { [self] in
+      beginScrub()
     }
-    scrubInput.onTick = { [self] deltaSeconds in
+    scrubInput.onScrubMoved = { [self] deltaSeconds in
       handleScrubTick(deltaSeconds)
+    }
+    scrubInput.onScrubEnded = { [self] in
+      endScrub()
     }
     scrubInput.start()
   }
 
   private func stopScrubInput() {
     scrubInput.stop()
-    scrubInput.onJogChanged = nil
-    scrubInput.onTick = nil
-    if isScrubbing { handleJogChanged(false) }
+    scrubInput.onScrubBegan = nil
+    scrubInput.onScrubMoved = nil
+    scrubInput.onScrubEnded = nil
+    if isScrubbing { endScrub() }
   }
 
-  /// Called when the finger crosses the trackpad dead zone (jog start) or lifts
-  /// (jog end). Pausing during an active jog gives clean, judder-free scrubbing.
-  private func handleJogChanged(_ active: Bool) {
-    if active {
-      guard let window = currentSeekWindow() else { return }
-      isScrubbing = true
-      scrubCommitTask?.cancel()
-      hideTask?.cancel()
-      if scrubTargetSeconds == nil { scrubTargetSeconds = window.now }
-      if !isUserPaused { player.pause() }
-    } else {
-      isScrubbing = false
-      if let target = scrubTargetSeconds {
-        commitScrubSeek(to: target)
-      } else if !isUserPaused {
-        player.play()
-      }
-      scheduleHide()
+  /// A real swipe has started (finger moved past the tap threshold). Pause the
+  /// live video entirely so scrubbing never fights playback, and anchor the orb.
+  private func beginScrub() {
+    guard let window = currentSeekWindow() else { return }
+    isScrubbing = true
+    scrubCommitTask?.cancel()
+    hideTask?.cancel()
+    if scrubTargetSeconds == nil { scrubTargetSeconds = window.now }
+    if !isUserPaused { player.pause() }
+  }
+
+  /// The swipe (and any momentum tail) has finished: commit a frame-accurate seek
+  /// and resume playback unless the viewer is intentionally paused.
+  private func endScrub() {
+    isScrubbing = false
+    if let target = scrubTargetSeconds {
+      commitScrubSeek(to: target)
+    } else if !isUserPaused {
+      player.play()
     }
+    scheduleHide()
   }
 
-  /// One analog jog frame: advance the intended position by the shaped delta,
-  /// move the orb instantly, and issue a throttled tolerant seek.
+  /// Applies one frame of swipe/momentum displacement: advance the intended
+  /// position, move the orb instantly, and issue a throttled tolerant seek.
   private func handleScrubTick(_ deltaSeconds: Double) {
     guard let window = currentSeekWindow() else { return }
     let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
@@ -4908,26 +4915,47 @@ private struct ScrubBarButtonStyle: ButtonStyle {
   }
 }
 
-/// Reads the Siri Remote trackpad as an analog jog wheel for precision scrubbing.
+/// Reads the Siri Remote trackpad as a *relative* swipe surface for scrubbing.
 /// A plain (non-`@Observable`) reference type held in `@State` so its per-frame
 /// work never invalidates `PlayerView`; it only calls back out through closures.
 ///
 /// The Siri Remote surfaces as a `GCMicroGamepad`. Setting
-/// `reportsAbsoluteDpadValues = true` makes `dpad.xAxis` report the finger's
-/// absolute horizontal position in [-1, 1], returning to 0 on lift — exactly the
-/// continuous signal SwiftUI's discrete `onMoveCommand` can't provide.
+/// `reportsAbsoluteDpadValues = true` makes `dpad` report the finger's absolute
+/// position in [-1, 1], snapping to exactly (0, 0) on lift. We integrate the
+/// frame-to-frame *change* in that position — so a resting finger (however
+/// off-center) produces no movement, and only an actual swipe scrubs. The orb
+/// tracks how far/fast the finger moved, and a momentum tail continues the glide
+/// after release, decaying to a stop.
 final class ScrubInputCoordinator {
-  /// Timeline-seconds-per-real-second at full deflection, set by the view.
-  var maxRate: Double = 75
-  /// Per-frame shaped time delta (seconds) to apply while jogging.
-  var onTick: ((Double) -> Void)?
-  /// Fires when the finger crosses the dead zone (jog start) or lifts (jog end).
-  var onJogChanged: ((Bool) -> Void)?
+  /// Timeline seconds moved per unit of finger travel, set by the view.
+  var gain: Double = 55
+  /// Fires once a swipe passes the tap threshold (so a click-to-pause never
+  /// registers as a scrub). The view pauses playback here.
+  var onScrubBegan: (() -> Void)?
+  /// Per-frame timeline displacement (seconds) while swiping or coasting.
+  var onScrubMoved: ((Double) -> Void)?
+  /// Fires when the swipe and its momentum tail have fully settled.
+  var onScrubEnded: (() -> Void)?
+
+  private enum Phase { case idle, pending, tracking, momentum }
 
   private var displayLink: CADisplayLink?
   private var connectObserver: NSObjectProtocol?
-  private let deadZone = 0.12
-  private var isJogging = false
+  private var phase: Phase = .idle
+  private var lastX: Double = 0
+  private var pendingTravel: Double = 0
+  /// Smoothed finger velocity in units/sec, used to seed the momentum tail.
+  private var velocity: Double = 0
+
+  /// Movement (in dpad units) required before a touch counts as a swipe rather
+  /// than a tap/click.
+  private let tapThreshold = 0.05
+  /// Per-frame multiplicative decay applied to the momentum velocity.
+  private let momentumDecay = 0.88
+  /// Below this speed (units/sec) the momentum tail is considered stopped.
+  private let momentumStop = 0.12
+  /// Clamp on the seed velocity so a hard flick can't launch a huge jump.
+  private let maxMomentumVelocity = 3.0
 
   func start() {
     guard displayLink == nil else { return }
@@ -4947,10 +4975,11 @@ final class ScrubInputCoordinator {
       NotificationCenter.default.removeObserver(connectObserver)
     }
     connectObserver = nil
-    if isJogging {
-      isJogging = false
-      onJogChanged?(false)
-    }
+    let wasActive = (phase == .tracking || phase == .momentum)
+    phase = .idle
+    velocity = 0
+    pendingTravel = 0
+    if wasActive { onScrubEnded?() }
   }
 
   private func configureControllers() {
@@ -4960,27 +4989,67 @@ final class ScrubInputCoordinator {
     GCController.current?.microGamepad?.reportsAbsoluteDpadValues = true
   }
 
-  private func currentX() -> Double {
+  private func currentTouch() -> (x: Double, touching: Bool) {
     let pad = GCController.current?.microGamepad
       ?? GCController.controllers().first(where: { $0.microGamepad != nil })?.microGamepad
-    return Double(pad?.dpad.xAxis.value ?? 0)
+    let x = Double(pad?.dpad.xAxis.value ?? 0)
+    let y = Double(pad?.dpad.yAxis.value ?? 0)
+    // The dpad snaps to exactly (0, 0) only on lift; a mid-swipe pass through the
+    // center still reports tiny non-zero noise, so exact-zero means "not touching".
+    return (x, x != 0 || y != 0)
   }
 
   @objc private func handleTick(_ link: CADisplayLink) {
-    let x = currentX()
-    let magnitude = abs(x)
-    let jogging = magnitude > deadZone
-    if jogging != isJogging {
-      isJogging = jogging
-      onJogChanged?(jogging)
+    let duration = max(link.targetTimestamp - link.timestamp, 1.0 / 120.0)
+    let sample = currentTouch()
+
+    switch phase {
+    case .idle:
+      if sample.touching {
+        phase = .pending
+        lastX = sample.x
+        pendingTravel = 0
+        velocity = 0
+      }
+
+    case .pending:
+      if sample.touching {
+        let dx = sample.x - lastX
+        lastX = sample.x
+        pendingTravel += dx
+        velocity = velocity * 0.6 + (dx / duration) * 0.4
+        if abs(pendingTravel) > tapThreshold {
+          phase = .tracking
+          onScrubBegan?()
+          onScrubMoved?(pendingTravel * gain)
+        }
+      } else {
+        // Released without moving far enough — it was a tap/click, not a scrub.
+        phase = .idle
+      }
+
+    case .tracking:
+      if sample.touching {
+        let dx = sample.x - lastX
+        lastX = sample.x
+        velocity = velocity * 0.6 + (dx / duration) * 0.4
+        if dx != 0 { onScrubMoved?(dx * gain) }
+      } else {
+        // Finger lifted: start coasting from the smoothed release velocity.
+        velocity = min(max(velocity, -maxMomentumVelocity), maxMomentumVelocity)
+        phase = .momentum
+      }
+
+    case .momentum:
+      velocity *= momentumDecay
+      if abs(velocity) < momentumStop {
+        phase = .idle
+        velocity = 0
+        onScrubEnded?()
+      } else {
+        onScrubMoved?(velocity * duration * gain)
+      }
     }
-    guard jogging else { return }
-    // Remove the dead zone then square the normalized magnitude so small touches
-    // near the center scrub slowly (frame-accurate) and a firm glide ramps up.
-    let normalized = (magnitude - deadZone) / (1 - deadZone)
-    let shaped = normalized * normalized * (x < 0 ? -1 : 1)
-    let frameDuration = link.targetTimestamp - link.timestamp
-    onTick?(shaped * maxRate * frameDuration)
   }
 }
 
