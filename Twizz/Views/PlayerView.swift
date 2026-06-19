@@ -2708,22 +2708,23 @@ struct PlayerView: View {
 
   // MARK: - Sleep timer
 
-  /// One selectable sleep-timer duration. `minutes == nil && !isEndOfStream` is
+  /// One selectable sleep-timer duration. `seconds == nil && !isEndOfStream` is
   /// the "Off" row; `isEndOfStream` sleeps when the channel goes offline.
   private struct SleepTimerOption: Hashable {
     let label: String
-    let minutes: Int?
+    let seconds: Int?
     let isEndOfStream: Bool
   }
 
   private static let sleepTimerOptions: [SleepTimerOption] = [
-    .init(label: "Off", minutes: nil, isEndOfStream: false),
-    .init(label: "15 minutes", minutes: 15, isEndOfStream: false),
-    .init(label: "30 minutes", minutes: 30, isEndOfStream: false),
-    .init(label: "45 minutes", minutes: 45, isEndOfStream: false),
-    .init(label: "1 hour", minutes: 60, isEndOfStream: false),
-    .init(label: "1.5 hours", minutes: 90, isEndOfStream: false),
-    .init(label: "End of stream", minutes: nil, isEndOfStream: true),
+    .init(label: "Off", seconds: nil, isEndOfStream: false),
+    .init(label: "10 seconds (test)", seconds: 10, isEndOfStream: false),
+    .init(label: "15 minutes", seconds: 15 * 60, isEndOfStream: false),
+    .init(label: "30 minutes", seconds: 30 * 60, isEndOfStream: false),
+    .init(label: "45 minutes", seconds: 45 * 60, isEndOfStream: false),
+    .init(label: "1 hour", seconds: 60 * 60, isEndOfStream: false),
+    .init(label: "1.5 hours", seconds: 90 * 60, isEndOfStream: false),
+    .init(label: "End of stream", seconds: nil, isEndOfStream: true),
   ]
 
   private var sleepTimerOptionLabels: [String] {
@@ -2750,14 +2751,14 @@ struct PlayerView: View {
       return
     }
 
-    guard let minutes = option.minutes else {
+    guard let seconds = option.seconds else {
       disarmSleepTimer()
       return
     }
 
     sleepUntilStreamEnds = false
-    sleepDeadline = Date().addingTimeInterval(Double(minutes) * 60)
-    sleepRemainingSeconds = minutes * 60
+    sleepDeadline = Date().addingTimeInterval(Double(seconds))
+    sleepRemainingSeconds = seconds
     startSleepCountdown()
   }
 
