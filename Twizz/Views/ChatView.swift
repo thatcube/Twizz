@@ -142,33 +142,45 @@ struct ChatView: View {
     }
   }
 
-  /// Shown while the list is frozen. In the soft-pause "read" mode it keeps the
-  /// "Chat paused" countdown but adds an animated up-chevron hinting that you can
-  /// scroll; once you actually scroll it collapses to a minimal "Scrolling" tag.
+  /// Shown while the list is frozen. In the soft-pause "read" mode it shows the
+  /// "Chat paused" countdown with a wide, bouncing up-chevron hint (the native
+  /// "swipe/press up" affordance) floating just above it; once you actually
+  /// scroll it collapses to a minimal "Scrolling" tag.
   private var pausedPill: some View {
-    HStack(spacing: 8) {
-      if let remaining = softPauseRemaining {
-        Image(systemName: "pause.fill")
-          .font(.caption.weight(.bold))
-          .symbolEffect(.pulse, options: .repeating)
-        Text("Chat paused · \(remaining)s")
-          .font(.caption.weight(.semibold))
-          .contentTransition(.numericText())
-      } else {
-        Image(systemName: "arrow.up.and.down")
-          .font(.caption.weight(.bold))
-        Text("Scrolling")
-          .font(.caption.weight(.semibold))
+    VStack(spacing: 2) {
+      // Wide, shallow chevron — the conventional "swipe up to go up" hint, like
+      // an iOS sheet grabber. Only on the read-pause state, where an up press is
+      // the next action; it bounces upward to read as an invitation.
+      if softPauseRemaining != nil {
+        Image(systemName: "chevron.compact.up")
+          .font(.system(size: 30, weight: .semibold))
+          .foregroundStyle(.white.opacity(0.9))
+          .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
+          .symbolEffect(.bounce.up, options: .repeating)
+          .transition(.opacity)
       }
+
+      HStack(spacing: 8) {
+        if let remaining = softPauseRemaining {
+          Text("Chat paused · \(remaining)s")
+            .font(.caption.weight(.semibold))
+            .contentTransition(.numericText())
+        } else {
+          Image(systemName: "arrow.up.and.down")
+            .font(.caption.weight(.bold))
+          Text("Scrolling")
+            .font(.caption.weight(.semibold))
+        }
+      }
+      .lineLimit(1)
+      .fixedSize()
+      // Dark content to read against the white-tinted "focused" glass, mirroring
+      // the chat composer field when it is the focused element.
+      .foregroundStyle(.black.opacity(0.8))
+      .padding(.horizontal, 22)
+      .padding(.vertical, 10)
+      .modifier(PausedPillGlassStyle())
     }
-    .lineLimit(1)
-    .fixedSize()
-    // Dark content to read against the white-tinted "focused" glass, mirroring
-    // the chat composer field when it is the focused element.
-    .foregroundStyle(.black.opacity(0.8))
-    .padding(.horizontal, 22)
-    .padding(.vertical, 10)
-    .modifier(PausedPillGlassStyle())
     .padding(.bottom, 12)
     .transition(.move(edge: .bottom).combined(with: .opacity))
   }
