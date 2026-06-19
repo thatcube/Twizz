@@ -63,15 +63,24 @@ concrete tuning lives in `Twizz/Models/LivePlaybackProfile.swift`:
 - **Pinned rendition** — a stable buffer (~8s) with no rate games; ABR is off, so
   it holds exactly that rendition (and rebuffers rather than downshifting).
 - **Stability fallback** (automatic, all profiles) — a runtime override, not a
-  user-selectable row. A **stream-stability watchdog** counts stalls in a rolling
-  window (`unstableStallWindowSeconds`); once a stream trips
-  `unstableStallCountThreshold` stalls it is flagged *chronically unstable* —
-  almost always a struggling **broadcaster** encoder (lots of stalls despite
-  ample observed bandwidth), not the viewer's connection. There, the normal
-  low-latency strategy is actively harmful: the **low-latency prefetch proxy**
-  keeps promoting `#EXT-X-TWITCH-PREFETCH` segments and shoving the playhead at a
-  live edge the source can't sustain, so it stalls, rewinds, and loops. The
-  fallback inverts the trade-off:
+  user-selectable row. A **stream-stability watchdog** counts destabilizing
+  events — stalls plus involuntary backward playhead jumps (an AVPlayer rewind we
+  never request) — in a rolling window (`unstableEventWindowSeconds`). Reaching
+  the threshold flags the stream *chronically unstable* — almost always a
+  struggling **broadcaster** encoder (lots of stalls/rewinds despite ample
+  observed bandwidth), not the viewer's connection. To stabilize a bad stream as
+  soon as you arrive, the trip is **aggressive and front-loaded**: during the
+  first `unstableStartupGraceSeconds` of playback a **single** event trips it;
+  after that any **two** events in the window do (so "2 stalls", "2 jumps", or "1
+  stall + 1 jump" all qualify). Stalls feed the watchdog from both the
+  `AVPlayerItemPlaybackStalled` notification and the frozen-playhead heuristic;
+  backward jumps feed it from the playback-health sampler. All of this runs with
+  the diagnostics overlay **off**.
+
+  Once flagged, the normal low-latency strategy is actively harmful: the
+  **low-latency prefetch proxy** keeps promoting `#EXT-X-TWITCH-PREFETCH` segments
+  and shoving the playhead at a live edge the source can't sustain, so it stalls,
+  rewinds, and loops. The fallback inverts the trade-off:
   - **Drops the prefetch proxy.** `makeItem` suppresses promotion while unstable
     (`promotePrefetch = lowLatencyProxyEnabled && !isStreamUnstable`) and, when
     Stream Rewind isn't separately holding the proxy on for DVR, detaches it

@@ -513,6 +513,19 @@ extension PlayerView {
         diagWasStalled = false
         diagIsFrozen = false
         diagFrozenSince = nil
+        // First forward progress of this stream session: anchor the startup-grace
+        // window so an immediate stutter trips stability on the very first event.
+        if streamPlaybackStartedAt == nil, advanced > 0.05 {
+          streamPlaybackStartedAt = Date()
+        }
+      }
+
+      // An involuntary backward jump (AVPlayer rewinding to refill its buffer) is
+      // a strong instability signal. We never seek backward ourselves while
+      // chasing live, so any meaningful negative advance here is the source
+      // misbehaving — feed it to the stability watchdog alongside stalls.
+      if !isVOD, pinnedToLive, advanced <= -diagJumpBackwardThresholdSeconds {
+        recordBackwardJumpForStability()
       }
     }
 

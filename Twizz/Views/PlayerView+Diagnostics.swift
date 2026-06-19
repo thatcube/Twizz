@@ -54,21 +54,41 @@ extension PlayerView {
     }
   }
 
-  /// Stream-stability watchdog: track stall density and, once a stream stalls
-  /// repeatedly in a short window, switch to deep-buffer stability mode. This is
-  /// the "detect a problematic stream and change strategy" fallback — most streams
-  /// never trip it, but a struggling broadcaster encoder (lots of stalls despite
-  /// ample bandwidth) does, and chasing the live edge there only makes it worse.
+  /// Stream-stability watchdog: track destabilizing events (stalls + involuntary
+  /// backward jumps) and, once they cluster, switch to deep-buffer stability mode.
+  /// This is the "detect a problematic stream and change strategy" fallback — most
+  /// streams never trip it, but a struggling broadcaster encoder (lots of stalls
+  /// despite ample bandwidth) does, and chasing the live edge there only makes it
+  /// worse. A stall is counted here; backward jumps are fed in from the playback
+  /// watchdog via `recordBackwardJumpForStability()`.
   func recordStallForStability() {
-    guard !isVOD else { return }
+    recordInstabilityEvent()
+  }
+
+  /// An involuntary backward playhead jump (AVPlayer rewinding to refill its
+  /// buffer) is as strong an instability signal as a stall, so it counts too.
+  func recordBackwardJumpForStability() {
+    recordInstabilityEvent()
+  }
+
+  private func recordInstabilityEvent() {
+    guard !isVOD, !isStreamUnstable else { return }
     let now = Date()
     lastStallAt = now
-    var recent = recentStallTimes
+    var recent = recentInstabilityEvents
     recent.append(now)
-    recent.removeAll { now.timeIntervalSince($0) > unstableStallWindowSeconds }
-    recentStallTimes = recent
+    recent.removeAll { now.timeIntervalSince($0) > unstableEventWindowSeconds }
+    recentInstabilityEvents = recent
 
-    if !isStreamUnstable, recent.count >= unstableStallCountThreshold {
+    // Be far more sensitive in the opening seconds: a stream that stutters the
+    // moment you arrive should be stabilized on the first event, not after you've
+    // sat through several. After the grace window, require a small cluster so a
+    // lone transient blip on an otherwise-healthy stream doesn't latch us.
+    let withinStartup =
+      streamPlaybackStartedAt.map { now.timeIntervalSince($0) <= unstableStartupGraceSeconds }
+      ?? true
+    let threshold = withinStartup ? unstableStartupEventThreshold : unstableEventThreshold
+    if recent.count >= threshold {
       enterStreamStabilityMode()
     }
   }
@@ -176,7 +196,8 @@ extension PlayerView {
     lastStallNotificationAt = Date.distantPast
     // New stream: forget any prior instability so we start in low-latency mode.
     streamUnstableSince = nil
-    recentStallTimes = []
+    recentInstabilityEvents = []
     lastStallAt = nil
+    streamPlaybackStartedAt = nil
   }
 }

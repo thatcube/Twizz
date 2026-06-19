@@ -406,9 +406,9 @@ struct PlayerView: View {
     get { mon.lastOfflineProbeAt }
     nonmutating set { mon.lastOfflineProbeAt = newValue }
   }
-  var recentStallTimes: [Date] {
-    get { mon.recentStallTimes }
-    nonmutating set { mon.recentStallTimes = newValue }
+  var recentInstabilityEvents: [Date] {
+    get { mon.recentInstabilityEvents }
+    nonmutating set { mon.recentInstabilityEvents = newValue }
   }
   var streamUnstableSince: Date? {
     get { mon.streamUnstableSince }
@@ -417,6 +417,10 @@ struct PlayerView: View {
   var lastStallAt: Date? {
     get { mon.lastStallAt }
     nonmutating set { mon.lastStallAt = newValue }
+  }
+  var streamPlaybackStartedAt: Date? {
+    get { mon.streamPlaybackStartedAt }
+    nonmutating set { mon.streamPlaybackStartedAt = newValue }
   }
   /// True while the stream-stability watchdog has us in deep-buffer stability mode.
   var isStreamUnstable: Bool { mon.streamUnstableSince != nil }
@@ -612,11 +616,21 @@ struct PlayerView: View {
   /// can never loop into repeated reloads.
   let liveEdgeSnapCooldownSeconds: Double = 6
   let stallNotificationDebounceSeconds: Double = 2.5
-  /// Stream-stability watchdog. When this many stalls occur within the rolling
-  /// window, the stream is flagged chronically unstable and we switch to
-  /// deep-buffer stability mode (ride behind the edge instead of chasing it).
-  let unstableStallWindowSeconds: Double = 45
-  let unstableStallCountThreshold = 4
+  /// Stream-stability watchdog. It counts destabilizing events — stalls plus
+  /// involuntary backward playhead jumps (an AVPlayer rewind we never request) —
+  /// within a rolling window. Reaching the threshold flags the stream as
+  /// chronically unstable and switches to deep-buffer stability mode (drop the
+  /// prefetch proxy and ride behind the edge instead of chasing it). A struggling
+  /// broadcaster encoder trips this; healthy streams effectively never do.
+  let unstableEventWindowSeconds: Double = 45
+  /// Steady-state: any two destabilizing events in the window trip it (so "2
+  /// stalls", "2 jumps", or "1 stall + 1 jump" all qualify).
+  let unstableEventThreshold = 2
+  /// During the opening seconds of a stream a single event trips it, so a stream
+  /// that stutters the moment you arrive is stabilized almost immediately instead
+  /// of making you watch it sort itself out.
+  let unstableStartupEventThreshold = 1
+  let unstableStartupGraceSeconds: Double = 12
   /// On entering stability mode, seek back to roughly this far behind the live
   /// edge to build a cushion (and skip past a stuck near-edge segment). Only used
   /// when the proxy was already off; otherwise a reload repositions the timeline.
@@ -3071,14 +3085,16 @@ final class PlaybackMonitorBox {
   var lastOfflineProbeAt = Date.distantPast
   /// Timestamps of recent counted stalls, pruned to a rolling window, used to
   /// detect a chronically-unstable stream (a struggling broadcaster encoder).
-  var recentStallTimes: [Date] = []
+  var recentInstabilityEvents: [Date] = []
   /// Set when the stream-stability watchdog has switched into deep-buffer
-  /// stability mode; `nil` while the stream is behaving. Latched (sticky) until a
-  /// sustained stall-free streak clears it.
+  /// stability mode; `nil` while the stream is behaving. Latched (sticky) for the
+  /// rest of the channel session.
   var streamUnstableSince: Date?
-  /// When the most recent stall was counted, used to measure the stall-free
-  /// streak that exits stability mode.
+  /// When the most recent stall/jump was counted.
   var lastStallAt: Date?
+  /// When playback first started advancing for this stream session, used to apply
+  /// a more sensitive (single-event) instability trip during the opening seconds.
+  var streamPlaybackStartedAt: Date?
 }
 
 /// The only latency state SwiftUI observes for the on-screen badge. Updated once
