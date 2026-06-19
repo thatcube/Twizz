@@ -50,7 +50,67 @@ extension PlayerView {
       if showLatencyDiagnostics {
         logDiagnosticsEvent("stall (\(reason))")
       }
+      recordStallForStability()
     }
+  }
+
+  /// Stream-stability watchdog: track stall density and, once a stream stalls
+  /// repeatedly in a short window, switch to deep-buffer stability mode. This is
+  /// the "detect a problematic stream and change strategy" fallback — most streams
+  /// never trip it, but a struggling broadcaster encoder (lots of stalls despite
+  /// ample bandwidth) does, and chasing the live edge there only makes it worse.
+  func recordStallForStability() {
+    guard !isVOD else { return }
+    let now = Date()
+    lastStallAt = now
+    var recent = recentStallTimes
+    recent.append(now)
+    recent.removeAll { now.timeIntervalSince($0) > unstableStallWindowSeconds }
+    recentStallTimes = recent
+
+    if !isStreamUnstable, recent.count >= unstableStallCountThreshold {
+      enterStreamStabilityMode()
+    }
+  }
+
+  /// Switch into deep-buffer stability mode: stop chasing the live edge, deepen the
+  /// forward buffer, and seek back to a cushion of already-produced segments so the
+  /// source's jitter is absorbed instead of causing a stall/rewind loop.
+  func enterStreamStabilityMode() {
+    streamUnstableSince = Date()
+    if showLatencyDiagnostics {
+      logDiagnosticsEvent("stream unstable -> stability mode")
+    }
+    // activeLivePlaybackPolicy now returns the deep-buffer fallback; apply it.
+    applyActiveLivePlaybackPolicy()
+    // Build a cushion (and skip a stuck near-edge segment) by riding well back.
+    guard !isUserPaused, !isScrubbing, pinnedToLive,
+      let item = player.currentItem, let edge = liveSeekableEdgeSeconds(item)
+    else { return }
+    let start = item.seekableTimeRanges.first?.timeRangeValue.start
+    let startSeconds = start.map { CMTimeGetSeconds($0) } ?? 0
+    let target = max(edge - stabilityTargetBehindEdgeSeconds, startSeconds)
+    let tolerance = CMTime(seconds: 1.0, preferredTimescale: 600)
+    item.seek(
+      to: CMTime(seconds: target, preferredTimescale: 600),
+      toleranceBefore: tolerance,
+      toleranceAfter: tolerance
+    ) { [self] _ in
+      player.playImmediately(atRate: 1.0)
+    }
+  }
+
+  /// Leave stability mode after a sustained stall-free streak, returning the stream
+  /// to the normal low-latency strategy (catch-up re-engages to pull back to live).
+  func clearStreamStabilityIfRecovered() {
+    guard isStreamUnstable, let lastStall = lastStallAt else { return }
+    guard Date().timeIntervalSince(lastStall) >= streamStabilityRecoverySeconds else { return }
+    streamUnstableSince = nil
+    recentStallTimes = []
+    if showLatencyDiagnostics {
+      logDiagnosticsEvent("stream recovered -> low latency")
+    }
+    applyActiveLivePlaybackPolicy()
   }
 
   /// Detects forward/backward playhead jumps by comparing actual playhead
@@ -112,5 +172,9 @@ extension PlayerView {
     diagSessionStartedAt = Date()
     lastRecoveryAttemptAt = Date.distantPast
     lastStallNotificationAt = Date.distantPast
+    // New stream: forget any prior instability so we start in low-latency mode.
+    streamUnstableSince = nil
+    recentStallTimes = []
+    lastStallAt = nil
   }
 }

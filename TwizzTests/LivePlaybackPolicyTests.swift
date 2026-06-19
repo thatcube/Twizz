@@ -78,4 +78,29 @@ final class LivePlaybackPolicyTests: XCTestCase {
       XCTAssertEqual(policy.catchUpThresholdSeconds, .greatestFiniteMagnitude)
     }
   }
+
+  func testStabilityFallbackIsDeepBufferedAndDoesNotChaseEdge() {
+    let policy = LivePlaybackPolicy.stabilityFallback
+    // Deep buffer to absorb an erratic source.
+    XCTAssertGreaterThanOrEqual(policy.preferredForwardBufferDuration, 12)
+    // Never chase the live edge — that's what caused the stall/rewind loop.
+    XCTAssertFalse(policy.enablesGentleCatchUp)
+    XCTAssertEqual(policy.maxCatchUpRate, 1.0, accuracy: 0.0001)
+    XCTAssertEqual(policy.catchUpThresholdSeconds, .greatestFiniteMagnitude)
+  }
+
+  func testStabilityFallbackKeepsAntiStallSlowdown() {
+    let policy = LivePlaybackPolicy.stabilityFallback
+    // The anti-stall slow-down stays as the last line of defence.
+    XCTAssertEqual(policy.minPlaybackRate, 0.90, accuracy: 0.0001)
+    XCTAssertGreaterThan(policy.slowdownBufferFloorSeconds, 0)
+  }
+
+  func testStabilityFallbackBuffersDeeperThanNormalProfiles() {
+    let stability = LivePlaybackPolicy.stabilityFallback
+    let lowLatency = LivePlaybackPolicy.live(profile: .lowerLatency, isPinned: false)
+    let highQuality = LivePlaybackPolicy.live(profile: .higherQuality, isPinned: false)
+    XCTAssertGreaterThan(stability.preferredForwardBufferDuration, lowLatency.preferredForwardBufferDuration)
+    XCTAssertGreaterThan(stability.preferredForwardBufferDuration, highQuality.preferredForwardBufferDuration)
+  }
 }

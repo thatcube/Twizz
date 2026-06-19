@@ -127,4 +127,28 @@ struct LivePlaybackPolicy: Equatable {
       )
     }
   }
+
+  /// Emergency policy for a stream detected as chronically unstable (repeated
+  /// stalls in a short window — usually a struggling *broadcaster* encoder, not
+  /// the viewer's bandwidth). The normal low-latency strategy actively makes this
+  /// worse: catch-up and edge-resync keep yanking the playhead toward a live edge
+  /// that can't sustain playback, so it stalls, rewinds, and repeats. This profile
+  /// inverts the trade-off — abandon low latency, ride well behind the edge on a
+  /// deep buffer so the source's jitter is absorbed. Smoothness over latency.
+  static var stabilityFallback: LivePlaybackPolicy {
+    LivePlaybackPolicy(
+      // Deep buffer: bank a large cushion so an erratic source can't starve us.
+      preferredForwardBufferDuration: 12,
+      // Never chase the edge — that's what was causing the stall/rewind loop.
+      enablesGentleCatchUp: false,
+      catchUpThresholdSeconds: .greatestFiniteMagnitude,
+      maxCatchUpRate: 1.0,
+      catchUpRampPerSecond: 0,
+      // Keep the anti-stall slow-down (start easing earlier, given the deep
+      // buffer) as the last line of defence against the next dip.
+      minPlaybackRate: 0.90,
+      slowdownBufferFloorSeconds: 3.0,
+      catchUpHealthyBufferSeconds: .greatestFiniteMagnitude
+    )
+  }
 }

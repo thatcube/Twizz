@@ -406,6 +406,20 @@ struct PlayerView: View {
     get { mon.lastOfflineProbeAt }
     nonmutating set { mon.lastOfflineProbeAt = newValue }
   }
+  var recentStallTimes: [Date] {
+    get { mon.recentStallTimes }
+    nonmutating set { mon.recentStallTimes = newValue }
+  }
+  var streamUnstableSince: Date? {
+    get { mon.streamUnstableSince }
+    nonmutating set { mon.streamUnstableSince = newValue }
+  }
+  var lastStallAt: Date? {
+    get { mon.lastStallAt }
+    nonmutating set { mon.lastStallAt = newValue }
+  }
+  /// True while the stream-stability watchdog has us in deep-buffer stability mode.
+  var isStreamUnstable: Bool { mon.streamUnstableSince != nil }
   @State var lastStallNotificationAt = Date.distantPast
   @State var suppressLowLatencyToggleReload = false
   @State var consecutiveLoadFailures = 0
@@ -598,6 +612,17 @@ struct PlayerView: View {
   /// can never loop into repeated reloads.
   let liveEdgeSnapCooldownSeconds: Double = 6
   let stallNotificationDebounceSeconds: Double = 2.5
+  /// Stream-stability watchdog. When this many stalls occur within the rolling
+  /// window, the stream is flagged chronically unstable and we switch to
+  /// deep-buffer stability mode (ride behind the edge instead of chasing it).
+  let unstableStallWindowSeconds: Double = 45
+  let unstableStallCountThreshold = 4
+  /// A stall-free streak this long while in stability mode returns the stream to
+  /// the normal low-latency strategy.
+  let streamStabilityRecoverySeconds: Double = 90
+  /// On entering stability mode, seek back to roughly this far behind the live
+  /// edge to build a cushion (and skip past a stuck near-edge segment).
+  let stabilityTargetBehindEdgeSeconds: Double = 20
   /// How long the player may sit unable to play (waiting on a starved buffer)
   /// before we authoritatively ask Twitch whether the channel is still live.
   /// Short enough to surface an ended broadcast promptly, long enough that a
@@ -1701,6 +1726,9 @@ struct PlayerView: View {
     let mode = lowLatencyProxyEnabled ? "LL proxy ON" : "LL proxy off"
     let pin = preferredQuality == "Auto" ? "Auto/adaptive" : "\(preferredQuality) (pinned)"
     lines.append("Mode: \(mode) · \(pin)")
+    if isStreamUnstable {
+      lines.append("⚠︎ STABILITY MODE (deep buffer, riding behind edge)")
+    }
 
     if let item = player.currentItem {
       let size = item.presentationSize
@@ -3038,6 +3066,16 @@ final class PlaybackMonitorBox {
   /// Guards against overlapping offline probes and rate-limits them.
   var offlineProbeInFlight = false
   var lastOfflineProbeAt = Date.distantPast
+  /// Timestamps of recent counted stalls, pruned to a rolling window, used to
+  /// detect a chronically-unstable stream (a struggling broadcaster encoder).
+  var recentStallTimes: [Date] = []
+  /// Set when the stream-stability watchdog has switched into deep-buffer
+  /// stability mode; `nil` while the stream is behaving. Latched (sticky) until a
+  /// sustained stall-free streak clears it.
+  var streamUnstableSince: Date?
+  /// When the most recent stall was counted, used to measure the stall-free
+  /// streak that exits stability mode.
+  var lastStallAt: Date?
 }
 
 /// The only latency state SwiftUI observes for the on-screen badge. Updated once

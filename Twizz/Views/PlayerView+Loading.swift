@@ -515,8 +515,9 @@ extension PlayerView {
     // its buffer and then resume *playing forward* from there — which the
     // frozen-playhead heuristic above never catches (the playhead is advancing).
     // The viewer is left tens of seconds behind live, slowly playing, forever.
-    // Detect that directly from the edge gap and snap back with a light seek.
-    if !isVOD, pinnedToLive, let edge = liveSeekableEdgeSeconds(item) {
+    // Detect that directly from the edge gap and snap back with a light seek —
+    // but NOT while in stability mode, where riding behind the edge is the point.
+    if !isVOD, pinnedToLive, !isStreamUnstable, let edge = liveSeekableEdgeSeconds(item) {
       let gap = edge - currentSeconds
       if gap.isFinite, gap > liveEdgeResyncThresholdSeconds {
         triggerLiveEdgeResyncIfAllowed(item: item, edge: edge)
@@ -525,6 +526,8 @@ extension PlayerView {
         liveResyncAttempts = 0
       }
     }
+
+    clearStreamStabilityIfRecovered()
 
     let isHardStallSignal =
       player.timeControlStatus == .waitingToPlayAtSpecifiedRate
