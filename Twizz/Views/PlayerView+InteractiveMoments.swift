@@ -145,6 +145,7 @@ extension PlayerView {
           tint: tint,
           style: style,
           emphasized: true)
+        .padding(.bottom, 8)
       }
     }
   }
@@ -159,8 +160,14 @@ extension PlayerView {
 
   static func hypeTrainTitle(_ train: LiveHypeTrain) -> String {
     switch train.phase {
-    case .approaching: return "Starting soon"
-    case .active, .completed: return "Level \(train.level)"
+    case .approaching:
+      return "Starting soon"
+    case .active, .completed:
+      // Only show a level when we actually know it — better to say nothing than
+      // a wrong "Level 1" when the end event omitted the level. The kicker
+      // already conveys the completed/active state, so drop the title entirely.
+      if let level = train.level { return "Level \(level)" }
+      return ""
     }
   }
 
@@ -221,13 +228,15 @@ extension PlayerView {
           trailing()
         }
       }
-      Text(title)
-        .font(.headline)
-        .foregroundStyle(style.primaryText)
-        .lineLimit(2)
-        .multilineTextAlignment(.leading)
-        .contentTransition(.numericText())
-        .animation(.snappy, value: title)
+      if !title.isEmpty {
+        Text(title)
+          .font(.headline)
+          .foregroundStyle(style.primaryText)
+          .lineLimit(2)
+          .multilineTextAlignment(.leading)
+          .contentTransition(.numericText())
+          .animation(.snappy, value: title)
+      }
       VStack(alignment: .leading, spacing: 8) {
         content()
       }
