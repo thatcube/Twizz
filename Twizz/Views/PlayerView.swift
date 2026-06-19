@@ -2107,6 +2107,23 @@ struct PlayerView: View {
     }
   }
 
+  /// Surface style for the docked interactive-moment card, mirroring the chat
+  /// list it sits above so it only reads *light* when the chat itself is light
+  /// (Side layout under the light theme). Glass/Overlay chat stay dark.
+  func momentDockStyle(isGlass: Bool) -> MomentDockStyle {
+    switch chatLayoutMode {
+    case .glass:
+      return MomentDockStyle(surface: .glass)
+    case .overlay:
+      return MomentDockStyle(surface: .darkOverlay)
+    case .side:
+      return MomentDockStyle(
+        surface: .side(
+          surface: palette.chatSideSurface,
+          primaryText: palette.chatSidePrimaryText))
+    }
+  }
+
   var chatPane: some View {
     let isGlass = chatLayoutMode == .glass
     let useLighterOverlayBackground = chatLayoutMode == .overlay
@@ -2116,7 +2133,7 @@ struct PlayerView: View {
       // push the messages down when they appear. Only visible while chat is open
       // (this whole pane is). Passive + non-interactive: never takes focus.
       if let moment = hermes.currentMoment, !isSleeping {
-        dockedInteractiveMoment(moment, glass: isGlass)
+        dockedInteractiveMoment(moment, style: momentDockStyle(isGlass: isGlass))
           .transition(.move(edge: .top).combined(with: .opacity))
       }
 

@@ -1,4 +1,44 @@
 import SwiftUI
+import UIKit
+
+/// Describes the surface the docked interactive-moment card sits on, so it can
+/// match the chat list beneath it. The card is only ever *light* when the chat
+/// itself is light (Side layout under the light theme); Glass and Overlay chat
+/// always float on the dark translucent player and stay dark.
+struct MomentDockStyle: Equatable {
+  enum Surface: Equatable {
+    /// Glass chat pane: real Liquid Glass over a dark scrim.
+    case glass
+    /// Overlay chat: a dark lighter-than-side translucent panel.
+    case darkOverlay
+    /// Side chat: a solid themed panel. Carries the theme surface + text colors
+    /// so light mode reads light and dark mode reads dark.
+    case side(surface: Color, primaryText: Color)
+  }
+  let surface: Surface
+
+  /// True only when docked over a genuinely light surface (light-theme Side
+  /// chat). Drives text/track contrast so nothing is light unless chat is.
+  var isLight: Bool {
+    guard case let .side(surface, _) = surface else { return false }
+    var white: CGFloat = 0
+    var alpha: CGFloat = 0
+    UIColor(surface).getWhite(&white, alpha: &alpha)
+    return white > 0.5
+  }
+
+  var primaryText: Color {
+    if case let .side(_, primaryText) = surface, isLight { return primaryText }
+    return .white
+  }
+  var secondaryText: Color {
+    isLight ? primaryText.opacity(0.62) : .white.opacity(0.6)
+  }
+  /// Unfilled progress-bar track.
+  var trackColor: Color {
+    isLight ? .black.opacity(0.10) : .white.opacity(0.14)
+  }
+}
 
 // Passive, read-only banners that surface live interactive moments (polls,
 // predictions, hype trains, creator goals) for the channel being watched, so
@@ -6,17 +46,18 @@ import SwiftUI
 // viewer-side API to vote, and these never take focus or steal input.
 extension PlayerView {
   /// Docked above the chat list (see `chatPane`): surfaces the current live
-  /// interactive moment sharing the chat's width and glass treatment. Passive
+  /// interactive moment sharing the chat's width and surface treatment. Passive
   /// and non-interactive — Twitch exposes no viewer-side API to vote, and this
   /// never takes focus or steals input.
   @ViewBuilder
-  func dockedInteractiveMoment(_ moment: InteractiveMoment, glass: Bool) -> some View {
+  func dockedInteractiveMoment(_ moment: InteractiveMoment, style: MomentDockStyle) -> some View {
+    let glass = style.surface == .glass
     Group {
       switch moment {
-      case .poll(let poll): pollBanner(poll)
-      case .prediction(let prediction): predictionBanner(prediction)
-      case .hypeTrain(let train): hypeTrainBanner(train)
-      case .goal(let goal): goalBanner(goal)
+      case .poll(let poll): pollBanner(poll, style: style)
+      case .prediction(let prediction): predictionBanner(prediction, style: style)
+      case .hypeTrain(let train): hypeTrainBanner(train, style: style)
+      case .goal(let goal): goalBanner(goal, style: style)
       }
     }
     // Inset a touch in glass mode so the card clears the pane's rounded corners;
@@ -30,14 +71,15 @@ extension PlayerView {
   // MARK: - Poll
 
   @ViewBuilder
-  private func pollBanner(_ poll: LivePoll) -> some View {
+  private func pollBanner(_ poll: LivePoll, style: MomentDockStyle) -> some View {
     let ranked = poll.choices.sorted { $0.votes > $1.votes }.prefix(4)
     let leadingID = ranked.first?.id
     momentCard(
       glyph: .chartBar,
       kicker: poll.isActive ? "Live poll" : "Poll results",
       tint: Color(red: 0.65, green: 0.45, blue: 0.95),
-      title: poll.title
+      title: poll.title,
+      style: style
     ) {
       ForEach(Array(ranked)) { choice in
         MomentBar(
@@ -45,23 +87,25 @@ extension PlayerView {
           trailing: Self.percentText(poll.fraction(of: choice)),
           fraction: poll.fraction(of: choice),
           tint: Color(red: 0.65, green: 0.45, blue: 0.95),
+          style: style,
           emphasized: choice.id == leadingID)
       }
       Text("\(Self.compact(poll.totalVotes)) votes")
         .font(.caption)
-        .foregroundStyle(.white.opacity(0.6))
+        .foregroundStyle(style.secondaryText)
     }
   }
 
   // MARK: - Prediction
 
   @ViewBuilder
-  private func predictionBanner(_ prediction: LivePrediction) -> some View {
+  private func predictionBanner(_ prediction: LivePrediction, style: MomentDockStyle) -> some View {
     momentCard(
       glyph: .chartLine,
       kicker: Self.predictionKicker(prediction.status),
       tint: Color(red: 0.36, green: 0.42, blue: 0.95),
-      title: prediction.title
+      title: prediction.title,
+      style: style
     ) {
       ForEach(prediction.outcomes) { outcome in
         MomentBar(
@@ -69,6 +113,7 @@ extension PlayerView {
           trailing: Self.percentText(prediction.fraction(of: outcome)),
           fraction: prediction.fraction(of: outcome),
           tint: Self.predictionColor(outcome.color),
+          style: style,
           emphasized: outcome.id == prediction.winningOutcomeID,
           subtitle: "\(Self.compact(outcome.points)) pts · \(Self.compact(outcome.users)) users")
       }
@@ -78,13 +123,14 @@ extension PlayerView {
   // MARK: - Hype train
 
   @ViewBuilder
-  private func hypeTrainBanner(_ train: LiveHypeTrain) -> some View {
+  private func hypeTrainBanner(_ train: LiveHypeTrain, style: MomentDockStyle) -> some View {
     let tint = Color(red: 0.95, green: 0.45, blue: 0.2)
     momentCard(
       glyph: .flame,
       kicker: train.isActive ? "Hype Train" : "Hype Train complete",
       tint: tint,
-      title: "Level \(train.level)"
+      title: "Level \(train.level)",
+      style: style
     ) {
       if train.goal > 0 {
         MomentBar(
@@ -92,6 +138,7 @@ extension PlayerView {
           trailing: Self.percentText(train.fraction),
           fraction: train.fraction,
           tint: tint,
+          style: style,
           emphasized: true)
       }
     }
@@ -100,19 +147,21 @@ extension PlayerView {
   // MARK: - Goal
 
   @ViewBuilder
-  private func goalBanner(_ goal: LiveGoal) -> some View {
+  private func goalBanner(_ goal: LiveGoal, style: MomentDockStyle) -> some View {
     let tint = Color(red: 0.2, green: 0.78, blue: 0.55)
     momentCard(
       glyph: .targetArrow,
       kicker: goal.kindLabel,
       tint: tint,
-      title: goal.description.isEmpty ? goal.kindLabel : goal.description
+      title: goal.description.isEmpty ? goal.kindLabel : goal.description,
+      style: style
     ) {
       MomentBar(
         label: "\(Self.compact(goal.current)) / \(Self.compact(goal.target))",
         trailing: Self.percentText(goal.fraction),
         fraction: goal.fraction,
         tint: tint,
+        style: style,
         emphasized: true)
     }
   }
@@ -125,6 +174,7 @@ extension PlayerView {
     kicker: String,
     tint: Color,
     title: String,
+    style: MomentDockStyle,
     @ViewBuilder content: () -> Content
   ) -> some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -139,7 +189,7 @@ extension PlayerView {
       }
       Text(title)
         .font(.headline)
-        .foregroundStyle(.white)
+        .foregroundStyle(style.primaryText)
         .lineLimit(2)
         .multilineTextAlignment(.leading)
       VStack(alignment: .leading, spacing: 8) {
@@ -149,7 +199,7 @@ extension PlayerView {
     .padding(.horizontal, 20)
     .padding(.vertical, 16)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .modifier(MomentDockSurface(tint: tint))
+    .modifier(MomentDockSurface(tint: tint, style: style))
   }
 
   // MARK: - Formatting helpers
@@ -244,6 +294,7 @@ private struct MomentBar: View {
   let trailing: String
   let fraction: Double
   let tint: Color
+  let style: MomentDockStyle
   var emphasized: Bool = false
   var subtitle: String? = nil
 
@@ -252,17 +303,17 @@ private struct MomentBar: View {
       HStack {
         Text(label)
           .font(.subheadline).fontWeight(emphasized ? .semibold : .regular)
-          .foregroundStyle(.white)
+          .foregroundStyle(style.primaryText)
           .lineLimit(1)
         Spacer(minLength: 8)
         Text(trailing)
           .font(.subheadline).bold()
-          .foregroundStyle(.white.opacity(0.9))
+          .foregroundStyle(style.primaryText.opacity(0.9))
           .monospacedDigit()
       }
       GeometryReader { geo in
         ZStack(alignment: .leading) {
-          Capsule().fill(.white.opacity(0.14))
+          Capsule().fill(style.trackColor)
           Capsule()
             .fill(tint.opacity(emphasized ? 1 : 0.75))
             .frame(width: max(6, geo.size.width * fraction))
@@ -272,25 +323,52 @@ private struct MomentBar: View {
       if let subtitle {
         Text(subtitle)
           .font(.caption2)
-          .foregroundStyle(.white.opacity(0.6))
+          .foregroundStyle(style.secondaryText)
       }
     }
   }
 }
 
-/// Gives a docked interactive-moment card the same dark Liquid Glass surface as
-/// the chat pane and settings panel (`.glassEffect(.regular)` over a
-/// `Color.black.opacity(0.22)` scrim, with a subtle white hairline), plus a thin
-/// tinted accent border so each moment type keeps its color identity.
+/// Gives a docked interactive-moment card a surface that matches the chat list
+/// beneath it: real Liquid Glass over a dark scrim for Glass chat, a dark
+/// translucent panel for Overlay chat, and the themed solid surface for Side
+/// chat (which is light only under the light theme). A thin tinted accent border
+/// keeps each moment type's color identity on every surface.
 private struct MomentDockSurface: ViewModifier {
   let tint: Color
+  let style: MomentDockStyle
 
   private var shape: RoundedRectangle {
     RoundedRectangle(cornerRadius: 22, style: .continuous)
   }
 
+  private var accentOpacity: Double { style.isLight ? 0.55 : 0.35 }
+  private var hairlineColor: Color {
+    style.isLight ? .black.opacity(0.08) : .white.opacity(0.10)
+  }
+
   @ViewBuilder
   func body(content: Content) -> some View {
+    switch style.surface {
+    case .glass:
+      glassSurface(content)
+    case .darkOverlay:
+      content
+        .background(Color(white: 0.13).opacity(0.92), in: shape)
+        .overlay(shape.strokeBorder(hairlineColor, lineWidth: 1))
+        .overlay(shape.strokeBorder(tint.opacity(accentOpacity), lineWidth: 1))
+        .shadow(color: .black.opacity(0.3), radius: 14, y: 6)
+    case let .side(surface, _):
+      content
+        .background(surface, in: shape)
+        .overlay(shape.strokeBorder(hairlineColor, lineWidth: 1))
+        .overlay(shape.strokeBorder(tint.opacity(accentOpacity), lineWidth: 1))
+        .shadow(color: .black.opacity(style.isLight ? 0.18 : 0.3), radius: 14, y: 6)
+    }
+  }
+
+  @ViewBuilder
+  private func glassSurface(_ content: Content) -> some View {
     if #available(tvOS 26.0, *) {
       content
         .background(Color.black.opacity(0.22), in: shape)
