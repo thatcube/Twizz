@@ -1558,7 +1558,7 @@ struct PlayerView: View {
   /// Distance the bottom control row sits above the screen's bottom edge. Kept
   /// generous so the row (and the chat composer it aligns with) clears typical TV
   /// overscan instead of hugging the very bottom.
-  private let controlsBottomPadding: CGFloat = 64
+  private let controlsBottomPadding: CGFloat = 32
   /// How far above the screen bottom the floating settings panel must start so it
   /// floats *above* the control row rather than behind/under it. Control row
   /// bottom inset plus its approximate height plus a small gap.
