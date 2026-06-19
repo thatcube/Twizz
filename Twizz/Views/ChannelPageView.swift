@@ -16,7 +16,6 @@ struct ChannelPageView: View {
 
   @Environment(\.dismiss) private var dismiss
   @Environment(\.themePalette) private var palette
-  @Environment(\.resetFocus) private var resetFocus
 
   @State private var profile: ChannelProfile?
   @State private var isLoadingProfile = true
@@ -28,9 +27,10 @@ struct ChannelPageView: View {
   @State private var isLoadingRecs = true
 
   @State private var onDemandItem: OnDemandItem?
+  @FocusState private var focusedID: String?
   /// Namespace for default-focus anchoring in this page's focus scope.
   @Namespace private var focusNamespace
-  @State private var didRequestDefaultFocus = false
+  @State private var didSetInitialFocus = false
 
   /// Measured height of the identity hero card, so it can straddle the banner's
   /// bottom edge by exactly 50% regardless of its dynamic content.
@@ -113,12 +113,13 @@ struct ChannelPageView: View {
     }
     .onExitCommand { dismiss() }
     .onChange(of: defaultFocusID) { _, _ in
-      requestDefaultFocusIfNeeded()
+      applyInitialFocusIfNeeded()
     }
     .task(id: target.id) {
-      didRequestDefaultFocus = false
+      didSetInitialFocus = false
+      focusedID = nil
       await loadAll()
-      requestDefaultFocusIfNeeded()
+      applyInitialFocusIfNeeded()
     }
     .fullScreenCover(item: $onDemandItem) { item in
       OnDemandPlayerView(item: item)
@@ -294,8 +295,12 @@ struct ChannelPageView: View {
   private func liveCard(_ profile: ChannelProfile) -> some View {
     let id = "live"
     return FocusableTile(
+      id: id,
+      focusedID: $focusedID,
       cornerRadius: heroCorner,
       focusedScale: 1.01,
+      prefersDefaultFocus: defaultFocusID == id,
+      focusNamespace: focusNamespace,
       onSelect: { onWatchChannel?(followedChannel(from: profile)) }
     ) { isFocused in
       HStack(spacing: 20) {
@@ -339,7 +344,6 @@ struct ChannelPageView: View {
       .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: isFocused, palette: palette)
       .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 22, y: 12)
     }
-    .prefersDefaultFocus(defaultFocusID == id, in: focusNamespace)
     .padding(.horizontal, AppLayout.horizontalPadding)
   }
 
@@ -393,8 +397,12 @@ struct ChannelPageView: View {
         ForEach(clips) { clip in
           let itemID = "clip-\(clip.slug)"
           FocusableTile(
+            id: itemID,
+            focusedID: $focusedID,
             cornerRadius: cardCorner,
             focusedScale: AppLayout.focusedCardScale,
+            prefersDefaultFocus: defaultFocusID == itemID,
+            focusNamespace: focusNamespace,
             onSelect: { onDemandItem = .clip(slug: clip.slug, title: clip.title) }
           ) { isFocused in
             MediaContentCard(
@@ -411,7 +419,6 @@ struct ChannelPageView: View {
               mediaCornerRadius: mediaCorner
             )
           }
-          .prefersDefaultFocus(defaultFocusID == itemID, in: focusNamespace)
         }
       }
     } else if isLoadingContent {
@@ -434,8 +441,12 @@ struct ChannelPageView: View {
         ForEach(videos) { vod in
           let itemID = "vod-\(vod.id)"
           FocusableTile(
+            id: itemID,
+            focusedID: $focusedID,
             cornerRadius: cardCorner,
             focusedScale: AppLayout.focusedCardScale,
+            prefersDefaultFocus: defaultFocusID == itemID,
+            focusNamespace: focusNamespace,
             onSelect: { onDemandItem = .vod(id: vod.id, title: vod.title) }
           ) { isFocused in
             MediaContentCard(
@@ -452,7 +463,6 @@ struct ChannelPageView: View {
               mediaCornerRadius: mediaCorner
             )
           }
-          .prefersDefaultFocus(defaultFocusID == itemID, in: focusNamespace)
         }
       }
     } else if isLoadingContent {
@@ -482,8 +492,12 @@ struct ChannelPageView: View {
           LazyHStack(spacing: 22) {
             ForEach(recommendations) { channel in
               FocusableTile(
+                id: "rec-\(channel.id)",
+                focusedID: $focusedID,
                 cornerRadius: cardCorner,
                 focusedScale: AppLayout.focusedCardScale,
+                prefersDefaultFocus: false,
+                focusNamespace: focusNamespace,
                 onSelect: { onWatchChannel?(channel) }
               ) { isFocused in
                 StreamChannelCard(
@@ -610,10 +624,12 @@ struct ChannelPageView: View {
     profile = loadedProfile
     profileFailed = loadedProfile == nil
     isLoadingProfile = false
+    applyInitialFocusIfNeeded()
 
     let loadedContent = await contentTask
     content = loadedContent
     isLoadingContent = false
+    applyInitialFocusIfNeeded()
 
     if let signals = loadedContent?.signals {
       // Let the page become interactive before kicking off the heavy multi-seed
@@ -626,10 +642,10 @@ struct ChannelPageView: View {
     isLoadingRecs = false
   }
 
-  private func requestDefaultFocusIfNeeded() {
-    guard !didRequestDefaultFocus, defaultFocusID != nil else { return }
-    didRequestDefaultFocus = true
-    resetFocus(in: focusNamespace)
+  private func applyInitialFocusIfNeeded() {
+    guard !didSetInitialFocus, focusedID == nil, let defaultFocusID else { return }
+    didSetInitialFocus = true
+    focusedID = defaultFocusID
   }
 
   private func followedChannel(from profile: ChannelProfile) -> FollowedChannel {
@@ -736,15 +752,19 @@ struct ChannelPageView: View {
   }
 }
 
-/// Focusable wrapper that keeps focus state local to the tile and drives
-/// visuals from `.onFocusChange`, avoiding page-level focus bindings.
+/// Focusable wrapper that uses a single page-level focus binding, matching the
+/// rest of the app's stable tvOS focus pattern.
 private struct FocusableTile<Content: View>: View {
+  let id: String
+  @FocusState.Binding var focusedID: String?
   let cornerRadius: CGFloat
   let focusedScale: CGFloat
+  let prefersDefaultFocus: Bool
+  let focusNamespace: Namespace.ID
   let onSelect: () -> Void
   @ViewBuilder let content: (Bool) -> Content
 
-  @FocusState private var isFocused: Bool
+  private var isFocused: Bool { focusedID == id }
 
   var body: some View {
     content(isFocused)
@@ -754,7 +774,9 @@ private struct FocusableTile<Content: View>: View {
       }
       .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
       .focusable(true)
-      .focused($isFocused)
+      .focused($focusedID, equals: id)
+      .prefersDefaultFocus(prefersDefaultFocus, in: focusNamespace)
+      .focusEffectDisabled()
       .onTapGesture(perform: onSelect)
       .scaleEffect(isFocused ? focusedScale : 1)
       .animation(AppLayout.focusScaleAnimation, value: isFocused)

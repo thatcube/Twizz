@@ -13,12 +13,8 @@ enum AppLayout {
   /// everywhere instead of varying per surface.
   static let focusedCardScale: CGFloat = 1.07
 
-  /// tvOS 27's focus/render pipeline regressed with many simultaneously animating
-  /// card scales across large `ForEach` grids/rails (scene-update watchdogs).
-  /// Disable implicit focus-scale animations on tvOS 27+ and keep the prior
-  /// animation on older systems.
+  /// Shared focus/hover animation used by interactive cards.
   static var focusScaleAnimation: Animation? {
-    if #available(tvOS 27.0, *) { return nil }
     return .easeOut(duration: 0.14)
   }
 }
