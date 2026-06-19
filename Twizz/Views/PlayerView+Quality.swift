@@ -11,8 +11,11 @@ extension PlayerView {
   }
 
   /// Concrete buffer / catch-up tuning for the current profile and pin state.
+  /// A stream flagged chronically unstable overrides everything with the
+  /// deep-buffer stability fallback (smoothness over latency).
   var activeLivePlaybackPolicy: LivePlaybackPolicy {
-    LivePlaybackPolicy.live(profile: livePlaybackProfile, isPinned: preferredQuality != "Auto")
+    if isStreamUnstable { return .stabilityFallback }
+    return LivePlaybackPolicy.live(profile: livePlaybackProfile, isPinned: preferredQuality != "Auto")
   }
 
   /// Applies the active policy to the live item without swapping the source —

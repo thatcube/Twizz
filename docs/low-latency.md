@@ -62,6 +62,22 @@ concrete tuning lives in `Twizz/Models/LivePlaybackProfile.swift`:
   latency. No rate games (always 1.0×); it never sacrifices quality on its own.
 - **Pinned rendition** — a stable buffer (~8s) with no rate games; ABR is off, so
   it holds exactly that rendition (and rebuffers rather than downshifting).
+- **Stability fallback** (automatic, all profiles) — a runtime override, not a
+  user-selectable row. A **stream-stability watchdog** counts stalls in a rolling
+  window (`unstableStallWindowSeconds`); once a stream trips
+  `unstableStallCountThreshold` stalls it is flagged *chronically unstable* —
+  almost always a struggling **broadcaster** encoder (lots of stalls despite
+  ample observed bandwidth), not the viewer's connection. There, the normal
+  low-latency strategy is actively harmful: catch-up and edge-resync keep yanking
+  the playhead toward a live edge that can't sustain playback, so it stalls,
+  rewinds, and loops. The fallback inverts the trade-off — **deep forward buffer
+  (~12s), no catch-up, edge-resync suppressed**, and on entry a one-time seek back
+  (~`stabilityTargetBehindEdgeSeconds`) to build a cushion and skip a stuck
+  near-edge segment. The anti-stall slow-down stays on. After a sustained
+  stall-free streak (`streamStabilityRecoverySeconds`) it returns to normal
+  low-latency. Surfaced in the Diagnostics overlay as "⚠︎ STABILITY MODE". The
+  flag resets on every new channel session (`resetDiagnostics`) but persists
+  across watchdog reloads.
 
 The adaptive-rate technique mirrors low-latency DASH/HLS players (e.g. dash.js
 `liveCatchup`): keep latency near a target by trimming a few percent off the
