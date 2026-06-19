@@ -16,6 +16,7 @@ struct ChannelPageView: View {
 
   @Environment(\.dismiss) private var dismiss
   @Environment(\.themePalette) private var palette
+  @Environment(\.resetFocus) private var resetFocus
 
   @State private var profile: ChannelProfile?
   @State private var isLoadingProfile = true
@@ -29,6 +30,7 @@ struct ChannelPageView: View {
   @State private var onDemandItem: OnDemandItem?
   /// Namespace for default-focus anchoring in this page's focus scope.
   @Namespace private var focusNamespace
+  @State private var didRequestDefaultFocus = false
 
   /// Measured height of the identity hero card, so it can straddle the banner's
   /// bottom edge by exactly 50% regardless of its dynamic content.
@@ -110,7 +112,14 @@ struct ChannelPageView: View {
       }
     }
     .onExitCommand { dismiss() }
-    .task(id: target.id) { await loadAll() }
+    .onChange(of: defaultFocusID) { _, _ in
+      requestDefaultFocusIfNeeded()
+    }
+    .task(id: target.id) {
+      didRequestDefaultFocus = false
+      await loadAll()
+      requestDefaultFocusIfNeeded()
+    }
     .fullScreenCover(item: $onDemandItem) { item in
       OnDemandPlayerView(item: item)
         .environment(\.themePalette, palette)
@@ -615,6 +624,12 @@ struct ChannelPageView: View {
       recommendations = []
     }
     isLoadingRecs = false
+  }
+
+  private func requestDefaultFocusIfNeeded() {
+    guard !didRequestDefaultFocus, defaultFocusID != nil else { return }
+    didRequestDefaultFocus = true
+    resetFocus(in: focusNamespace)
   }
 
   private func followedChannel(from profile: ChannelProfile) -> FollowedChannel {
