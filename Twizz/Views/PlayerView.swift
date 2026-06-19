@@ -1322,12 +1322,12 @@ struct PlayerView: View {
         .focusable(focus != .chatInput && focus != .chatSend)
         .focused($focus, equals: .rewindScrubber)
         .onMoveCommand { direction in
-          // Up exits to the controls; left/right step the timeline. Sideways
-          // escape to chat is prevented structurally (see .focusable above), so
-          // this handler only needs to perform the seek/step itself.
+          // Left/right step the timeline. Up is intentionally left to the focus
+          // engine: forcing an explicit target here fought the engine's own
+          // upward move and produced a visible double-hop (it would land on the
+          // nearest control, then yank sideways to ours). Sideways escape to
+          // chat is prevented structurally (see .focusable above).
           switch direction {
-          case .up:
-            focus = .quality
           case .left:
             if !isScrubbing { rewindStep(-rewindStepSeconds) }
           case .right:
