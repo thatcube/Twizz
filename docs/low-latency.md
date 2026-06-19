@@ -42,17 +42,28 @@ promotion on; they differ only in how they trade quality for latency. The
 concrete tuning lives in `Twizz/Models/LivePlaybackProfile.swift`:
 
 - **Auto · Low Latency** (default) — shallow forward buffer (~4s) to sit near
-  the edge, plus gentle catch-up (≤1.04×) once the edge gap exceeds ~8s. ABR is
-  free to drop resolution to avoid a stall; degraded quality is acceptable,
-  stutter is not.
+  the edge, plus a **bidirectional adaptive playback-rate controller** (see
+  `desiredLivePlaybackRate`). As the forward buffer drains under ~1.5s it eases
+  the rate down toward **0.90×** (anti-stall: playing slightly slow lets the
+  buffer refill so a transient dip is absorbed instead of a hard stall); when the
+  buffer is healthy (>~3s) *and* the edge gap exceeds ~8s it nudges up to
+  **1.04×** to drift back toward live. ABR is also free to drop resolution to
+  avoid a stall; degraded quality is acceptable, stutter is not.
 - **Auto · High Quality** — deeper forward buffer (~8s) so ABR has the runway to
   settle on and hold the best stable resolution, accepting a little more
-  latency. No catch-up; it never sacrifices quality on its own.
-- **Pinned rendition** — a stable buffer (~8s) with no catch-up; ABR is off, so
+  latency. No rate games (always 1.0×); it never sacrifices quality on its own.
+- **Pinned rendition** — a stable buffer (~8s) with no rate games; ABR is off, so
   it holds exactly that rendition (and rebuffers rather than downshifting).
 
-Stutter-resistance in both Auto modes comes from ABR headroom, not from a hard
-pin: ABR is what lets the stream step down instead of stalling.
+The adaptive-rate technique mirrors low-latency DASH/HLS players (e.g. dash.js
+`liveCatchup`): keep latency near a target by trimming a few percent off the
+playback rate either side of 1.0 rather than hard seeks/pauses. Time-domain
+pitch correction (`audioTimePitchAlgorithm = .timeDomain`) keeps the audio
+natural through those changes.
+
+Stutter-resistance in both Auto modes comes from ABR headroom plus the
+anti-stall slow-down, not from a hard pin: ABR lets the stream step down instead
+of stalling, and the slow-down rides out short buffer dips.
 
 ## Established facts (verified)
 
@@ -94,21 +105,25 @@ pin: ABR is what lets the stream step down instead of stalling.
 - **A pinned rendition has no ABR fallback.** If its bitrate exceeds the
   connection, it rebuffers instead of stepping down — so "Auto" is the safe
   choice when a pin is unstable.
-- **Playback speed never affects resolution.** Catch-up rate changes (≤1.05x)
-  cannot blur the picture; blur is always an ABR/rendition issue.
+- **Playback speed never affects resolution.** Adaptive-rate changes (~0.90×–
+  1.04×) cannot blur the picture; blur is always an ABR/rendition issue.
 
 ### The latency readout
 - There are two different "latency" numbers, and they mean different things:
-  - **Encoder delay** = `Date()` − `PROGRAM-DATE-TIME` of the current frame.
-    For a standard-latency Twitch stream this is ~18–20s. The Twitch phone app
-    sits this far behind too. So this number reading "~20s" while you are
-    visually in sync with your phone is expected — it is distance from the
-    *encoder*, not from what any viewer can actually reach.
-  - **Edge gap** = how far the playhead trails the freshest segment we can
-    fetch (the seekable-window end). This is ~2–6s and is the number that
-    tracks "am I near the freshest available content / in sync with my phone."
-- The on-screen badge now **leads with the edge gap**, with encoder delay kept
-  only as a fallback when the edge gap is unavailable.
+  - **Wall-clock behind-live** = `Date()` − `PROGRAM-DATE-TIME` of the current
+    frame. This is how far behind the real broadcast the on-screen picture is —
+    the metric a viewer actually experiences (and the one used for chat sync).
+    For Twitch low-latency this is typically ~5–15s.
+  - **Edge gap** = how far the playhead trails the freshest segment we can fetch
+    (the seekable-window end). This is ~2–6s; it collapses to ~0 at the edge and
+    is *not* a reliable "behind live" figure on its own.
+- The on-screen badge **leads with wall-clock behind-live**, with the edge gap
+  kept only as a fallback when wall-clock (`currentDate()`) is unavailable. The
+  badge is **hidden by default** (`showLatencyBadge`).
+- `PROGRAM-DATE-TIME` is approximate and occasionally stale (especially right
+  after a stall/reload), so the raw wall-clock value can momentarily spike; the
+  smoother applies outlier rejection, but transient jumps in the diagnostic
+  readout do not reflect a real change in playback position.
 
 ### Recovery behavior
 - **Involuntary live-edge drift is detected independently of the frozen-playhead
@@ -125,6 +140,14 @@ pin: ABR is what lets the stream step down instead of stalling.
   restarts playback near the live edge. A reload therefore looks like a large
   forward "jump" on screen — this is one known, code-level source of jumps
   (counted separately as "Reloads" in the Diagnostics overlay).
+- **Snap to true live on return.** After scrubbing through the DVR window and
+  returning to the live edge, AVPlayer's seekable window can itself trail the
+  true broadcast tail (its cached media playlist is stale), so a same-window seek
+  leaves the viewer ~10s+ behind. On scrub commit, when pinned to live and that
+  staleness (wall-clock behind-live minus the in-window edge gap) exceeds a
+  threshold, `snapToTrueLiveIfStale` forces a fresh load that lands at the real
+  edge. The proxy only clears its DVR buffers when `retainHistory` actually
+  changes, so the rewind window survives the reload.
 
 ## Realistic floor
 

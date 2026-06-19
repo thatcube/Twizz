@@ -14,17 +14,8 @@ extension PlayerView {
   }
 
   func diagBufferAheadDescription(_ item: AVPlayerItem) -> String {
-    let current = CMTimeGetSeconds(item.currentTime())
-    guard current.isFinite else { return "—" }
-    for value in item.loadedTimeRanges {
-      let range = value.timeRangeValue
-      let start = CMTimeGetSeconds(range.start)
-      let end = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
-      if start.isFinite, end.isFinite, current >= start - 0.5, current <= end + 0.5 {
-        return "\(diagFormat(max(0, end - current), decimals: 1))s"
-      }
-    }
-    return "—"
+    guard let ahead = bufferAheadSeconds(item) else { return "—" }
+    return "\(diagFormat(ahead, decimals: 1))s"
   }
 
   func diagWaitingReasonDescription() -> String {

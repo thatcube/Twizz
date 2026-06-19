@@ -54,6 +54,16 @@ struct LivePlaybackPolicy: Equatable {
   var catchUpRate: Float
   /// Engage catch-up only once the live-edge gap exceeds this many seconds.
   var catchUpThresholdSeconds: Double
+  /// Anti-stall floor: the slowest the player may run while easing the rate down
+  /// to ride out a draining buffer. `1.0` disables the slow-down arm entirely.
+  var minPlaybackRate: Float
+  /// Begin easing the rate below 1.0 once the forward buffer drops under this many
+  /// seconds; the rate ramps linearly from 1.0 here down to `minPlaybackRate` at an
+  /// empty buffer.
+  var slowdownBufferFloorSeconds: Double
+  /// Only allow catch-up (speeding up) when the forward buffer is at least this
+  /// healthy, so we never chase the edge while already starved.
+  var catchUpHealthyBufferSeconds: Double
 
   /// Builds the policy for a live stream.
   /// - Parameters:
@@ -67,7 +77,10 @@ struct LivePlaybackPolicy: Equatable {
         preferredForwardBufferDuration: 8,
         enablesGentleCatchUp: false,
         catchUpRate: 1.0,
-        catchUpThresholdSeconds: .greatestFiniteMagnitude
+        catchUpThresholdSeconds: .greatestFiniteMagnitude,
+        minPlaybackRate: 1.0,
+        slowdownBufferFloorSeconds: 0,
+        catchUpHealthyBufferSeconds: .greatestFiniteMagnitude
       )
     }
 
@@ -77,14 +90,22 @@ struct LivePlaybackPolicy: Equatable {
         preferredForwardBufferDuration: 4,
         enablesGentleCatchUp: true,
         catchUpRate: 1.04,
-        catchUpThresholdSeconds: 8
+        catchUpThresholdSeconds: 8,
+        // Ease down toward 0.90× as the buffer drains under 1.5s so a transient
+        // dip is absorbed by playing slightly slow instead of a hard stall.
+        minPlaybackRate: 0.90,
+        slowdownBufferFloorSeconds: 1.5,
+        catchUpHealthyBufferSeconds: 3
       )
     case .higherQuality:
       return LivePlaybackPolicy(
         preferredForwardBufferDuration: 8,
         enablesGentleCatchUp: false,
         catchUpRate: 1.0,
-        catchUpThresholdSeconds: .greatestFiniteMagnitude
+        catchUpThresholdSeconds: .greatestFiniteMagnitude,
+        minPlaybackRate: 1.0,
+        slowdownBufferFloorSeconds: 0,
+        catchUpHealthyBufferSeconds: .greatestFiniteMagnitude
       )
     }
   }

@@ -190,6 +190,10 @@ extension PlayerView {
     // Buffer depth comes from the active profile: shallower for lower latency,
     // deeper to let ABR hold higher quality. (See LivePlaybackPolicy.)
     item.preferredForwardBufferDuration = activeLivePlaybackPolicy.preferredForwardBufferDuration
+    // The adaptive-rate controller nudges the live rate a few percent either side
+    // of 1.0 (anti-stall slow-down / gentle catch-up); time-domain pitch correction
+    // keeps the audio natural through those small changes.
+    item.audioTimePitchAlgorithm = .timeDomain
     // Keep refreshing the live playlist while paused so the seekable (rewind)
     // window keeps growing and pause-then-resume stays inside the DVR window.
     item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
@@ -791,27 +795,63 @@ extension PlayerView {
     }
   }
 
-  /// Keeps live playback running at the policy's target rate without fighting an
-  /// intentional pause or an in-progress scrub. When the active profile enables
-  /// gentle catch-up and the live-edge gap exceeds its threshold, nudges the rate
-  /// slightly above 1.0 to drift back toward the edge (imperceptible, and it never
-  /// reduces quality). Otherwise it normalizes the rate to 1.0×.
+  /// Forward buffer headroom in seconds (how much playable media sits ahead of the
+  /// playhead in the range currently being played), or `nil` when unknown.
+  func bufferAheadSeconds(_ item: AVPlayerItem?) -> Double? {
+    guard let item else { return nil }
+    let current = CMTimeGetSeconds(item.currentTime())
+    guard current.isFinite else { return nil }
+    for value in item.loadedTimeRanges {
+      let range = value.timeRangeValue
+      let start = CMTimeGetSeconds(range.start)
+      let end = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+      if start.isFinite, end.isFinite, current >= start - 0.5, current <= end + 0.5 {
+        return max(0, end - current)
+      }
+    }
+    return nil
+  }
+
+  /// Bidirectional adaptive playback-rate control for live, driven by buffer
+  /// occupancy (the standard low-latency technique — cf. dash.js `liveCatchup`).
+  /// Two arms, anti-stall first:
+  ///   • Anti-stall — as the forward buffer drains under the policy floor, ease the
+  ///     rate down toward `minPlaybackRate` (~0.90×). Playing slightly slow buys the
+  ///     buffer time to refill, so a transient dip is absorbed instead of becoming a
+  ///     hard stall (and AVPlayer's jarring "waiting toMinimizeStalls" rebuffer).
+  ///   • Catch-up — only when there is healthy buffer headroom *and* we have drifted
+  ///     behind the live edge, nudge slightly above 1.0× to drift back. Never used
+  ///     to reduce quality, and never while starved.
+  /// Returns 1.0× otherwise. A few percent either side of 1.0 is inaudible with
+  /// pitch correction (`audioTimePitchAlgorithm`).
+  func desiredLivePlaybackRate(policy: LivePlaybackPolicy) -> Float {
+    if policy.minPlaybackRate < 1.0,
+      let buffer = bufferAheadSeconds(player.currentItem),
+      buffer < policy.slowdownBufferFloorSeconds {
+      let floor = max(policy.slowdownBufferFloorSeconds, 0.001)
+      let fraction = Float(max(0, min(1, buffer / floor)))
+      return policy.minPlaybackRate + (1.0 - policy.minPlaybackRate) * fraction
+    }
+
+    if policy.enablesGentleCatchUp,
+      let gap = liveEdgeLatencySeconds, gap > policy.catchUpThresholdSeconds,
+      let buffer = bufferAheadSeconds(player.currentItem),
+      buffer > policy.catchUpHealthyBufferSeconds {
+      return policy.catchUpRate
+    }
+
+    return 1.0
+  }
+
+  /// Applies the adaptive live playback rate without fighting an intentional pause
+  /// or an in-progress scrub.
   func applyLiveLatencyCorrection() {
     guard isPlaybackActive else { return }
     guard !isUserPaused, !isScrubbing, !isVOD else { return }
 
-    let policy = activeLivePlaybackPolicy
-    if policy.enablesGentleCatchUp,
-      let gap = liveEdgeLatencySeconds,
-      gap > policy.catchUpThresholdSeconds {
-      if abs(player.rate - policy.catchUpRate) > 0.01 {
-        player.playImmediately(atRate: policy.catchUpRate)
-      }
-      return
-    }
-
-    if abs(player.rate - 1.0) > 0.01 {
-      player.playImmediately(atRate: 1.0)
+    let targetRate = desiredLivePlaybackRate(policy: activeLivePlaybackPolicy)
+    if abs(player.rate - targetRate) > 0.01 {
+      player.playImmediately(atRate: targetRate)
     }
   }
 
