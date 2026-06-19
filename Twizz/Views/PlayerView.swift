@@ -209,6 +209,10 @@ struct PlayerView: View {
   /// True only for the moment the user deliberately leaves the chat scroller via
   /// the Back button, so the focus trap lets that one transition through.
   @State private var isExitingChatScroll = false
+  /// Last directional press, captured so the chat-scroll focus trap can tell a
+  /// downward exit (drop to the composer) from a sideways/upward escape (snap
+  /// back into the list).
+  @State private var lastMoveDirection: MoveCommandDirection?
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
   @State private var raidBannerDismissTask: Task<Void, Never>?
   /// The outgoing raid currently being followed (with a cancel window).
@@ -536,6 +540,7 @@ struct PlayerView: View {
       }
     }
     .onMoveCommand { direction in
+      lastMoveDirection = direction
       if !showControls {
         // Directional movement should immediately surface controls. Pressing
         // right with chat open means the user wants the composer, so land
@@ -558,6 +563,12 @@ struct PlayerView: View {
       if oldFocus == .chatScroll, newFocus != .chatScroll, showChat {
         if isExitingChatScroll {
           isExitingChatScroll = false
+        } else if lastMoveDirection == .down {
+          // Pressing down out of the list means "I'm done scrolling" — drop to
+          // the composer and resume live instead of leaking to a control.
+          focus = .chatInput
+          scheduleHide()
+          return
         } else {
           focus = .chatScroll
           return
