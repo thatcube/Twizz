@@ -28,6 +28,7 @@ Playback:
 - Side-by-side layout: video on the left, chat pane on the right.
 - Quality picker with persistence (`Auto` + explicit qualities), ordered highest-to-lowest.
 - Custom bottom overlay controls with tvOS focus navigation.
+- Sleep timer tucked inside the quality menu (timed or "end of stream") with a "still watching?" check, an animated starry "Sleeping" screen, and one-press resume that snaps back to the live edge.
 
 Chat:
 
@@ -130,7 +131,6 @@ A running list of features we're considering, roughly ordered by effort.
 
 | Feature | Why people want it | Why it's quick here |
 |---|---|---|
-| **Sleep timer** | Top "fall asleep to a stream" request; almost no TV app has it | Pure UI + a timer that pauses/quits playback. Hours, not days. |
 | **"Go Live" button + latency indicator** | Web/mobile have it; viewers hate drifting behind | We already have `LowLatencyHLSProxy`; just expose seek-to-live edge + a delay badge in the overlay. |
 | **"Just went live" toast for follows** | Discovery — catch a stream the moment it starts | We already run `EventSubService` (`stream.online`). Surface it as a banner like the raid banner. |
 | **Chat keyword highlights + mention ping** | Chatterino's most-loved feature; makes big chats usable | Client-side string match in `RichChatLineView` + a settings list. |
