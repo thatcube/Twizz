@@ -3007,10 +3007,10 @@ private struct PlayerInfoBadge: View {
         HStack(spacing: 12) {
           if let viewers {
             HStack(spacing: 7) {
-              Icon(glyph: .user, size: 22)
+              Icon(glyph: .user, size: 30)
                 .foregroundStyle(Self.viewerTint)
               Text(viewers.formatted(.number))
-                .font(.callout)
+                .font(.footnote)
                 .fontWeight(.semibold)
                 .foregroundStyle(.white)
                 .monospacedDigit()
