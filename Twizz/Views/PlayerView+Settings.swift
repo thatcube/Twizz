@@ -522,23 +522,21 @@ extension PlayerView {
 
   /// The Back button + title shown at the top of a settings sub-page.
   func subpageHeader(_ title: String) -> some View {
-    HStack(spacing: 12) {
+    HStack(spacing: 14) {
       Button {
         closeSubpage()
       } label: {
-        HStack(spacing: 6) {
-          Icon(glyph: .chevronLeft, size: 20)
-          Text("Back")
-            .font(.subheadline.weight(.semibold))
-        }
+        Icon(glyph: .chevronLeft, size: 24)
       }
       .chatSettingsGlassButton()
-      .buttonBorderShape(.capsule)
+      .buttonBorderShape(.circle)
       .focused($focus, equals: .chatAdvancedBack)
 
       Text(title)
         .font(.headline)
         .foregroundStyle(.white)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
 
       Spacer(minLength: 0)
     }
