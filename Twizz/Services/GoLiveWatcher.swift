@@ -101,6 +101,14 @@ final class GoLiveWatcher {
     advance()
   }
 
+  /// Debug-only: inject a simulated go-live so the toast, auto-dismiss, and
+  /// "Watch" switch can be exercised without waiting for a real follow to start.
+  /// Targets a near-24/7 channel (Monstercat) so "Watch" lands on a genuinely
+  /// live stream.
+  func simulateGoLive() {
+    enqueue(GoLiveEvent(login: "monstercat", displayName: "Monstercat", gameName: "Music"))
+  }
+
   /// Freeze the auto-dismiss countdown — called while the toast's button holds
   /// focus, so the toast can't vanish out from under the viewer.
   func pauseAutoDismiss() {
