@@ -849,11 +849,14 @@ struct PlayerView: View {
   /// live, ask Twitch whether the channel is still up (this is independent of the
   /// waiting/stall state, which the anti-stall slow-down keeps flickering). A
   /// merely-struggling stream still advances its edge, so it won't trip this.
-  let endOfStreamEdgeFrozenSeconds: Double = 12
+  let endOfStreamEdgeFrozenSeconds: Double = 8
   /// Safety net for when Twitch's status lookup keeps returning `.unknown` for an
   /// ended stream: if the edge has been frozen this long AND the buffer is empty,
   /// surface the offline state anyway rather than sit on a dead frame forever.
-  let endOfStreamEdgeForceOfflineSeconds: Double = 30
+  /// Kept tight (a frozen edge + drained buffer is an unmistakably dead stream)
+  /// so the viewer reaches the offline screen — with its Try Again button —
+  /// quickly instead of staring at a frozen final frame.
+  let endOfStreamEdgeForceOfflineSeconds: Double = 12
   /// Fast end-of-stream force-offline for the unambiguous "ended" signature: the
   /// live edge has stopped advancing AND playback is hard-stalled on a starved
   /// buffer. A struggling-but-live stream keeps advancing its edge (clearing the
