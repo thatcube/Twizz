@@ -519,6 +519,10 @@ struct PlayerView: View {
   @State var isUsingAltSource = false
   @State var altYouTubeMasterURL: URL?
   @State var altSourceStatus: String?
+  // Throttles automatic alt-source manifest re-resolution after a 403/expiry so a
+  // failing googlevideo URL is refreshed without hammering YouTube.
+  @State var lastAltResolveAt = Date.distantPast
+  @State var altResolveInFlight = false
   var isPlaybackActive: Bool {
     get { mon.isPlaybackActive }
     nonmutating set { mon.isPlaybackActive = newValue }

@@ -40,30 +40,46 @@ extension PlayerView {
   /// latency monitor keeps running so the Diagnostics readout still measures.
   func switchToAltYouTubeSource() async {
     guard !isVOD else { return }
+    isUsingAltSource = true
+    stopRateController()
+    stopPlaybackWatchdog()
+    await resolveAndPlayAltSource(reason: "enable")
+  }
+
+  /// (Re)resolves a *fresh* YouTube HLS master and starts playing it. Always
+  /// re-fetches the manifest rather than reusing `altYouTubeMasterURL`, because
+  /// googlevideo manifest/segment URLs are IP-bound and time-expiring — a reused
+  /// URL 403s. Throttled so the on-`.failed` auto-retry can't hammer YouTube.
+  func resolveAndPlayAltSource(reason: String) async {
+    guard isUsingAltSource, !isVOD else { return }
+    guard !altResolveInFlight else { return }
+    guard Date().timeIntervalSince(lastAltResolveAt) >= 4 else { return }
+    altResolveInFlight = true
+    lastAltResolveAt = Date()
+    defer { altResolveInFlight = false }
+
     let login = activeChannel
     altSourceStatus = "Resolving YouTube simulcast…"
 
-    if altYouTubeMasterURL == nil {
-      var target = youtubeAutoResolvedTarget.trimmingCharacters(in: .whitespacesAndNewlines)
-      if target.isEmpty {
-        target = await Self.resolveYouTubeTarget(forTwitchLogin: login)
-      }
-      guard login == activeChannel, !target.isEmpty else {
-        altSourceStatus = "No YouTube link for this channel."
-        return
-      }
-      altYouTubeMasterURL = await AltSourceService.youtubeHLSMaster(forTarget: target)
+    var target = youtubeAutoResolvedTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+    if target.isEmpty {
+      target = await Self.resolveYouTubeTarget(forTwitchLogin: login)
     }
+    guard login == activeChannel, isUsingAltSource else { return }
+    guard !target.isEmpty else {
+      altSourceStatus = "No YouTube link for this channel."
+      return
+    }
+    youtubeAutoResolvedTarget = target
 
-    guard login == activeChannel else { return }
-    guard let master = altYouTubeMasterURL else {
+    let master = await AltSourceService.youtubeHLSMaster(forTarget: target)
+    guard login == activeChannel, isUsingAltSource else { return }
+    guard let master else {
       altSourceStatus = "YouTube simulcast not live / not found."
       return
     }
 
-    isUsingAltSource = true
-    stopRateController()
-    stopPlaybackWatchdog()
+    altYouTubeMasterURL = master
     player.replaceCurrentItem(with: makeAltSourceItem(url: master))
     startPlayback()
     altSourceStatus = "Playing YouTube simulcast"
@@ -101,7 +117,11 @@ extension PlayerView {
         let comment = last.errorComment ?? ""
         detail += " [\(code)\(comment.isEmpty ? "" : " \(comment)")]"
       }
-      altSourceStatus = detail
+      // googlevideo URLs are IP-bound and expire (403/-12660). Auto-recover by
+      // re-resolving a fresh manifest; the throttle in resolveAndPlayAltSource
+      // keeps this from hammering YouTube.
+      altSourceStatus = detail + " · refreshing…"
+      Task { await resolveAndPlayAltSource(reason: "failed-retry") }
     case .unknown:
       altSourceStatus = "YouTube: loading manifest…"
     case .readyToPlay:
