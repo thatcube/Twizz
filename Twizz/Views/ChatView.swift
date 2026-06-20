@@ -543,8 +543,8 @@ struct ChatView: View {
           // and uses relative radii, so it needs no GeometryReader.
           EllipticalGradient(
             colors: [
-              accent.opacity(isSideLayout ? 0.24 : 0.34),
-              accent.opacity(isSideLayout ? 0.04 : 0.07),
+              accent.opacity(isSideLayout ? 0.18 : 0.26),
+              accent.opacity(isSideLayout ? 0.03 : 0.05),
             ],
             center: glow.center,
             startRadiusFraction: 0,
