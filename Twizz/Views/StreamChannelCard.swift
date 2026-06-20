@@ -282,7 +282,7 @@ struct StreamChannelCard: View {
   /// light page the dark shadow otherwise muddies into the focused card's
   /// darkening tint, so the lift reads as a smudge rather than a float.
   private var focusedShadowOpacity: Double {
-    palette.isLight ? 0.20 : 0.36
+    palette.isLight ? 0.12 : 0.36
   }
 
   @MainActor

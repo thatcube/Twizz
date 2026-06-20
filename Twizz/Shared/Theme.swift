@@ -237,9 +237,9 @@ struct ThemePalette: Equatable {
   /// focus treatment; the Reduce Transparency path keeps its opaque
   /// `liftSurface` fill.
   var focusedCardGlassTint: Color {
-    if isLight { return Color.black.opacity(0.15) }
-    if self == .oled { return Color.white.opacity(0.12) }
-    return Color.white.opacity(0.15)
+    if isLight { return Color.black.opacity(0.05) }
+    if self == .oled { return Color.white.opacity(0.10) }
+    return Color.white.opacity(0.13)
   }
 }
 
