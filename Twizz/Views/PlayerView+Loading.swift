@@ -588,7 +588,15 @@ extension PlayerView {
     // flickering, so the starvation timer below could otherwise never mature) and
     // works in stability mode too. A merely-struggling stream still advances its
     // edge, so it won't trip this.
-    if !isVOD, pinnedToLive {
+    //
+    // Deliberately NOT gated on `pinnedToLive`: edge freeze is a property of the
+    // broadcast, not of where the viewer sits in the window. A viewer who has
+    // drifted off the edge (a DVR rewind) would otherwise lose every local
+    // offline path and, when Twitch's status lookup lags at `.unknown` for the
+    // ended broadcast, be stranded on a frozen final frame forever. The
+    // `starved` requirement on the force/probe arms keeps a rewound viewer who
+    // still has buffered content ahead from being yanked offline mid-playback.
+    if !isVOD {
       let now = Date()
       let edge = liveSeekableEdgeSeconds(item)
       let advanced = edge.map { $0 > (lastLiveEdgeSeconds ?? -.greatestFiniteMagnitude) + 0.5 } ?? false
@@ -615,7 +623,10 @@ extension PlayerView {
           // stall signal (e.g. the anti-stall slow-down keeps flickering the state):
           // don't sit on a frozen frame forever waiting on Twitch's `.unknown`.
           presentOfflineState()
-        } else if frozenFor >= endOfStreamEdgeFrozenSeconds {
+        } else if frozenFor >= endOfStreamEdgeFrozenSeconds, starved {
+          // Buffer drained and the edge has been frozen a while: confirm with
+          // Twitch. Gated on `starved` so a rewound DVR viewer still playing
+          // buffered content is never probed (and possibly yanked) offline.
           probeOfflineIfStreamEnded()
         }
       }
