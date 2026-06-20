@@ -79,7 +79,6 @@ struct MultiviewSetupView: View {
           .padding(.horizontal, 12)
       }
       .disabled(!canStart)
-      .tint(ThemePalette.brandPurple)
     }
     .padding(.horizontal, AppLayout.horizontalPadding)
     .padding(.top, 48)
@@ -114,14 +113,14 @@ struct MultiviewSetupView: View {
     .overlay(alignment: .topTrailing) {
       if let order {
         selectionBadge(order: order + 1)
-          .padding(26)
+          .padding(20)
       }
     }
     .overlay {
       RoundedRectangle(cornerRadius: 16, style: .continuous)
         .strokeBorder(
-          isSelected ? ThemePalette.brandPurple : Color.clear,
-          lineWidth: 5
+          isSelected ? selectionColor : Color.clear,
+          lineWidth: 4
         )
     }
     .opacity(dimmed ? 0.4 : 1)
@@ -143,16 +142,23 @@ struct MultiviewSetupView: View {
     )
   }
 
-  /// Numbered pick-order badge. White on the brand fill reads against any
-  /// thumbnail; the brand purple keeps it consistent with the selection ring.
+  /// The native tvOS selection/focus color: white on dark and OLED, black on
+  /// the Light theme — never brand purple.
+  private var selectionColor: Color {
+    palette.isLight ? .black : .white
+  }
+
+  /// Numbered pick-order badge. A clean solid disc in the selection color with a
+  /// contrasting, monospaced numeral so it reads at a glance and never feels
+  /// cramped.
   private func selectionBadge(order: Int) -> some View {
     Text("\(order)")
-      .font(.title3.weight(.bold))
-      .foregroundStyle(.white)
-      .frame(width: 46, height: 46)
-      .background(ThemePalette.brandPurple, in: Circle())
-      .overlay(Circle().strokeBorder(.white.opacity(0.9), lineWidth: 2))
-      .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+      .font(.system(size: 26, weight: .bold, design: .rounded))
+      .monospacedDigit()
+      .foregroundStyle(palette.isLight ? Color.white : Color.black)
+      .frame(width: 52, height: 52)
+      .background(selectionColor, in: Circle())
+      .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
   }
 
   private func toggle(_ channel: FollowedChannel) {

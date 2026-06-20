@@ -341,37 +341,39 @@ struct HomeView: View {
 
         Spacer()
 
-        if liveFollowedChannels.count >= 2 {
-          Button {
-            showingMultiview = true
-          } label: {
-            Label {
-              Text("Multiview")
-                .font(.system(size: 24, weight: .semibold))
-            } icon: {
-              Icon(glyph: .layoutGrid, size: 26)
+        HStack(spacing: 8) {
+          if liveFollowedChannels.count >= 2 {
+            Button {
+              showingMultiview = true
+            } label: {
+              Label {
+                Text("Multiview")
+                  .font(.system(size: 24, weight: .semibold))
+              } icon: {
+                Icon(glyph: .layoutGrid, size: 26)
+              }
             }
+            .accessibilityLabel("Watch multiple channels at once")
           }
-          .accessibilityLabel("Watch multiple channels at once")
-        }
 
-        if !follows.isUsingDemoData {
+          if !follows.isUsingDemoData {
+            Button {
+              showingFollowingDirectory = true
+            } label: {
+              Text("See All")
+                .font(.system(size: 24, weight: .semibold))
+            }
+            .accessibilityLabel("See all followed channels")
+          }
+
           Button {
-            showingFollowingDirectory = true
+            performManualRefresh()
           } label: {
-            Text("See All")
-              .font(.system(size: 24, weight: .semibold))
+            Image(systemName: "arrow.clockwise")
+              .font(.system(size: 28, weight: .semibold))
           }
-          .accessibilityLabel("See all followed channels")
+          .accessibilityLabel("Refresh")
         }
-
-        Button {
-          performManualRefresh()
-        } label: {
-          Image(systemName: "arrow.clockwise")
-            .font(.system(size: 28, weight: .semibold))
-        }
-        .accessibilityLabel("Refresh")
       }
 
       if let errorMessage = follows.errorMessage {

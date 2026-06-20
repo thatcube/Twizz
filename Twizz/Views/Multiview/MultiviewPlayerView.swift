@@ -53,22 +53,26 @@ struct MultiviewPlayerView: View {
     ZStack {
       Color.black.ignoresSafeArea()
 
-      VStack(spacing: 0) {
-        controlsBar
-          .padding(.horizontal, 28)
-          .padding(.top, 18)
-          .padding(.bottom, 10)
-
-        Group {
-          switch controller.layout {
-          case .grid: gridLayout
-          case .spotlight: spotlightLayout
-          }
+      // The video wall fills the entire screen edge-to-edge — no outer margins.
+      Group {
+        switch controller.layout {
+        case .grid: gridLayout
+        case .spotlight: spotlightLayout
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .ignoresSafeArea()
+
+      // Controls ride on top as auto-hiding chrome so they never steal space
+      // from the streams.
+      VStack {
+        controlsBar
+          .padding(.horizontal, 36)
+          .padding(.top, 28)
+        Spacer()
+      }
+      .opacity(chromeVisible ? 1 : 0)
+      .animation(.easeOut(duration: 0.3), value: chromeVisible)
     }
     .onAppear {
       controller.start()
@@ -115,59 +119,35 @@ struct MultiviewPlayerView: View {
 
       Spacer()
 
+      // Native tvOS buttons: the system handles the focus lift/highlight, so
+      // these match the standard "See All"-style buttons elsewhere in the app.
       Button {
         controller.toggleLayout()
         bumpChrome()
       } label: {
-        controlChip(
-          icon: controller.layout == .grid ? .layoutBottombar : .layoutGrid,
-          text: controller.layout == .grid ? "Spotlight" : "Grid"
-        )
+        Label {
+          Text(controller.layout == .grid ? "Spotlight" : "Grid")
+        } icon: {
+          Icon(glyph: controller.layout == .grid ? .layoutBottombar : .layoutGrid, size: 22)
+        }
+        .font(.headline)
       }
-      .buttonStyle(.plain)
       .focused($focus, equals: .layoutButton)
 
       if controller.canAddPane && !addableChannels.isEmpty {
         Button {
           showingAddPicker = true
         } label: {
-          controlChip(icon: .plus, text: "Add")
+          Label {
+            Text("Add")
+          } icon: {
+            Icon(glyph: .plus, size: 22)
+          }
+          .font(.headline)
         }
-        .buttonStyle(.plain)
         .focused($focus, equals: .addButton)
       }
     }
-  }
-
-  private func controlChip(icon: Glyph, text: String) -> some View {
-    let isFocused: Bool = {
-      switch focus {
-      case .layoutButton: return icon == .layoutBottombar || icon == .layoutGrid
-      case .addButton: return icon == .plus
-      default: return false
-      }
-    }()
-    return HStack(spacing: 8) {
-      Icon(glyph: icon, size: 22)
-      Text(text).font(.headline)
-    }
-    .foregroundStyle(.white)
-    .padding(.horizontal, 18)
-    .padding(.vertical, 11)
-    .background(
-      glassDisabled
-        ? AnyShapeStyle(Color.white.opacity(0.16))
-        : AnyShapeStyle(.regularMaterial),
-      in: Capsule()
-    )
-    .overlay(
-      Capsule().strokeBorder(
-        isFocused ? ThemePalette.brandPurple : Color.white.opacity(0.12),
-        lineWidth: isFocused ? 3 : 1
-      )
-    )
-    .scaleEffect(isFocused ? 1.06 : 1)
-    .animation(.easeOut(duration: 0.16), value: isFocused)
   }
 
   // MARK: Grid layout
@@ -257,7 +237,7 @@ struct MultiviewPlayerView: View {
       onEscalate(pane.channel)
     } label: {
       Label {
-        Text("Watch Full Screen")
+        Text("Watch Stream")
       } icon: {
         Icon(glyph: .arrowsMaximize)
       }
@@ -392,9 +372,12 @@ private struct MultiviewPaneTile: View {
   }
 
   private var borderColor: Color {
-    if isFocused { return ThemePalette.brandPurple }
-    if pane.isAudible { return ThemePalette.brandPurple.opacity(0.7) }
-    return Color.white.opacity(0.08)
+    // The multiview wall is always a black video surface, so the native tvOS
+    // focus treatment here is a white border (as on any dark screen). The
+    // audible-but-unfocused pane keeps a lighter white hairline as a quiet cue.
+    if isFocused { return .white }
+    if pane.isAudible { return Color.white.opacity(0.5) }
+    return Color.white.opacity(0.12)
   }
 
   private var borderWidth: CGFloat {
@@ -439,10 +422,10 @@ private struct MultiviewPaneTile: View {
           .font(.subheadline.weight(.semibold))
       }
     }
-    .foregroundStyle(.white)
+    .foregroundStyle(.black)
     .padding(.horizontal, style == .compact ? 9 : 12)
     .padding(.vertical, style == .compact ? 7 : 8)
-    .background(ThemePalette.brandPurple, in: Capsule())
+    .background(Color.white, in: Capsule())
     .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
   }
 
