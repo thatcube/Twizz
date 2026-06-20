@@ -350,7 +350,7 @@ struct HomeView: View {
                 Text("Multiview")
                   .font(.system(size: 24, weight: .semibold))
               } icon: {
-                Icon(glyph: .layoutGrid, size: 26)
+                Icon(glyph: .borderAll, size: 26)
               }
             }
             .accessibilityLabel("Watch multiple channels at once")
