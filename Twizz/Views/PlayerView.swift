@@ -1095,6 +1095,23 @@ struct PlayerView: View {
     }
   }
 
+  /// Trailing inset for the full-bleed loading surface so it occupies only the
+  /// *uncovered* video region instead of stretching the full screen under the
+  /// (often translucent) chat in overlay/glass modes — which made the loading
+  /// art read as fullscreen even though the video is sharing the screen with
+  /// chat. Side mode already shrinks the video column, so no inset is needed.
+  var loadingChatInset: CGFloat {
+    guard showChat, chatLayoutMode.isOverlay else { return 0 }
+    switch chatLayoutMode {
+    case .glass:
+      return chatWidth + GlassChatPaneStyle.edgeInset
+    case .overlay:
+      return chatWidth
+    case .side:
+      return 0
+    }
+  }
+
   var body: some View {
     ZStack {
       palette.playerBackdrop.ignoresSafeArea()
@@ -1573,18 +1590,21 @@ struct PlayerView: View {
         .ignoresSafeArea()
 
       // Shared loading surface: the stream's frame blurred behind the channel's
-      // avatar, name, and a native spinner. It fills the video column
-      // immediately and cross-fades to live video once playback starts, so
-      // opening a stream (or escalating from a multiview pane) reads as a quick
-      // sharpen instead of a black "Loading…" gap. Constrained to the video
-      // column so it never bleeds over the chat (whose width varies).
+      // avatar, name, and a native spinner. It fills the *uncovered* video
+      // region immediately and cross-fades to live video once playback starts,
+      // so opening a stream (or escalating from a multiview pane) reads as a
+      // quick sharpen instead of a black "Loading…" gap. The trailing inset
+      // keeps it clear of the chat in overlay/glass modes (side mode already
+      // shrinks the video column), so it never reads as fullscreen when chat is
+      // open.
       StreamLoadingView(
         posterURL: posterURL,
         avatarURL: channelAvatarURL,
         title: isVOD ? vod?.title : offlineDisplayName
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .ignoresSafeArea()
+      .padding(.trailing, loadingChatInset)
+      .ignoresSafeArea(edges: loadingChatInset > 0 ? [.top, .bottom, .leading] : .all)
       .opacity(isLoading && errorMessage == nil && !isOffline ? 1 : 0)
       .allowsHitTesting(false)
       .animation(.easeOut(duration: 0.45), value: isLoading)
