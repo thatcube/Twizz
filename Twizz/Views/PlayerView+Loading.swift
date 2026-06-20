@@ -23,6 +23,13 @@ extension PlayerView {
   func load(maxAttempts: Int = 3, reason: String = "initial", resetMetadata: Bool = true)
     async
   {
+    // While the experimental alternate source (YouTube simulcast) is active the
+    // player holds a plain non-Twitch item. Every `load()` rebuilds the proxied
+    // Twitch pipeline via `makeItem` and re-arms the Twitch control loops, which
+    // would clobber the alt item (and the loops then seek it backward). Ignore
+    // reloads — from proxy/rewind toggles, stability mode, or stall recovery —
+    // until the user switches back to Twitch (`switchToTwitchSource`).
+    guard !isUsingAltSource else { return }
     isLoading = true
     errorMessage = nil
     isOffline = false
@@ -464,7 +471,9 @@ extension PlayerView {
   /// its DVR buffers when `retainHistory` actually changes — so this preserves the
   /// ability to rewind while snapping playback back to real live.
   func snapToTrueLiveIfStale() {
-    guard !isVOD, pinnedToLive, !isUserPaused, !isScrubbing, !isRecoveringPlayback else {
+    guard !isVOD, !isUsingAltSource, pinnedToLive, !isUserPaused, !isScrubbing,
+      !isRecoveringPlayback
+    else {
       return
     }
     guard let item = player.currentItem, let source = currentSourceURL else { return }
@@ -482,6 +491,19 @@ extension PlayerView {
   }
 
   func samplePlaybackHealth() {
+    // On the experimental alternate source (YouTube simulcast) this watchdog's
+    // Twitch-tuned recovery — live-edge resync, predictive stability mode, stall
+    // reloads — must not run: it seeks the plain alt item backward (accumulating
+    // latency) or rebuilds the Twitch pipeline. Leave the alt item to plain
+    // AVPlayer so the latency comparison is honest.
+    guard !isUsingAltSource else {
+      stalledPlaybackSamples = 0
+      lastObservedPlaybackTimeSeconds = nil
+      liveStallWaitingSince = nil
+      softStallSince = nil
+      videoDecodeFrozenSince = nil
+      return
+    }
     guard !isLoading, errorMessage == nil, !isOffline
     else {
       stalledPlaybackSamples = 0

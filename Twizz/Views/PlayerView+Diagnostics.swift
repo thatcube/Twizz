@@ -121,6 +121,10 @@ extension PlayerView {
   /// the live edge keeps the safe strategy until the viewer changes channel
   /// (`resetDiagnostics`); we never flap back and risk re-destabilizing it.
   func enterStreamStabilityMode() {
+    // Never engage on the alternate source: stability mode is a Twitch-pipeline
+    // strategy (drop the prefetch proxy, ride a deep buffer behind the edge) and
+    // would seek the alt item backward or reload it into Twitch.
+    guard !isUsingAltSource else { return }
     streamUnstableSince = Date()
     if showLatencyDiagnostics {
       logDiagnosticsEvent("stream unstable -> stability mode")
