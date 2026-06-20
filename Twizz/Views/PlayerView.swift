@@ -153,19 +153,11 @@ struct PlayerView: View {
   /// The row keeps only ONE button in the focus engine at a time (see
   /// `controlButtonRemoved`), so tvOS can never free-walk across it on a fast
   /// swipe — every step is driven by `stepControl`, which rate-limits the swipe
-  /// burst to this interval. A flick lands one button, a long swipe a couple.
-  /// Bigger = more deliberate / harder to swipe across. Discrete D-pad clicks are
-  /// NOT subject to this (see `controlSwipeBurstGap`).
-  var controlStepInterval: TimeInterval { 0.26 }
-
-  /// Move events closer together than this are treated as one continuous trackpad
-  /// swipe (momentum fires `onMoveCommand` in a rapid burst) and are rate-limited
-  /// by `controlStepInterval`. Anything slower is a deliberate press — a discrete
-  /// D-pad click, or a fresh gesture — and is allowed through immediately so
-  /// pressing left/right repeatedly moves snappily, one button per press. Kept low
-  /// so even fast repeated clicking clears it (only true swipe momentum, which
-  /// fires faster, is throttled); raising it also makes swipes move less.
-  var controlSwipeBurstGap: TimeInterval { 0.06 }
+  /// burst to this interval. A flick lands a button or two, a long swipe a few.
+  /// Bigger = more deliberate / harder to swipe across. This throttle applies
+  /// ONLY to touch swipes: physical D-pad clicks bypass it entirely (every press
+  /// moves), detected via the remote's clickpad button (`horizontalClickActive`).
+  var controlStepInterval: TimeInterval { 0.22 }
 
   /// How long the button we just stepped off stays focusable after a step. With
   /// both the old and new button briefly in the focus engine, tvOS animates the
@@ -218,18 +210,20 @@ struct PlayerView: View {
     focus = button
   }
 
-  /// The shared rate limiter for every horizontal move. Discrete presses (D-pad
-  /// clicks or a fresh gesture — anything arriving more than `controlSwipeBurstGap`
-  /// after the previous move event) return `true` immediately, so pressing
-  /// left/right repeatedly is snappy. A continuous swipe fires move events in a
-  /// rapid burst; those are limited to one accepted step per `controlStepInterval`
-  /// so the row can't be crossed in a single fling.
+  /// The shared rate limiter for every horizontal move. A physical D-pad click is
+  /// detected at the hardware level (the clickpad depresses over a left/right zone,
+  /// which a touch swipe never does) and is ALWAYS honoured — press left/right
+  /// seven times and focus moves seven times, however fast you press. Only a touch
+  /// swipe, which fires `onMoveCommand` in a rapid burst with no clickpad press, is
+  /// rate-limited to one accepted step per `controlStepInterval`, so a swipe can't
+  /// fling across the row in a single gesture.
   func controlStepAllowed() -> Bool {
     let now = Date()
-    let sinceLastMove = lastControlMoveAt.map { now.timeIntervalSince($0) } ?? .greatestFiniteMagnitude
-    lastControlMoveAt = now
-    let isSwipeBurst = sinceLastMove < controlSwipeBurstGap
-    if isSwipeBurst, let last = lastControlStepAt, now.timeIntervalSince(last) < controlStepInterval {
+    if trackpad.horizontalClickActive {
+      lastControlStepAt = now
+      return true
+    }
+    if let last = lastControlStepAt, now.timeIntervalSince(last) < controlStepInterval {
       return false
     }
     lastControlStepAt = now
@@ -745,10 +739,6 @@ struct PlayerView: View {
   @State var controlStepClearTask: Task<Void, Never>?
   /// Timestamp of the last accepted control-row step, for the swipe rate limit.
   @State var lastControlStepAt: Date?
-  /// Timestamp of the last control-row move EVENT (accepted or swallowed). The gap
-  /// since this tells `stepControl` whether the current move is part of a rapid
-  /// swipe burst (throttle) or a discrete press (allow immediately).
-  @State var lastControlMoveAt: Date?
   /// Set for the duration of a deliberate, throttled hop from the collapse button
   /// into the chat input, which momentarily admits the composer to the focus
   /// engine. Cleared as soon as focus returns to a control button so a plain swipe
@@ -4717,12 +4707,33 @@ final class RemoteTrackpadMonitor {
   /// directional press from a mere finger rest.
   private(set) var dpadUpPressed = false
   private(set) var dpadDownPressed = false
+  private(set) var dpadLeftPressed = false
+  private(set) var dpadRightPressed = false
   /// Direction (+1 up / -1 down / 0 none) captured at the instant of a click,
   /// while the finger position is still trustworthy. The live dpad/`y` reading
   /// flickers once the surface is clicked, so a held repeat keys off this latch
   /// plus `clickPressed` rather than the live position.
   private(set) var clickLatchedDirection = 0
+  /// Timestamp of the most recent *horizontal* physical click (the clickpad
+  /// depressed while the finger sits over the left/right zone). A touch swipe
+  /// drags the analog dpad but never depresses the pad, so it never sets this —
+  /// which is exactly how the control row tells a deliberate left/right press
+  /// (always honoured) apart from swipe momentum (rate-limited).
+  private(set) var lastHorizontalClickAt: Date?
   private var observers: [NSObjectProtocol] = []
+
+  /// True while a left/right press should be treated as a deliberate click: the
+  /// pad is currently held down over a horizontal zone (covers press-and-hold
+  /// auto-repeat), or a horizontal click landed within the last 150 ms (covers
+  /// rapid discrete clicking, where each press registers just before its
+  /// focus-move event). A pure touch swipe satisfies neither.
+  var horizontalClickActive: Bool {
+    if clickPressed, dpadLeftPressed || dpadRightPressed || abs(horizontalValue) > 0.2 {
+      return true
+    }
+    if let t = lastHorizontalClickAt, Date().timeIntervalSince(t) < 0.15 { return true }
+    return false
+  }
 
   func start() {
     for controller in GCController.controllers() { configure(controller) }
@@ -4742,6 +4753,8 @@ final class RemoteTrackpadMonitor {
         self?.clickPressed = false
         self?.dpadUpPressed = false
         self?.dpadDownPressed = false
+        self?.dpadLeftPressed = false
+        self?.dpadRightPressed = false
         self?.clickLatchedDirection = 0
       })
   }
@@ -4754,6 +4767,8 @@ final class RemoteTrackpadMonitor {
     clickPressed = false
     dpadUpPressed = false
     dpadDownPressed = false
+    dpadLeftPressed = false
+    dpadRightPressed = false
     clickLatchedDirection = 0
   }
 
@@ -4782,6 +4797,11 @@ final class RemoteTrackpadMonitor {
         } else {
           self.clickLatchedDirection = 0
         }
+        // A press over a left/right zone is a deliberate horizontal click; stamp
+        // it so the control row honours it even amid swipe-throttling.
+        if self.dpadLeftPressed || self.dpadRightPressed || abs(self.horizontalValue) > 0.2 {
+          self.lastHorizontalClickAt = Date()
+        }
       } else {
         self.clickLatchedDirection = 0
       }
@@ -4791,6 +4811,12 @@ final class RemoteTrackpadMonitor {
     }
     micro.dpad.down.pressedChangedHandler = { [weak self] _, _, pressed in
       self?.dpadDownPressed = pressed
+    }
+    micro.dpad.left.pressedChangedHandler = { [weak self] _, _, pressed in
+      self?.dpadLeftPressed = pressed
+    }
+    micro.dpad.right.pressedChangedHandler = { [weak self] _, _, pressed in
+      self?.dpadRightPressed = pressed
     }
   }
 }
