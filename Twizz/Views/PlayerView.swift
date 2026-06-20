@@ -793,14 +793,16 @@ struct PlayerView: View {
   let diagJumpBackwardThresholdSeconds: Double = 1.0
   /// Decode-freeze watchdog. AVPlayer can keep its playback clock running — so
   /// `currentTime()` advances, the buffer stays healthy and `timeControlStatus`
-  /// reads `.playing` — while the video decoder is wedged and no new frames reach
-  /// the screen (the picture freezes but PROGRAM-DATE-TIME-synced captions and
-  /// chat keep scrolling). None of the playhead/buffer/edge watchdogs can see
-  /// this; only the video output can. Once the clock has advanced this long with
-  /// zero fresh frames, reload through the same cooldown-gated failsafe path as a
-  /// hard stall. Kept well above ordinary decode jitter so a brief hiccup during a
-  /// quality switch never reloads.
-  let videoDecodeFreezeRecoverySeconds: Double = 6
+  /// reads `.playing` (or flickers into an `evaluatingBufferingRate` wait while
+  /// catch-up re-targets the rate) — while the video decoder is wedged and no new
+  /// frames reach the screen (the picture freezes but PROGRAM-DATE-TIME-synced
+  /// captions and chat keep scrolling, even running ahead of the frozen picture).
+  /// None of the playhead/buffer/edge watchdogs can see this; only the video
+  /// output can. Once the clock has advanced this long with zero fresh frames,
+  /// reload through the same cooldown-gated failsafe path as a hard stall. Kept
+  /// above ordinary decode jitter so a brief hiccup during a quality switch or an
+  /// ad discontinuity never reloads, but low enough to recover promptly.
+  let videoDecodeFreezeRecoverySeconds: Double = 5
   let chatReplayMessageCount = 30
   let chatComposerRowHeight: CGFloat = 62
 

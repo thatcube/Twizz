@@ -253,6 +253,27 @@ of stalling, and the slow-down rides out short buffer dips.
   readout do not reflect a real change in playback position.
 
 ### Recovery behavior
+- **Decode-freeze watchdog now fires while the player is *waiting*, not only
+  while `.playing` (UNPROVEN — added 2026-06).** Observed freeze: the picture
+  was frozen while captions kept scrolling (and ran 2-3s *ahead* of the audio),
+  with the overlay showing `State: Playing/waiting · evaluatingBufferingRate`,
+  `Stalls: 0`, `Reloads: 0`, and a large `Edge gap: 26.7s` while catch-up ran at
+  1.12×. That is a wedged *video decoder* with an advancing clock — exactly what
+  `checkVideoDecodeFreeze` exists to catch. The bug: its guard required
+  `player.timeControlStatus == .playing`, but the gentle catch-up rate controller
+  constantly re-targets the rate, which flickers AVPlayer into
+  `.waitingToPlayAtSpecifiedRate` (reason `evaluatingBufferingRate`). The guard
+  failed on every such tick and reset the freeze timer, so the watchdog never
+  reached its reload threshold. Fix: the guard now keys off `clockAdvanced >=
+  0.05` (forward motion this sample) and `timeControlStatus != .paused` instead
+  of requiring `.playing` — a genuine non-advancing stall keeps the clock still
+  (delta ~0) so it still falls through to the hard-stall paths, and user
+  pause/scrub are excluded upstream. The recovery reload also re-lands near live,
+  so it clears the runaway `Edge gap` at the same time. `videoDecodeFreezeRecovery
+  Seconds` was lowered 6s → 5s toward the ~5s recovery target. On-device this logs
+  "video frozen (clock running) -> reload" and shows `State: FROZEN video`.
+  **Status: targeted at the "captions move, video frozen" report but NOT yet
+  reproduced/verified in the act — treat as a hypothesis.**
 - **Involuntary live-edge drift is detected independently of the frozen-playhead
   heuristic.** With a large DVR window and `automaticallyWaitsToMinimizeStalling`
   on, AVPlayer can rewind the playhead far back inside the seekable window to
