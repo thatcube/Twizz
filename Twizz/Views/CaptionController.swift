@@ -23,6 +23,61 @@ enum CaptionBackgroundStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// Caption text color, user-selectable in caption settings. A small preset
+/// palette (rather than a free RGB picker) keeps selection fast on the Siri
+/// Remote and every choice legible over video. Stored as a raw string in
+/// `@AppStorage` because SwiftUI `Color` isn't directly persistable — same
+/// pattern as `CaptionBackgroundStyle`.
+enum CaptionTextColor: String, CaseIterable, Identifiable {
+    case white
+    case gray
+    case yellow
+    case amber
+    case mint
+    case cyan
+    case lavender
+    case rose
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .white: return "White"
+        case .gray: return "Gray"
+        case .yellow: return "Yellow"
+        case .amber: return "Amber"
+        case .mint: return "Mint"
+        case .cyan: return "Cyan"
+        case .lavender: return "Lavender"
+        case .rose: return "Rose"
+        }
+    }
+
+    /// The drawn color. Curated for legibility over video and for looking good:
+    /// readability research favors white and yellow, so those anchor the set; the
+    /// rest are high-luminance, low-saturation tints (not the harsh system
+    /// primaries) that stay readable on bright frames. Pure red/blue/green are
+    /// deliberately omitted — they're low-luminance and worst for color-vision
+    /// deficiency. `gray` is a softened white, gentler on OLED panels where pure
+    /// white can feel harsh. No black: it disappears on dark video.
+    var color: Color {
+        switch self {
+        case .white: return .white
+        case .gray: return Color(white: 0.74)
+        case .yellow: return Color(red: 1.0, green: 0.87, blue: 0.40)
+        case .amber: return Color(red: 1.0, green: 0.74, blue: 0.45)
+        case .mint: return Color(red: 0.55, green: 0.93, blue: 0.70)
+        case .cyan: return Color(red: 0.50, green: 0.85, blue: 1.0)
+        case .lavender: return Color(red: 0.78, green: 0.72, blue: 1.0)
+        case .rose: return Color(red: 1.0, green: 0.67, blue: 0.80)
+        }
+    }
+
+    static func from(_ raw: String) -> CaptionTextColor {
+        CaptionTextColor(rawValue: raw) ?? .white
+    }
+}
+
 /// Bridges the (tvOS 26-gated) `LiveCaptionEngine` to SwiftUI, and owns the
 /// rolling caption text shown by `CaptionOverlayView`.
 ///
@@ -223,12 +278,17 @@ struct CaptionOverlayView: View {
     let controlsVisible: Bool
     /// Multiplier on the base caption font size (user "Text Size" control).
     var fontScale: Double = 1.0
-    /// 0 = bottom of the safe area, 1 = top (user "Position" control).
+    /// 0 = bottom of the safe area, 1 = top; negatives push below the edge into
+    /// overscan (user "Position" control).
     var verticalPosition: Double = 0.0
     /// Slab background treatment (user "Background" control).
     var backgroundStyle: CaptionBackgroundStyle = .blur
     /// Draw a dark outline around the glyphs for legibility (user toggle).
     var outline: Bool = false
+    /// Caption text color (user "Color" control).
+    var textColor: Color = .white
+    /// Caption text opacity 0…1 (user "Opacity" control).
+    var textOpacity: Double = 1.0
 
     @Environment(\.glassDisabled) private var glassDisabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -258,7 +318,7 @@ struct CaptionOverlayView: View {
         Text(text)
             .font(.system(size: baseFontSize * fontScale, weight: .semibold))
             .multilineTextAlignment(.center)
-            .foregroundStyle(.white)
+            .foregroundStyle(textColor.opacity(textOpacity))
             .lineLimit(1)
             // Single, fixed-height line that always shows the most recent words
             // (older ones scroll off the front) — avoids the jank of the slab
@@ -272,14 +332,36 @@ struct CaptionOverlayView: View {
             .accessibilityValue(text)
     }
 
-    /// Map the 0…1 position control to a vertical center, keeping the lowest
-    /// positions clear of the control bar when it's visible.
+    /// Map the position control to a vertical center. `0` hugs the bottom
+    /// title-safe edge; `1` sits near the top. **Negative** values continue past
+    /// the bottom anchor into overscan (deliberately allowed so captions can be
+    /// pushed lower than the safe edge), using a compact pixel step so the small
+    /// overscan band isn't blown past in a single notch. When the control bar is
+    /// visible the caption is clamped up so it never hides behind the controls /
+    /// interactive-moment dock.
     private func captionCenterY(in height: CGFloat) -> CGFloat {
-        let bottomMargin: CGFloat = controlsVisible ? 260 : 96
+        let bottomInset: CGFloat = 56
         let topMargin: CGFloat = 80
-        let low = height - bottomMargin
+        let low = height - bottomInset
         let high = topMargin
-        return low - CGFloat(verticalPosition) * (low - high)
+        let span = low - high
+        let p = CGFloat(verticalPosition)
+
+        var center: CGFloat
+        if p >= 0 {
+            center = low - p * span
+        } else {
+            // Below the bottom anchor: ~120pt of extra drop per 1.0 of negative
+            // position, so the limited overscan region steps gradually.
+            let overscanPerUnit: CGFloat = 120
+            center = low - p * overscanPerUnit
+        }
+
+        if controlsVisible {
+            let controlsFloor = height - 260
+            center = min(center, controlsFloor)
+        }
+        return center
     }
 
     @ViewBuilder

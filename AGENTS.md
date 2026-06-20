@@ -85,7 +85,36 @@ built-in components and the system's native appearance over custom-built equival
    more familiar to users, more maintainable, and stay consistent with tvOS conventions
    and future OS updates.
 
-## Icons: use Tabler icons globally
+## Theme & accessibility-aware styling (use shared styles, never hardcode)
+
+Every UI surface must look correct in **all four themes** — System, Dark, OLED,
+and Light — **and** with the **Reduce Transparency** accessibility toggle on or
+off. Do not assume a dark background.
+
+Rules whenever you add or change any UI element:
+
+1. **Never hardcode `.white` / `.black` (or raw `Color(...)`) as a foreground,
+   background, or border on a themed surface.** A hardcoded `.white` label
+   disappears on the Light theme's opaque white panel; a hardcoded `.black`
+   disappears on dark/OLED. These are bugs, not style choices.
+2. **Use the shared theme-aware helpers instead.** For player chat-settings
+   surfaces use `chatSettingsForeground` (and the matching background/stroke
+   helpers in `PlayerView+Settings.swift`); elsewhere resolve colors from the
+   active `ThemePalette` (`Twizz/Shared/Theme.swift`) and the `glassDisabled`
+   (Reduce Transparency) environment value. If a suitable shared helper doesn't
+   exist for your surface, **add one** rather than inlining a literal color.
+3. **Respect Reduce Transparency.** When `glassDisabled` is true, panels become
+   opaque and may match the theme's base color — text/lines must derive their
+   color from the palette so they stay legible (e.g. dark text on the Light
+   theme's opaque panel), not from a fixed white.
+4. **Test mentally against all four themes + transparency on/off** before
+   considering a UI change done; ideally verify Light + Reduce Transparency
+   specifically, since that's where hardcoded whites break.
+5. **Why:** consistency across surfaces, accessibility (contrast, Reduce
+   Transparency), and so future theme work doesn't have to chase down one-off
+   hardcoded colors.
+
+
 
 The app uses **Tabler icons** (MIT) everywhere for iconography. Whenever you add
 or change an icon, use a Tabler glyph — do not introduce SF Symbols, emoji, or

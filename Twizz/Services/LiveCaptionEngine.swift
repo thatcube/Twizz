@@ -90,7 +90,9 @@ actor LiveCaptionEngine {
     }
 
     /// Update the user's timing fine-tune. Called periodically from the MainActor
-    /// controller alongside `setPlayhead`.
+    /// controller alongside `setPlayhead`. Convention: **positive delays**
+    /// captions (shows them later), **negative advances** them (shows them
+    /// earlier) — matching the settings menu's "later (+) / earlier (–)".
     func setTimingOffset(_ offset: TimeInterval) {
         timingOffset = offset
     }
@@ -275,7 +277,10 @@ actor LiveCaptionEngine {
                 // Feed a touch before the playhead literally reaches the audio so
                 // that, after recognition latency (~1–1.5s), the caption surfaces
                 // roughly as the words are heard rather than lagging behind.
-                due = date <= playhead.addingTimeInterval(recognitionLead + timingOffset)
+                // `timingOffset` is subtracted so a *positive* user offset delays
+                // captions (raises the release threshold) and a negative one
+                // advances them — the menu's "later (+) / earlier (–)".
+                due = date <= playhead.addingTimeInterval(recognitionLead - timingOffset)
             } else {
                 // Undated segment or no playhead clock — no basis to hold it.
                 due = true

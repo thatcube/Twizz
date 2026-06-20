@@ -670,6 +670,14 @@ extension PlayerView {
   }
 
   /// Text size, on-screen position, background slab, and outline controls.
+  /// Caption color swatches, chunked into rows of four for the settings palette
+  /// so eight options stay on-screen and remain Siri-Remote navigable.
+  var captionColorRows: [[(index: Int, color: CaptionTextColor)]] {
+    let all = Array(CaptionTextColor.allCases.enumerated())
+      .map { (index: $0.offset, color: $0.element) }
+    return stride(from: 0, to: all.count, by: 4).map { Array(all[$0..<min($0 + 4, all.count)]) }
+  }
+
   var captionsAppearanceSection: some View {
     VStack(alignment: .leading, spacing: 10) {
       settingsSectionHeader("Appearance")
@@ -677,9 +685,34 @@ extension PlayerView {
       settingsStepperRow(.captionFontSize)
       settingsStepperRow(.captionPosition)
 
+      Text("Color")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(chatSettingsForeground.opacity(0.7))
+        .padding(.top, 4)
+
+      VStack(alignment: .leading, spacing: 8) {
+        ForEach(Array(captionColorRows.enumerated()), id: \.offset) { _, row in
+          HStack(spacing: 8) {
+            ForEach(row, id: \.color) { entry in
+              settingsPill(
+                title: entry.color.label,
+                isSelected: CaptionTextColor.from(captionsTextColorRaw) == entry.color,
+                focusTag: .chatCaptionsColorOption(entry.index)
+              ) {
+                captionsTextColorRaw = entry.color.rawValue
+              }
+            }
+          }
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .focusSection()
+
+      settingsStepperRow(.captionOpacity)
+
       Text("Background")
         .font(.caption.weight(.semibold))
-        .foregroundStyle(.white.opacity(0.7))
+        .foregroundStyle(chatSettingsForeground.opacity(0.7))
         .padding(.top, 4)
 
       HStack(spacing: 8) {
@@ -715,9 +748,9 @@ extension PlayerView {
 
       settingsStepperRow(.captionTiming)
 
-      Text("Nudge captions earlier (+) or later (–) to line them up with the speech. On-device recognition adds a short, unavoidable delay.")
+      Text("Nudge captions later (+) or earlier (–) to line them up with the speech. On-device recognition adds a short, unavoidable delay, so a negative value usually lines them up best.")
         .font(.caption2)
-        .foregroundStyle(.white.opacity(0.6))
+        .foregroundStyle(chatSettingsForeground.opacity(0.6))
         .fixedSize(horizontal: false, vertical: true)
     }
   }
@@ -737,17 +770,17 @@ extension PlayerView {
 
         Text("On-device live captions, generated from the stream audio. English, live channels only — experimental.")
           .font(.caption2)
-          .foregroundStyle(.white.opacity(0.6))
+          .foregroundStyle(chatSettingsForeground.opacity(0.6))
           .fixedSize(horizontal: false, vertical: true)
       }
     } else {
       VStack(alignment: .leading, spacing: 7) {
         Text("Captions (beta)")
           .font(.subheadline)
-          .foregroundStyle(.white.opacity(0.4))
+          .foregroundStyle(chatSettingsForeground.opacity(0.4))
         Text("On-device live captions require tvOS 26 or later on a supported Apple TV.")
           .font(.caption2)
-          .foregroundStyle(.white.opacity(0.4))
+          .foregroundStyle(chatSettingsForeground.opacity(0.4))
           .fixedSize(horizontal: false, vertical: true)
       }
     }
@@ -963,9 +996,11 @@ extension PlayerView {
     case .captionFontSize:
       return ("Text Size", 0.7...1.6, 0.1, CGFloat(captionsFontScale))
     case .captionPosition:
-      return ("Position", 0.0...1.0, 0.1, CGFloat(captionsVerticalPosition))
+      return ("Position", -0.5...1.0, 0.1, CGFloat(captionsVerticalPosition))
     case .captionTiming:
-      return ("Timing", -0.5...1.0, 0.1, CGFloat(captionsTimingOffset))
+      return ("Timing", -1.0...0.5, 0.1, CGFloat(captionsTimingOffset))
+    case .captionOpacity:
+      return ("Opacity", 0.3...1.0, 0.1, CGFloat(captionsTextOpacity))
     }
   }
 
@@ -976,8 +1011,11 @@ extension PlayerView {
     case .captionFontSize:
       return "\(Int((value * 100).rounded()))%"
     case .captionPosition:
-      if value <= 0.001 { return "Bottom" }
+      if abs(value) < 0.001 { return "Bottom" }
       if value >= 0.999 { return "Top" }
+      if value < 0 { return "Below \(Int((-value * 100).rounded()))%" }
+      return "\(Int((value * 100).rounded()))%"
+    case .captionOpacity:
       return "\(Int((value * 100).rounded()))%"
     case .captionTiming:
       if abs(value) < 0.001 { return "0.0s" }
@@ -1014,6 +1052,8 @@ extension PlayerView {
       captionsVerticalPosition = Double(next)
     case .captionTiming:
       captionsTimingOffset = Double(next)
+    case .captionOpacity:
+      captionsTextOpacity = Double(next)
     }
   }
 
