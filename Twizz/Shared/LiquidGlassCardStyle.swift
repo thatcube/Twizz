@@ -32,7 +32,10 @@ struct TwizzLiquidGlassCardModifier: ViewModifier {
         .clipShape(shape)
     } else if #available(tvOS 26.0, *), isFocused || glassWhenUnfocused {
       content
-        .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+        .glassEffect(
+          isFocused ? .regular.tint(palette.focusedCardGlassTint) : .regular,
+          in: .rect(cornerRadius: cornerRadius)
+        )
         .clipShape(shape)
     } else {
       content
