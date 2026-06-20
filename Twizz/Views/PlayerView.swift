@@ -135,15 +135,23 @@ struct PlayerView: View {
   /// immediately re-pause the replay.
   var chatScrollExitFocus: Focusable { isVOD ? .chatToggle : .chatInput }
 
-  /// The seek bar is only ever *entered* by an explicit up-press from a control
-  /// button (whose `onMoveCommand` assigns focus to it directly), and it only
-  /// needs to be focusable while it actually holds focus. Gating on the focus
-  /// value keeps it out of chat and — crucially — stops it from acting as a
-  /// geometric magnet that steals focus the instant the chrome appears, which
-  /// made up/left/down from rest jump straight to the bar instead of the
-  /// intended control.
+  /// The seek bar is only reachable by an explicit up-press from a control-row
+  /// button (each button's `onMoveCommand` assigns focus here). It is focusable
+  /// only while focus already sits inside the control cluster (or on the bar
+  /// itself), which means:
+  ///   • from rest (`.video`) or chat it is NOT focusable, so it can't act as a
+  ///     geometric magnet that steals focus the instant the chrome appears
+  ///     (which made up/left/down from rest jump to the bar), and
+  ///   • moving off the bar onto a sibling control keeps it focusable, so it
+  ///     doesn't drop out of the focus engine mid-move and scramble focus to the
+  ///     leftmost control (the channel-button "teleport").
   var scrubberFocusable: Bool {
-    focus == .rewindScrubber
+    switch focus {
+    case .rewindScrubber, .streamInfo, .quality, .chatSettingsButton, .chatToggle:
+      return true
+    default:
+      return false
+    }
   }
 
   /// Spoken value for the rewind/seek bar's `accessibilityValue`: VODs read
@@ -591,6 +599,16 @@ struct PlayerView: View {
     isChatScrolling || chatSoftPauseRemaining != nil
   }
   @State var lastChatSettingsFocus: Focusable = .chatSettingsButton
+  /// Initial focus target for the control row when the chrome appears. The row
+  /// is rebuilt from scratch each time controls are revealed, so an explicit
+  /// `focus =` set in the same tick is dropped (the buttons don't exist yet) and
+  /// tvOS auto-focuses the leftmost control (the channel button). Driving the
+  /// row's `.defaultFocus` from this lets a reveal land directly on the intended
+  /// button (quality on up, channel on left, etc.) with no leftmost detour.
+  @State var pendingControlFocus: Focusable = .quality
+  /// Reasserts focus onto the composer after leaving a chat scroll; see
+  /// `resumeChatLive(restoreFocus:)`.
+  @State var chatExitFocusTask: Task<Void, Never>?
   /// A just-activated settings control to briefly defend against tvOS's
   /// transient focus jump when toggling an option resizes the panel.
   @State var chatFocusPin: Focusable?
@@ -1218,14 +1236,10 @@ struct PlayerView: View {
       if isSleeping {
         wakeFromSleep()
       } else if isChatScrolling || chatSoftPauseRemaining != nil {
-        resumeChatLive()
-        // Focus is already on the composer during a scroll (the scroll trap holds
-        // it there with the chrome up), so in the common case this is a no-op and
-        // there's no focus flash. It only nudges focus on the VOD scroller (no
-        // composer) or any edge where focus drifted off the composer.
-        if focus != chatScrollExitFocus {
-          focus = chatScrollExitFocus
-        }
+        // Deliberate exit from a chat scroll: land focus on the composer (live)
+        // / collapse button (VOD), reasserting past the control row rejoining the
+        // focus engine so it can't bounce to the far-side channel button.
+        resumeChatLive(restoreFocus: true)
       } else if showChatSettings {
         if chatSettingsPage != .main {
           closeSubpage()
@@ -1267,18 +1281,25 @@ struct PlayerView: View {
         }
         switch direction {
         case .up:
+          pendingControlFocus = .quality
           revealControls(preferredFocus: .quality)
         case .left:
+          pendingControlFocus = .streamInfo
           revealControls(preferredFocus: .streamInfo)
         case .right:
           if !showChat {
             showChat = true
             chatReplayStartMessageID = chat.messages.suffix(chatReplayMessageCount).first?.id
           }
+          // Land on the chat composer (already mounted, so this sticks). Point
+          // the row's default at the collapse button so a later move into the
+          // row from chat is sensible.
+          pendingControlFocus = .chatToggle
           revealControls(preferredFocus: chatFocusAnchor)
         case .down where showChat && (isChatScrolling || chatSoftPauseRemaining != nil):
           handleChatDownPress()
         default:
+          pendingControlFocus = .quality
           revealControls(preferredFocus: .quality)
         }
       } else {
@@ -2011,6 +2032,11 @@ struct PlayerView: View {
     // list) offers competing focus targets and a quick swipe can fling focus out of
     // the row or drop it entirely — which never happens with chat closed.
     .focusSection()
+    // Direct the row's initial focus when the chrome is revealed. Because the
+    // row is rebuilt on each reveal, this is what actually makes a reveal land
+    // on the intended button (set via `pendingControlFocus`) instead of tvOS
+    // auto-picking the leftmost control. Dormant when focus is sent into chat.
+    .defaultFocus($focus, pendingControlFocus)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.leading, 48)

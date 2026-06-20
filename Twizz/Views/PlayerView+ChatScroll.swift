@@ -303,7 +303,7 @@ extension PlayerView {
     } else {
       let target = currentIndex + chatScrollStep
       if target >= lastIndex {
-        resumeChatLive()
+        resumeChatLive(restoreFocus: true)
       } else {
         chatScrollAnchorID = msgs[target].id
         trackpadScrollIndex = Double(target)
@@ -324,12 +324,28 @@ extension PlayerView {
   }
 
   /// Leave any frozen state and let chat snap back to the live, newest message.
-  func resumeChatLive() {
+  /// When `restoreFocus` is set (the viewer deliberately exited the scroll via
+  /// Back or by scrolling to the bottom) focus is driven to the composer /
+  /// collapse button. The control-row buttons re-enter the focus engine this
+  /// same tick (their `focusRemoved` gate flips with `isChatScrolling`), so tvOS
+  /// re-evaluates and would otherwise bounce focus to the leftmost control (the
+  /// channel button on the far side); a one-tick reassert lands it on the
+  /// composer instead. Callers that move focus elsewhere themselves (VOD
+  /// scroller blur, hiding chat) leave `restoreFocus` false.
+  func resumeChatLive(restoreFocus: Bool = false) {
     cancelSoftPause()
     isChatScrolling = false
     chatScrollAnchorID = nil
     chatFrozenMessages = nil
     stopTrackpadScrollLoop()
     scheduleHide()
+    guard restoreFocus else { return }
+    focus = chatScrollExitFocus
+    chatExitFocusTask?.cancel()
+    chatExitFocusTask = Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(30))
+      guard !Task.isCancelled else { return }
+      focus = chatScrollExitFocus
+    }
   }
 }
