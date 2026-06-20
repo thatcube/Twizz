@@ -349,8 +349,7 @@ struct MultiviewPlayerView: View {
 
     if controller.layout == .grid {
       Button {
-        controller.makePrimary(pane.id)
-        controller.layout = .spotlight
+        controller.spotlight(pane.id)
         bumpChrome()
       } label: {
         Label { Text("Spotlight") } icon: { Icon(glyph: .maximize) }
