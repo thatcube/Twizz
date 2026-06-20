@@ -41,6 +41,11 @@ struct HomeView: View {
   /// source lists changes, so we don't rebuild the lookup sets and refilter on
   /// every HomeView body pass (focus changes, scrolling, animations).
   @State private var topStreams: [FollowedChannel] = []
+  /// Followed channels that are live right now — the pool multiview draws from.
+  /// Memoized (rather than a computed `filter` over `follows.channels`) so the
+  /// large HomeView body doesn't re-filter the whole follow list on every focus
+  /// move and animation frame. Recomputed only when `follows.channels` changes.
+  @State private var liveFollowedChannels: [FollowedChannel] = []
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedEnabled = true
@@ -62,8 +67,8 @@ struct HomeView: View {
   }
 
   /// Followed channels that are live right now — the pool multiview draws from.
-  private var liveFollowedChannels: [FollowedChannel] {
-    follows.channels.filter(\.isLive)
+  private func recomputeLiveFollowed() {
+    liveFollowedChannels = follows.channels.filter(\.isLive)
   }
 
   private var targetVisibleCards: CGFloat {
@@ -202,6 +207,7 @@ struct HomeView: View {
       goLive.start(using: auth)
       promptFirstLaunchSignInIfNeeded()
       await refreshFollowedChannelsIfNeeded(force: true)
+      recomputeLiveFollowed()
       await refreshRecommendationsIfNeeded(force: true)
       await refreshPersonalizedIfNeeded(force: true)
       requestFocusIfPossible(force: true)
@@ -209,6 +215,7 @@ struct HomeView: View {
     }
     .onChange(of: follows.channels) { _, _ in
       requestFocusIfPossible(force: false)
+      recomputeLiveFollowed()
       recomputeTopStreams()
     }
     .onChange(of: recommendations.channels) { _, _ in
@@ -702,6 +709,7 @@ struct HomeView: View {
     Task {
       withAnimation(.easeOut(duration: 0.25)) { refreshToast = .refreshing }
       await refreshFollowedChannelsIfNeeded(force: true)
+      recomputeLiveFollowed()
       await refreshRecommendationsIfNeeded(force: true)
       await refreshPersonalizedIfNeeded(force: true)
       requestFocusIfPossible(force: true)
