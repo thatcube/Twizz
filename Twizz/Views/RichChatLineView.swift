@@ -61,8 +61,8 @@ struct RichChatLineView: View {
     private var sourceBadgeFill: Color {
         switch message.source {
         case .kick:
-            // Kick brand green.
-            return Color(twitchHex: "#53FC18") ?? .green
+            // Kick brand dark (green "K" sits on top).
+            return Color(twitchHex: "#0B0E0F") ?? .black
         default:
             return Color(twitchHex: "#FF0000") ?? .red
         }
@@ -211,8 +211,8 @@ struct RichChatLineView: View {
     }
 
     private var sourceBadgeIconColor: Color {
-        // Kick's brand mark is black-on-green; YouTube's is white-on-red.
-        message.source == .kick ? .black : .white
+        // Kick's mark is brand green on its dark tile; YouTube's is white on red.
+        message.source == .kick ? (Color(twitchHex: "#53FC18") ?? .green) : .white
     }
 
     private var sourceBadgeView: some View {
@@ -236,7 +236,7 @@ struct RichChatLineView: View {
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: badgeSize * 0.6, height: badgeSize * 0.6)
+                .frame(width: badgeSize * 0.74, height: badgeSize * 0.74)
                 .foregroundStyle(sourceBadgeIconColor)
         default:
             Icon(glyph: .playerPlayFilled, size: sourceBadgePlayIconSize)
