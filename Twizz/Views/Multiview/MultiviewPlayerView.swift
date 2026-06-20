@@ -14,8 +14,9 @@ struct MultiviewPlayerView: View {
   let availableChannels: [FollowedChannel]
   /// Invoked when the viewer clicks a pane to watch it full-screen (with chat,
   /// quality control, the works). The presenter tears down multiview and opens
-  /// the normal `PlayerView`.
-  var onEscalate: (FollowedChannel) -> Void
+  /// the normal `PlayerView`. The second argument is the current roster so the
+  /// presenter can restore this multiview when the single player is dismissed.
+  var onEscalate: (FollowedChannel, [FollowedChannel]) -> Void
 
   @Environment(\.dismiss) private var dismiss
   @Environment(\.themePalette) private var palette
@@ -36,11 +37,14 @@ struct MultiviewPlayerView: View {
   /// A brief on-appear coach hint explaining the hidden controls.
   @State private var hintVisible = true
   @State private var hintHideTask: Task<Void, Never>?
+  /// Timestamp of the last unconsumed up-press, used to require a deliberate
+  /// double-up to reveal the HUD so ordinary navigation doesn't trigger it.
+  @State private var lastUpAt: Date?
 
   init(
     channels: [FollowedChannel],
     availableChannels: [FollowedChannel],
-    onEscalate: @escaping (FollowedChannel) -> Void
+    onEscalate: @escaping (FollowedChannel, [FollowedChannel]) -> Void
   ) {
     self.channels = channels
     self.availableChannels = availableChannels
@@ -98,9 +102,20 @@ struct MultiviewPlayerView: View {
     }
     .onMoveCommand { direction in
       switch direction {
-      case .up where !showingControls: revealControls()
-      case .down where showingControls: hideControls()
-      default: break
+      case .up where !showingControls:
+        // Require two up-presses in quick succession so simply navigating to
+        // the top row doesn't pop the HUD by accident.
+        let now = Date()
+        if let last = lastUpAt, now.timeIntervalSince(last) < 0.7 {
+          lastUpAt = nil
+          revealControls()
+        } else {
+          lastUpAt = now
+        }
+      case .down where showingControls:
+        hideControls()
+      default:
+        lastUpAt = nil
       }
     }
     .onAppear {
@@ -151,26 +166,26 @@ struct MultiviewPlayerView: View {
   // MARK: Controls
 
   /// A slim, non-focusable coach mark shown briefly on appear so the hidden
-  /// controls are discoverable.
+  /// controls are discoverable. Styled as a standard tvOS material pill.
   private var revealHint: some View {
     HStack(spacing: 10) {
-      Icon(glyph: .selector, size: 20)
-      Text("Up for controls · Play/Pause switches layout · Hold Select for options")
-        .font(.footnote.weight(.medium))
+      Icon(glyph: .selector, size: 18)
+      Text("Press Up twice for controls")
+        .font(.callout.weight(.medium))
     }
-    .foregroundStyle(.white.opacity(0.92))
-    .padding(.horizontal, 18)
-    .padding(.vertical, 10)
+    .foregroundStyle(.white)
+    .padding(.horizontal, 20)
+    .padding(.vertical, 11)
     .background(
-      Capsule().fill(glassDisabled ? AnyShapeStyle(Color.black.opacity(0.7))
-                                   : AnyShapeStyle(.ultraThinMaterial))
+      Capsule().fill(glassDisabled ? AnyShapeStyle(Color.black.opacity(0.72))
+                                   : AnyShapeStyle(.regularMaterial))
     )
   }
 
   private var controlsBar: some View {
-    HStack(spacing: 16) {
-      // Native tvOS buttons: the system handles the focus lift/highlight, so
-      // these match the standard "See All"-style buttons elsewhere in the app.
+    // A compact, centered pill of native tvOS buttons — the system supplies the
+    // standard focus capsule/highlight, so it matches buttons elsewhere.
+    HStack(spacing: 22) {
       Button {
         controller.toggleLayout()
         bumpChrome()
@@ -197,23 +212,12 @@ struct MultiviewPlayerView: View {
         }
         .focused($focus, equals: .addButton)
       }
-
-      Spacer(minLength: 0)
-
-      Label {
-        Text("Menu or down to close")
-      } icon: {
-        Icon(glyph: .selector, size: 16)
-      }
-      .font(.footnote)
-      .foregroundStyle(.white.opacity(0.55))
     }
-    .padding(.horizontal, 26)
-    .padding(.vertical, 16)
+    .padding(.horizontal, 28)
+    .padding(.vertical, 14)
     .background(
-      RoundedRectangle(cornerRadius: 22, style: .continuous)
-        .fill(glassDisabled ? AnyShapeStyle(Color.black.opacity(0.72))
-                            : AnyShapeStyle(.ultraThinMaterial))
+      Capsule().fill(glassDisabled ? AnyShapeStyle(Color.black.opacity(0.72))
+                                   : AnyShapeStyle(.regularMaterial))
     )
   }
 
@@ -294,14 +298,14 @@ struct MultiviewPlayerView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .focusable()
     .focused($focus, equals: .pane(pane.id))
-    .onTapGesture { onEscalate(pane.channel) }
+    .onTapGesture { escalate(pane) }
     .contextMenu { paneMenu(pane) }
   }
 
   @ViewBuilder
   private func paneMenu(_ pane: MultiviewPane) -> some View {
     Button {
-      onEscalate(pane.channel)
+      escalate(pane)
     } label: {
       Label {
         Text("Watch Stream")
@@ -345,6 +349,12 @@ struct MultiviewPlayerView: View {
   }
 
   // MARK: Actions
+
+  /// Escalates a pane to the full single-stream player, handing the presenter
+  /// the current roster so it can restore this exact multiview on return.
+  private func escalate(_ pane: MultiviewPane) {
+    onEscalate(pane.channel, controller.panes.map(\.channel))
+  }
 
   private func add(_ channel: FollowedChannel) {
     if let id = controller.addPane(channel) {
@@ -627,8 +637,13 @@ private struct MultiviewAddView: View {
 /// timing issues of stacked covers out of the caller.
 struct MultiviewRootView: View {
   let liveChannels: [FollowedChannel]
-  /// Called when the viewer escalates a pane to full-screen single-stream.
-  var onWatchFull: (FollowedChannel) -> Void
+  /// When non-nil, multiview opens straight into the video wall with this
+  /// roster, skipping the setup picker — used to restore a session after the
+  /// viewer escalated a pane to full-screen and pressed Back.
+  var initialChannels: [FollowedChannel]? = nil
+  /// Called when the viewer escalates a pane to full-screen single-stream. The
+  /// second argument is the current roster, so the caller can restore it later.
+  var onWatchFull: (FollowedChannel, [FollowedChannel]) -> Void
 
   @Environment(\.dismiss) private var dismiss
   @State private var startedChannels: [FollowedChannel]?
@@ -647,6 +662,11 @@ struct MultiviewRootView: View {
           onStart: { startedChannels = $0 },
           onCancel: { dismiss() }
         )
+      }
+    }
+    .onAppear {
+      if startedChannels == nil, let initialChannels, !initialChannels.isEmpty {
+        startedChannels = initialChannels
       }
     }
   }
