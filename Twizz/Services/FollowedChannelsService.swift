@@ -193,12 +193,19 @@ final class FollowedChannelsService {
     guard !broadcasters.isEmpty else { return [] }
 
     let ids = broadcasters.map(\.broadcasterID)
-    let liveByID = try await fetchLiveStreamsForBroadcasterIDs(
+    // These three lookups all key off the same broadcaster ids and don't depend
+    // on one another, so run them concurrently instead of waiting for each in
+    // turn — it cuts the directory load from three sequential round-trip groups
+    // (each up to N/100 batches) down to one wall-clock group.
+    async let liveByIDTask = fetchLiveStreamsForBroadcasterIDs(
       clientID: clientID, accessToken: accessToken, broadcasterIDs: ids)
-    let usersByID = try await fetchUsersByID(
+    async let usersByIDTask = fetchUsersByID(
       clientID: clientID, accessToken: accessToken, userIDs: ids)
-    let infoByID = try await fetchChannelInfoByID(
+    async let infoByIDTask = fetchChannelInfoByID(
       clientID: clientID, accessToken: accessToken, broadcasterIDs: ids)
+    let liveByID = try await liveByIDTask
+    let usersByID = try await usersByIDTask
+    let infoByID = try await infoByIDTask
 
     let channels: [FollowedChannel] = broadcasters.map { broadcaster in
       let user = usersByID[broadcaster.broadcasterID]
@@ -474,16 +481,20 @@ final class FollowedChannelsService {
           return []
         }
 
-        let liveByBroadcasterID = try await fetchLiveStreamsByBroadcasterID(
+        // Live streams and profile images both derive only from `follows`, so
+        // fetch them concurrently rather than back to back.
+        async let liveByBroadcasterIDTask = fetchLiveStreamsByBroadcasterID(
           clientID: clientID,
           accessToken: accessToken,
           broadcasterIDs: follows.map(\.broadcasterID)
         )
-        let profileImagesByUserID = try await fetchProfileImagesByUserID(
+        async let profileImagesByUserIDTask = fetchProfileImagesByUserID(
           clientID: clientID,
           accessToken: accessToken,
           userIDs: follows.map(\.broadcasterID)
         )
+        let liveByBroadcasterID = try await liveByBroadcasterIDTask
+        let profileImagesByUserID = try await profileImagesByUserIDTask
 
         return follows.compactMap { followed in
           guard let stream = liveByBroadcasterID[followed.broadcasterID] else {
