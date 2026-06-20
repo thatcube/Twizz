@@ -223,24 +223,22 @@ struct MultiviewSetupView: View {
 
   /// Unselected (addable) indicator: a circle that exactly matches the numbered
   /// badge's size and position, so every selectable stream advertises the same
-  /// tap target. A bold ring in the native selection color (the part that reads
-  /// as a real affordance) over a faint translucent tint — a hint of glass
-  /// without the heavy frosted blur. Becomes an opaque palette disc under
+  /// tap target. A bold ring in the native selection color over a lightly
+  /// frosted disc — the glass material is dialed to a low opacity so there's
+  /// just a slight blur, not a heavy frost. Becomes an opaque palette disc under
   /// Reduce Transparency.
   private var selectionPlaceholder: some View {
-    Circle()
-      .fill(placeholderFill)
-      .overlay {
-        Circle().strokeBorder(selectionColor.opacity(0.9), lineWidth: 3)
+    ZStack {
+      if glassDisabled {
+        Circle().fill(palette.chromeOpaqueSurface.opacity(0.85))
+      } else {
+        Circle().fill(.ultraThinMaterial).opacity(0.55)
+        Circle().fill(selectionColor.opacity(0.08))
       }
-      .frame(width: 52, height: 52)
-      .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
-  }
-
-  private var placeholderFill: AnyShapeStyle {
-    glassDisabled
-      ? AnyShapeStyle(palette.chromeOpaqueSurface.opacity(0.85))
-      : AnyShapeStyle(selectionColor.opacity(0.12))
+      Circle().strokeBorder(selectionColor.opacity(0.9), lineWidth: 3)
+    }
+    .frame(width: 52, height: 52)
+    .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
   }
 
   private func toggle(_ channel: FollowedChannel) {
