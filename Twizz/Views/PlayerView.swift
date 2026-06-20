@@ -2469,6 +2469,7 @@ struct PlayerView: View {
       .chatLayoutOption,
       .chatSyncToggle,
       .chatLowLatencyToggle,
+      .chatAltSourceToggle,
       .chatRewindToggle,
       .chatViewerCountToggle,
       .chatLatencyToggle,
