@@ -89,9 +89,10 @@ struct StreamLoadingView: View {
   /// tvOS player (1920×1080). A quadrant or filmstrip thumbnail scales the same
   /// cluster down proportionally rather than switching to a different layout.
   private func clusterScale(for size: CGSize) -> CGFloat {
-    guard size.width > 0, size.height > 0 else { return 1 }
+    guard size.width > 0, size.height > 0 else { return 1.25 }
     let ratio = min(size.width / 1920, size.height / 1080)
-    return min(max(ratio, 0.5), 1)
+    // Bumped ~25% overall so the cluster doesn't read as undersized in a tile.
+    return min(max(ratio, 0.5), 1) * 1.25
   }
 
   private func cluster(scale: CGFloat) -> some View {
