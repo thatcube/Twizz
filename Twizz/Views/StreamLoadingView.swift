@@ -66,7 +66,7 @@ struct StreamLoadingView: View {
     .clipped()
     .allowsHitTesting(false)
     .onAppear {
-      guard !reduceMotion, !compact, avatarURL != nil else { return }
+      guard !reduceMotion, avatarURL != nil else { return }
       withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
         pulse = true
       }
@@ -74,26 +74,32 @@ struct StreamLoadingView: View {
   }
 
   private var cluster: some View {
-    VStack(spacing: compact ? 10 : 18) {
-      if !compact, let avatarURL {
-        avatar(avatarURL)
-      }
+    VStack(spacing: compact ? 12 : 18) {
       ProgressView()
         .tint(foreground)
         .scaleEffect(compact ? 1.0 : 1.3)
-      if let title, !title.isEmpty {
-        Text(title)
-          .font(compact ? .headline : .title3.weight(.semibold))
-          .foregroundStyle(compact ? foreground.opacity(0.85) : foreground)
-          .lineLimit(1)
-          .shadow(color: hasArt ? .black.opacity(0.6) : .clear, radius: 6, y: 1)
+
+      // Icon + name sit side by side so the channel reads as one unit.
+      if avatarURL != nil || (title.map { !$0.isEmpty } ?? false) {
+        HStack(spacing: compact ? 8 : 12) {
+          if let avatarURL {
+            avatar(avatarURL)
+          }
+          if let title, !title.isEmpty {
+            Text(title)
+              .font(compact ? .headline : .title3.weight(.semibold))
+              .foregroundStyle(foreground)
+              .lineLimit(1)
+              .shadow(color: hasArt ? .black.opacity(0.6) : .clear, radius: 6, y: 1)
+          }
+        }
       }
     }
     .padding(compact ? 12 : 24)
   }
 
   private func avatar(_ url: URL) -> some View {
-    let size: CGFloat = 96
+    let size: CGFloat = compact ? 36 : 64
     return CachedAsyncImage(url: url) { image in
       image.resizable().scaledToFill()
     } placeholder: {
@@ -102,8 +108,8 @@ struct StreamLoadingView: View {
     .frame(width: size, height: size)
     .clipShape(Circle())
     .overlay(Circle().strokeBorder(foreground.opacity(0.3), lineWidth: 2))
-    .shadow(color: .black.opacity(hasArt ? 0.4 : 0), radius: 12, y: 4)
-    .scaleEffect(pulse ? 1.0 : 0.93)
-    .opacity(pulse ? 1.0 : 0.85)
+    .shadow(color: .black.opacity(hasArt ? 0.4 : 0), radius: 10, y: 3)
+    .scaleEffect(pulse ? 1.0 : 0.95)
+    .opacity(pulse ? 1.0 : 0.88)
   }
 }
