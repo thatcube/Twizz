@@ -12,11 +12,14 @@ struct MultiviewPlayerView: View {
   let channels: [FollowedChannel]
   /// All currently-live channels, used to offer additions while watching.
   let availableChannels: [FollowedChannel]
-  /// Invoked when the viewer clicks a pane to watch it full-screen (with chat,
-  /// quality control, the works). The presenter tears down multiview and opens
-  /// the normal `PlayerView`. The second argument is the current roster so the
-  /// presenter can restore this multiview when the single player is dismissed.
-  var onEscalate: (FollowedChannel, [FollowedChannel]) -> Void
+  /// Auth + go-live context handed straight to the single-stream player when a
+  /// pane is escalated.
+  let auth: TwitchAuthSession
+  let goLive: GoLiveWatcher?
+  /// Called when a pane is escalated to the full player, so the host can record
+  /// it in watch history. The single player itself is presented here, layered
+  /// over the still-mounted multiview wall, so returning is instant.
+  var onWatch: (FollowedChannel) -> Void
 
   @Environment(\.dismiss) private var dismiss
   @Environment(\.themePalette) private var palette
@@ -37,15 +40,22 @@ struct MultiviewPlayerView: View {
   /// A brief on-appear coach hint explaining the hidden controls.
   @State private var hintVisible = true
   @State private var hintHideTask: Task<Void, Never>?
+  /// The pane escalated to the full single-stream player, presented over the
+  /// still-mounted wall so Back returns to multiview instantly (no flash).
+  @State private var escalatedChannel: FollowedChannel?
 
   init(
     channels: [FollowedChannel],
     availableChannels: [FollowedChannel],
-    onEscalate: @escaping (FollowedChannel, [FollowedChannel]) -> Void
+    auth: TwitchAuthSession,
+    goLive: GoLiveWatcher?,
+    onWatch: @escaping (FollowedChannel) -> Void
   ) {
     self.channels = channels
     self.availableChannels = availableChannels
-    self.onEscalate = onEscalate
+    self.auth = auth
+    self.goLive = goLive
+    self.onWatch = onWatch
     _controller = State(initialValue: MultiviewController(channels: channels))
   }
 
@@ -148,6 +158,14 @@ struct MultiviewPlayerView: View {
         onPick: { add($0) },
         onCancel: { showingAddPicker = false }
       )
+    }
+    .fullScreenCover(item: $escalatedChannel, onDismiss: {
+      // Returning from the single stream: resume the wall in place. Because the
+      // multiview view stayed mounted underneath, its layout/focus are intact.
+      controller.resume()
+    }) { channel in
+      PlayerView(channel: channel.login, auth: auth, goLive: goLive)
+        .environment(\.themePalette, palette)
     }
   }
 
@@ -365,10 +383,13 @@ struct MultiviewPlayerView: View {
 
   // MARK: Actions
 
-  /// Escalates a pane to the full single-stream player, handing the presenter
-  /// the current roster so it can restore this exact multiview on return.
+  /// Escalates a pane to the full single-stream player. The player is presented
+  /// as a child cover over the still-mounted wall (which is paused), so pressing
+  /// Back drops straight back into this exact multiview with no flash or reload.
   private func escalate(_ pane: MultiviewPane) {
-    onEscalate(pane.channel, controller.panes.map(\.channel))
+    onWatch(pane.channel)
+    controller.suspend()
+    escalatedChannel = pane.channel
   }
 
   private func add(_ channel: FollowedChannel) {

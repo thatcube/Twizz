@@ -216,6 +216,21 @@ final class MultiviewController {
     }
   }
 
+  /// Pause every pane without releasing its item — used while a single stream
+  /// is layered on top (escalated to full-screen), so the wall's audio/video
+  /// don't compete and battery isn't wasted decoding hidden video.
+  func suspend() {
+    for pane in panes { pane.player.pause() }
+  }
+
+  /// Resume playback after a suspend, restoring each pane's audible/mute state.
+  func resume() {
+    for pane in panes {
+      pane.player.isMuted = !pane.isAudible
+      pane.player.play()
+    }
+  }
+
   /// Stop everything and release the player items. Call on disappear.
   func teardown() {
     for pane in panes {
