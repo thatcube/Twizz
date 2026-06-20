@@ -52,11 +52,17 @@ struct RichChatLineView: View {
     }
 
     private var shouldShowSourceBadge: Bool {
-        message.source == .youtube
+        message.source == .youtube || message.source == .kick
     }
 
     private var sourceBadgeFill: Color {
-        Color(twitchHex: "#FF0000") ?? .red
+        switch message.source {
+        case .kick:
+            // Kick brand green.
+            return Color(twitchHex: "#53FC18") ?? .green
+        default:
+            return Color(twitchHex: "#FF0000") ?? .red
+        }
     }
 
     private var sourceBadgeWidth: CGFloat {
@@ -132,7 +138,7 @@ struct RichChatLineView: View {
             parts.append(contentsOf: message.badgeKeys.compactMap(Self.badgeAccessibilityName))
         }
         if shouldShowSourceBadge {
-            parts.append("YouTube")
+            parts.append(message.source == .kick ? "Kick" : "YouTube")
         }
 
         if !message.username.isEmpty {
@@ -200,13 +206,18 @@ struct RichChatLineView: View {
         return "\(friendly) badge"
     }
 
+    private var sourceBadgeIconColor: Color {
+        // Kick's brand mark is black-on-green; YouTube's is white-on-red.
+        message.source == .kick ? .black : .white
+    }
+
     private var sourceBadgeView: some View {
         ZStack {
             RoundedRectangle(cornerRadius: sourceBadgeCornerRadius, style: .continuous)
                 .fill(sourceBadgeFill)
 
             Icon(glyph: .playerPlayFilled, size: sourceBadgePlayIconSize)
-                .foregroundStyle(.white)
+                .foregroundStyle(sourceBadgeIconColor)
                 .offset(x: 0.8)
         }
         .frame(width: sourceBadgeWidth, height: badgeSize)
@@ -267,6 +278,7 @@ struct RichChatLineView: View {
             text: message.text,
             twitchEmoteURLs: message.twitchEmoteURLs,
             youtubeEmoteURLs: message.youtubeEmoteURLs,
+            kickEmoteURLs: message.kickEmoteURLs,
             globalEmoteURLs: globalEmoteURLs,
             cheermotes: cheermotes,
             shouldRenderCheers: shouldRenderCheers

@@ -4,6 +4,7 @@ import Foundation
 enum ChatSource: String, Codable {
     case twitch
     case youtube
+    case kick
 }
 
 /// How a highlighted Twitch USERNOTICE line should be styled in chat.
@@ -43,6 +44,9 @@ struct ChatMessage: Identifiable {
     /// Message-scoped YouTube emotes parsed from live chat message runs.
     /// Key = emote token in this message, value = CDN image URL.
     let youtubeEmoteURLs: [String: URL]
+    /// Message-scoped Kick emotes parsed from the inline `[emote:id:name]`
+    /// tokens in a Kick chat message. Key = emote token, value = CDN image URL.
+    var kickEmoteURLs: [String: URL] = [:]
     /// True for `/me` action messages (rendered in the user's color).
     let isAction: Bool
     /// True when Twitch flags this as the user's first message in the channel
@@ -162,6 +166,32 @@ extension ChatMessage {
         self.isFirstMessage = false
         self.bits = 0
         self.source = .youtube
+        self.systemMessage = nil
+        self.timestamp = timestamp
+    }
+
+    /// Build a chat line from a Kick `ChatMessageEvent`. Kick supplies the
+    /// sender's chosen color and embeds emotes inline in the text as
+    /// `[emote:<id>:<name>]`; the caller strips those to plain `<name>` tokens
+    /// and hands over the resolved name→URL map for rendering.
+    init(
+        kickAuthor: String,
+        colorHex: String?,
+        text: String,
+        kickEmoteURLs: [String: URL],
+        timestamp: Date = Date()
+    ) {
+        self.username = kickAuthor
+        self.colorHex = colorHex
+        self.badgeKeys = []
+        self.text = text
+        self.twitchEmoteURLs = [:]
+        self.youtubeEmoteURLs = [:]
+        self.kickEmoteURLs = kickEmoteURLs
+        self.isAction = false
+        self.isFirstMessage = false
+        self.bits = 0
+        self.source = .kick
         self.systemMessage = nil
         self.timestamp = timestamp
     }

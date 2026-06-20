@@ -413,6 +413,70 @@ extension PlayerView {
               .fixedSize(horizontal: false, vertical: true)
           }
         }
+
+        settingsPill(
+          title: "Merge with Kick Chat",
+          isSelected: experimentalKickMergeEnabled,
+          focusTag: .kickMergeToggle
+        ) {
+          experimentalKickMergeEnabled.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
+
+        Button {
+          // Seed the keyboard with the value the field is showing so editing
+          // starts from the resolved default rather than a blank line.
+          if experimentalKickMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty,
+            !kickMergeDefaultTarget.isEmpty
+          {
+            experimentalKickMergeChannelOrURL = kickMergeDefaultTarget
+          }
+          kickInputActivationToken &+= 1
+        } label: {
+          Text(kickMergeDisplayText)
+            .font(.subheadline)
+            .foregroundStyle(focus == .kickMergeURL ? .black : chatSettingsForeground)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 28)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .modifier(ChatGlassFieldStyle(isFocused: focus == .kickMergeURL))
+            .background(
+              ChatKeyboardHostField(
+                text: $experimentalKickMergeChannelOrURL,
+                activationToken: kickInputActivationToken,
+                onSubmit: {},
+                returnKeyType: .done,
+                dismissesOnReturn: true,
+                keyboardPrompt: "Kick handle or channel URL"
+              )
+              .allowsHitTesting(false)
+              .accessibilityHidden(true)
+            )
+        }
+        .buttonStyle(ChatInputButtonStyle())
+        .focusEffectDisabled()
+        .focused($focus, equals: .kickMergeURL)
+        .frame(maxWidth: .infinity)
+        .animation(.easeOut(duration: 0.18), value: focus == .kickMergeURL)
+
+        if let status = chat.kickStatusMessage, experimentalKickMergeEnabled {
+          HStack(spacing: 6) {
+            if status.hasPrefix("Kick chat connected") {
+              Icon(glyph: .circleCheckFilled, size: 18)
+                .foregroundStyle(.green)
+            }
+
+            Text(status)
+              .font(.caption2)
+              .foregroundStyle(chatSettingsForeground.opacity(0.76))
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
       }
       .focusSection()
     }

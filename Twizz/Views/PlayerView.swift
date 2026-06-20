@@ -284,6 +284,14 @@ struct PlayerView: View {
   /// Best-effort YouTube target derived from the active Twitch channel (its
   /// social links, then description, then a name-based guess).
   @State var youtubeAutoResolvedTarget = ""
+  @AppStorage("experimentalKickMergeEnabled") var experimentalKickMergeEnabled = false
+  /// Optional manual override for the Kick merge target. Per-channel and
+  /// non-persistent for the same reason as the YouTube override, so a handle
+  /// entered for one streamer never leaks into another.
+  @State var experimentalKickMergeChannelOrURL = ""
+  /// Best-effort Kick target derived from the active Twitch channel (its social
+  /// links, then description, then a name-based guess).
+  @State var kickAutoResolvedTarget = ""
   @AppStorage(LowLatencyHLSProxy.settingsKey) var lowLatencyProxyEnabled = true
   @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) var streamRewindEnabled = true
   @AppStorage("showLatencyDiagnostics") var showLatencyDiagnostics = false
@@ -374,6 +382,7 @@ struct PlayerView: View {
   @State var chatDraft: String = ""
   @State var chatInputActivationToken: Int = 0
   @State var youtubeInputActivationToken: Int = 0
+  @State var kickInputActivationToken: Int = 0
   @State var highlightKeywordsActivationToken: Int = 0
   @State var isSendingChat = false
   @State var chatSendError: String?
@@ -958,6 +967,8 @@ struct PlayerView: View {
     case chatCaptionsOutlineToggle
     case youtubeMergeToggle
     case youtubeMergeURL
+    case kickMergeToggle
+    case kickMergeURL
     // Events sub-page
     case chatEventsButton
     case chatRaidEventToggle
@@ -1279,6 +1290,7 @@ struct PlayerView: View {
         configurePlayerForLive()
         resetDiagnostics()
         applyExperimentalYouTubeSettings()
+        applyExperimentalKickSettings()
         chat.connect(to: activeChannel)
         eventSub.start(forChannel: activeChannel, auth: auth)
         hermes.start(forChannel: activeChannel)
@@ -1532,11 +1544,19 @@ struct PlayerView: View {
     .onChange(of: experimentalYouTubeMergeChannelOrURL) { _, _ in
       applyExperimentalYouTubeSettings()
     }
+    .onChange(of: experimentalKickMergeEnabled) { _, _ in
+      applyExperimentalKickSettings()
+    }
+    .onChange(of: experimentalKickMergeChannelOrURL) { _, _ in
+      applyExperimentalKickSettings()
+    }
     .onChange(of: activeChannel) { _, _ in
       // A manual override is scoped to the channel it was entered for; clear it
       // when the channel changes (e.g. following a raid) so it can't leak.
       experimentalYouTubeMergeChannelOrURL = ""
       youtubeAutoResolvedTarget = ""
+      experimentalKickMergeChannelOrURL = ""
+      kickAutoResolvedTarget = ""
       // The rewind window is per-stream: drop the previous channel's DVR history.
       lowLatencyProxy.resetDVR()
       isUserPaused = false
@@ -1545,6 +1565,9 @@ struct PlayerView: View {
     }
     .task(id: activeChannel) {
       await refreshYouTubeAutoTarget()
+    }
+    .task(id: activeChannel) {
+      await refreshKickAutoTarget()
     }
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
       guard !isVOD else { return }
@@ -2417,6 +2440,8 @@ struct PlayerView: View {
       .simulateGoLiveButton,
       .youtubeMergeToggle,
       .youtubeMergeURL,
+      .kickMergeToggle,
+      .kickMergeURL,
       .chatAdvancedBack,
       .chatStepperDec,
       .chatStepperInc,
@@ -2968,6 +2993,147 @@ struct PlayerView: View {
     for raw in text.components(separatedBy: separators) {
       let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !token.isEmpty, isYouTubeChannelURL(token) else { continue }
+      return token
+    }
+    return nil
+  }
+
+  // MARK: - Experimental Kick merge
+
+  /// Placeholder/value shown in the Kick merge settings input: the manual entry
+  /// when present, otherwise the resolved default slug for the channel.
+  var kickMergeDisplayText: String {
+    let manual = experimentalKickMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !manual.isEmpty { return manual }
+    return kickMergeDefaultTarget.isEmpty
+      ? "Kick handle or channel URL" : kickMergeDefaultTarget
+  }
+
+  /// The slug the merge falls back to when no manual value is entered. Prefers
+  /// the Kick channel discovered from the Twitch channel's social links /
+  /// description, and only guesses `<twitch-login>` when nothing better exists.
+  var kickMergeDefaultTarget: String {
+    let auto = kickAutoResolvedTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !auto.isEmpty { return auto }
+    let base = activeChannel.isEmpty ? channel : activeChannel
+    return base.isEmpty ? "" : base
+  }
+
+  func applyExperimentalKickSettings() {
+    let manual = experimentalKickMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    let resolvedTarget = manual.isEmpty ? kickMergeDefaultTarget : manual
+
+    chat.configureExperimentalKickMerge(
+      enabled: experimentalKickMergeEnabled,
+      channelOrURL: resolvedTarget
+    )
+  }
+
+  /// Resolves the best Kick target for the active channel and pushes it to the
+  /// chat service. Runs whenever the active channel changes.
+  func refreshKickAutoTarget() async {
+    let login = activeChannel
+    guard !login.isEmpty else { return }
+    let resolved = await Self.resolveKickTarget(forTwitchLogin: login)
+    guard login == activeChannel else { return }
+    kickAutoResolvedTarget = resolved
+    applyExperimentalKickSettings()
+  }
+
+  /// Makes an educated guess at a channel's Kick source from its Twitch profile,
+  /// scoring linked Kick channels against the streamer's Twitch identity. Falls
+  /// back to a Kick link in the bio, then a `<twitch-login>` guess.
+  static func resolveKickTarget(forTwitchLogin login: String) async -> String {
+    let fallback = login
+    guard let profile = await ChannelProfileService.fetch(login: login) else {
+      return fallback
+    }
+
+    if let best = bestKickChannelURL(
+      among: profile.socialLinks,
+      twitchLogin: login,
+      displayName: profile.displayName
+    ) {
+      return best
+    }
+    if let descLink = firstKickChannelURL(in: profile.description ?? "") {
+      return descLink
+    }
+    return fallback
+  }
+
+  /// Picks the Kick channel link most likely to be the streamer's primary live
+  /// channel. Returns nil when no candidate looks confident enough, so the
+  /// caller can fall back rather than merge with the wrong channel.
+  static func bestKickChannelURL(
+    among links: [ChannelSocialLink],
+    twitchLogin: String,
+    displayName: String
+  ) -> String? {
+    let candidates = links.filter { isKickChannelURL($0.url) }
+    guard !candidates.isEmpty else { return nil }
+
+    let loginKey = normalizeIdentity(twitchLogin)
+    let nameKey = normalizeIdentity(displayName)
+    let secondaryMarkers = [
+      "clip", "clips", "vod", "vods", "archive", "replay", "replays",
+      "highlight", "highlights", "fan", "second",
+    ]
+
+    func score(_ link: ChannelSocialLink) -> Int {
+      var score = 0
+      let handle = normalizeIdentity(kickHandle(from: link.url) ?? "")
+      let label = link.title.lowercased()
+      let haystack = "\(label) \(handle)"
+
+      if !handle.isEmpty {
+        if handle == loginKey || (!nameKey.isEmpty && handle == nameKey) {
+          score += 100
+        } else if !loginKey.isEmpty, handle.contains(loginKey) {
+          score += 60
+        } else if nameKey.count >= 3, handle.contains(nameKey) {
+          score += 50
+        }
+      }
+
+      if ["kick", "kick channel", "main", "main channel", "live"].contains(label) {
+        score += 20
+      }
+      if secondaryMarkers.contains(where: { haystack.contains($0) }) {
+        score -= 40
+      }
+
+      return score
+    }
+
+    let scored = candidates.map { ($0.url, score($0)) }
+    guard let best = scored.max(by: { $0.1 < $1.1 }), best.1 > 0 else {
+      return nil
+    }
+    return best.0
+  }
+
+  /// True for URLs that point at a Kick channel, e.g. `kick.com/<slug>`.
+  static func isKickChannelURL(_ string: String) -> Bool {
+    let lower = string.lowercased()
+    guard lower.contains("kick.com") else { return false }
+    let normalized = lower.contains("://") ? lower : "https://\(lower)"
+    guard let comps = URLComponents(string: normalized) else { return false }
+    return !comps.path.split(separator: "/").isEmpty
+  }
+
+  /// Extracts the channel slug from a Kick channel URL.
+  static func kickHandle(from urlString: String) -> String? {
+    let normalized = urlString.contains("://") ? urlString : "https://\(urlString)"
+    guard let comps = URLComponents(string: normalized) else { return nil }
+    return comps.path.split(separator: "/").map(String.init).first
+  }
+
+  static func firstKickChannelURL(in text: String) -> String? {
+    let separators = CharacterSet(charactersIn: " \n\t\r,;|()<>[]\"'")
+    for raw in text.components(separatedBy: separators) {
+      let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !token.isEmpty, isKickChannelURL(token) else { continue }
       return token
     }
     return nil
