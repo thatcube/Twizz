@@ -159,7 +159,7 @@ struct PlayerView: View {
   /// into one step per gesture makes navigating the row feel deliberate and
   /// precise (you land on the next button instead of flinging across the whole
   /// row) — closer to how YouTube and the system transport controls behave.
-  var controlSwipeThrottle: TimeInterval { 0.32 }
+  var controlSwipeThrottle: TimeInterval { 0.55 }
 
   /// Step focus to a neighbouring control button, but at most once per swipe
   /// gesture. A move that arrives inside the throttle window is swallowed (and it
@@ -184,7 +184,7 @@ struct PlayerView: View {
   func requestSeekBarFocus() {
     guard rewindAvailable else { return }
     if let last = lastControlHorizontalMoveAt,
-       Date().timeIntervalSince(last) < 0.34 { return }
+       Date().timeIntervalSince(last) < 0.55 { return }
     focus = .rewindScrubber
   }
 
