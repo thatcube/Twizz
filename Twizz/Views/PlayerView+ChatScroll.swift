@@ -355,12 +355,26 @@ extension PlayerView {
     // composer — which already holds it during the scroll, so this is a no-op
     // that simply prevents any competitor from grabbing it.
     focus = chatScrollExitFocus
+    // Point the control row's `.defaultFocus` at the chat-toggle (its rightmost
+    // button, right next to chat) so that IF the focus engine briefly re-resolves
+    // when the row rejoins, the worst case lands one button away from chat rather
+    // than flinging all the way to the far-side channel button.
+    pendingControlFocus = .chatToggle
     chatExitFocusTask?.cancel()
     chatExitFocusTask = Task { @MainActor in
       // Render B (next runloop): re-enable the control row now that focus is
-      // firmly on the composer, so the buttons can't steal it on the way back in.
+      // firmly on the composer.
       isChatScrolling = false
       focus = chatScrollExitFocus
+      // The control buttons re-enter the focus engine this tick; tvOS can still
+      // bounce focus onto the row as they materialise. Stomp any such bounce over
+      // the next few frames so focus snaps back to the composer before it can be
+      // seen, instead of leaving it stranded on a control button.
+      for _ in 0..<4 {
+        try? await Task.sleep(for: .milliseconds(16))
+        if Task.isCancelled { return }
+        if focus != chatScrollExitFocus { focus = chatScrollExitFocus }
+      }
       scheduleHide()
     }
   }

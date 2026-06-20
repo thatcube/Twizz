@@ -154,11 +154,27 @@ struct PlayerView: View {
     }
   }
 
-  /// Record a horizontal move within the control row so an immediately following
-  /// `.up` can be recognised as the tail of a diagonal swipe rather than a
-  /// deliberate request for the seek bar.
-  func noteControlHorizontalMove() {
-    lastControlHorizontalMoveAt = Date()
+  /// Throttle window for stepping between control-row buttons. The Siri Remote
+  /// trackpad emits a burst of move commands for a single swipe; coalescing them
+  /// into one step per gesture makes navigating the row feel deliberate and
+  /// precise (you land on the next button instead of flinging across the whole
+  /// row) — closer to how YouTube and the system transport controls behave.
+  var controlSwipeThrottle: TimeInterval { 0.32 }
+
+  /// Step focus to a neighbouring control button, but at most once per swipe
+  /// gesture. A move that arrives inside the throttle window is swallowed (and it
+  /// refreshes the timestamp so a continuous swipe keeps yielding nothing until
+  /// the finger lifts), so a fast flick advances a single button rather than
+  /// rocketing past several. Deliberate, spaced presses pass straight through.
+  func navigateControl(to target: Focusable) {
+    let now = Date()
+    if let last = lastControlHorizontalMoveAt,
+       now.timeIntervalSince(last) < controlSwipeThrottle {
+      lastControlHorizontalMoveAt = now
+      return
+    }
+    lastControlHorizontalMoveAt = now
+    focus = target
   }
 
   /// Handle an up-press from a control button. Moves focus to the seek bar, but
@@ -168,7 +184,7 @@ struct PlayerView: View {
   func requestSeekBarFocus() {
     guard rewindAvailable else { return }
     if let last = lastControlHorizontalMoveAt,
-       Date().timeIntervalSince(last) < 0.28 { return }
+       Date().timeIntervalSince(last) < 0.34 { return }
     focus = .rewindScrubber
   }
 
@@ -1872,11 +1888,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .right:
-            noteControlHorizontalMove()
-            focus = .quality
-          case .left:
-            noteControlHorizontalMove()
-            focus = .streamInfo
+            navigateControl(to: .quality)
           case .up:
             requestSeekBarFocus()
           default:
@@ -1948,11 +1960,9 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            noteControlHorizontalMove()
-            focus = .streamInfo
+            navigateControl(to: .streamInfo)
           case .right:
-            noteControlHorizontalMove()
-            focus = .chatSettingsButton
+            navigateControl(to: .chatSettingsButton)
           case .up:
             requestSeekBarFocus()
           default:
@@ -1979,11 +1989,9 @@ struct PlayerView: View {
           .onMoveCommand { direction in
             switch direction {
             case .left:
-              noteControlHorizontalMove()
-              focus = .streamInfo
+              navigateControl(to: .streamInfo)
             case .right:
-              noteControlHorizontalMove()
-              focus = .chatSettingsButton
+              navigateControl(to: .chatSettingsButton)
             case .up:
               requestSeekBarFocus()
             default:
@@ -2003,11 +2011,9 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            noteControlHorizontalMove()
-            focus = .quality
+            navigateControl(to: .quality)
           case .right:
-            noteControlHorizontalMove()
-            focus = .chatToggle
+            navigateControl(to: .chatToggle)
           case .up:
             requestSeekBarFocus()
           default:
@@ -2030,11 +2036,10 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            noteControlHorizontalMove()
-            focus = .chatSettingsButton
+            navigateControl(to: .chatSettingsButton)
           case .right:
             if showChat {
-              focus = chatFocusAnchor
+              navigateControl(to: chatFocusAnchor)
             }
           case .up:
             requestSeekBarFocus()
