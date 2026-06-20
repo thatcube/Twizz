@@ -208,7 +208,7 @@ struct MultiviewPlayerView: View {
     // standard focus capsule/highlight, so it matches buttons elsewhere.
     HStack(spacing: 22) {
       Button {
-        controller.toggleLayout()
+        snapLayout { controller.toggleLayout() }
         bumpChrome()
       } label: {
         Label {
@@ -349,14 +349,14 @@ struct MultiviewPlayerView: View {
 
     if controller.layout == .grid {
       Button {
-        controller.spotlight(pane.id)
+        snapLayout { controller.spotlight(pane.id) }
         bumpChrome()
       } label: {
         Label { Text("Spotlight") } icon: { Icon(glyph: .maximize) }
       }
     } else if controller.primaryPane?.id != pane.id {
       Button {
-        controller.makePrimary(pane.id)
+        snapLayout { controller.makePrimary(pane.id) }
         bumpChrome()
       } label: {
         Label { Text("Make Primary") } icon: { Icon(glyph: .maximize) }
@@ -405,6 +405,18 @@ struct MultiviewPlayerView: View {
       focus = controller.panes.first.map { .pane($0.id) }
     }
     bumpChrome()
+  }
+
+  /// Apply a layout/primary change without the implicit SwiftUI animation that
+  /// otherwise interpolates the grid↔spotlight reflow — during that interpolation
+  /// the new primary momentarily grows to full height while the filmstrip is
+  /// still laid out below it, overflowing the screen and shoving the thumbnails
+  /// off-frame before everything settles. Snapping straight to the final layout
+  /// avoids that jank.
+  private func snapLayout(_ change: () -> Void) {
+    var tx = Transaction()
+    tx.disablesAnimations = true
+    withTransaction(tx, change)
   }
 
   private func bumpChrome() {

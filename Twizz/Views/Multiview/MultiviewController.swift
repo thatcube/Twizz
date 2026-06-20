@@ -14,18 +14,36 @@ enum MultiviewLayout {
   case spotlight
 }
 
-/// Quality budget for a single pane. Each tier pins a *specific* rendition's
-/// media playlist (not the master), because pinning is the only thing that makes
-/// a quality stick on Twitch/AVPlayer — selecting Source on the master and
-/// capping `preferredPeakBitRate` is just a ceiling, so ABR keeps serving a
-/// lower rendition. The spotlight primary pins Source; everything else pins a
-/// light, low-bitrate rendition.
+/// Quality budget for a single pane. Every pane plays the *master* playlist (all
+/// renditions available in one item), and the tier only sets the live ABR knobs
+/// — a bitrate cap plus how deep to buffer. Because nothing is pinned, promoting
+/// a pane to the spotlight is just a knob change on the already-playing item:
+/// the cap is lifted and the buffer deepened so ABR climbs up within a few
+/// seconds, with no reload or interruption. (The dedicated full-screen player is
+/// the only place a reload is acceptable; here we never tear the stream down.)
 enum MultiviewQualityTier {
-  /// Spotlight primary: the highest "Source" rendition, full sharpness.
+  /// Spotlight primary: uncapped, deeper buffer so ABR can climb to Source.
   case source
-  /// A small tile (grid quadrant or spotlight filmstrip thumbnail): a light,
-  /// low-bitrate rendition that stays cheap to decode.
+  /// A small tile (grid quadrant or spotlight filmstrip thumbnail): capped to a
+  /// light, low-bitrate rendition with a shallow buffer to stay cheap.
   case light
+
+  /// `0` = unlimited (`AVPlayerItem.preferredPeakBitRate` treats 0 as no cap).
+  var peakBitRate: Double {
+    switch self {
+    case .source: return 0
+    case .light: return 800_000
+    }
+  }
+
+  /// A deeper forward buffer gives ABR the headroom/confidence to step *up* to a
+  /// higher rendition; a shallow one keeps the small tiles light and low-latency.
+  var forwardBufferDuration: Double {
+    switch self {
+    case .source: return 6
+    case .light: return 1
+    }
+  }
 }
 
 /// One tile in a multiview grid: a channel bound to its own `AVPlayer`.
@@ -101,12 +119,11 @@ final class MultiviewController {
     for pane in panes { load(pane) }
   }
 
-  /// (Re)resolve a single pane's stream and start it muted. Each tier pins a
-  /// specific rendition's media playlist: the spotlight primary pins Source for
-  /// real sharpness, while small tiles pin a light, low-bitrate rendition so a
-  /// 2×2 wall stays cheap. Changing tier swaps the item (a quick reload that the
-  /// tile masks with the channel thumbnail), which is the only way to actually
-  /// move quality — an ABR ceiling on the master never climbs to Source.
+  /// (Re)resolve a single pane's stream and start it muted. Every pane plays the
+  /// master playlist so all renditions live in one item; the tier sets the ABR
+  /// knobs (cap + buffer). This is only called on first start, retry, or a newly
+  /// added pane — a tier *change* afterwards is applied live in
+  /// ``refreshQuality`` without a reload.
   func load(_ pane: MultiviewPane) {
     pane.isLoading = true
     pane.hasError = false
@@ -115,17 +132,15 @@ final class MultiviewController {
     pane.resolveTask = Task { [weak pane] in
       guard let pane else { return }
       do {
-        let url = switch tier {
-        case .source: try await PlaybackService.sourceHLSURL(for: pane.channel.login)
-        case .light: try await PlaybackService.lightHLSURL(for: pane.channel.login)
-        }
+        let url = try await PlaybackService.hlsURL(for: pane.channel.login)
         guard !Task.isCancelled else { return }
         let asset = AVURLAsset(
           url: url,
           options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
         )
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = 1.0
+        item.preferredForwardBufferDuration = tier.forwardBufferDuration
+        item.preferredPeakBitRate = tier.peakBitRate
         pane.player.replaceCurrentItem(with: item)
         pane.player.isMuted = !pane.isAudible
         pane.player.play()
@@ -221,17 +236,23 @@ final class MultiviewController {
     for pane in panes { pane.qualityTier = desiredTier(for: pane) }
   }
 
-  /// Re-evaluate quality tiers and reload only the panes whose tier changed.
-  /// Quality is pinned per rendition, so a change means a different media
-  /// playlist — that requires swapping the item. Only the promoted/demoted pane
-  /// reloads (the rest keep playing), and the tile masks the swap with the
-  /// channel thumbnail so there's no black flash.
+  /// Re-evaluate quality tiers and apply them live. Every pane already holds the
+  /// master playlist, so a tier change is just new ABR knobs on the playing
+  /// item: lifting the cap and deepening the buffer lets the promoted pane climb
+  /// to Source within a few seconds; capping the demoted ones frees the
+  /// bandwidth for it to do so. No reload, no interruption. Only a pane that
+  /// never started (or errored) falls back to a full load.
   private func refreshQuality() {
     for pane in panes {
       let desired = desiredTier(for: pane)
       guard desired != pane.qualityTier else { continue }
       pane.qualityTier = desired
-      load(pane)
+      if let item = pane.player.currentItem, !pane.hasError {
+        item.preferredPeakBitRate = desired.peakBitRate
+        item.preferredForwardBufferDuration = desired.forwardBufferDuration
+      } else {
+        load(pane)
+      }
     }
   }
 
