@@ -25,13 +25,19 @@ struct MultiviewSetupView: View {
   var onCancel: () -> Void
 
   @Environment(\.themePalette) private var palette
+  @Environment(\.glassDisabled) private var glassDisabled
+  /// Global stream-card size preference, shared with Home/Browse so the picker
+  /// honours the same "N across" choice instead of a fixed width.
+  @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   /// Selected channel ids, in pick order — that order drives grid placement.
   @State private var selectedIDs: [String] = []
+  /// Set when the user activates a tile that's already at the pick limit; drives
+  /// the "max streams" toast. A fresh token on each rejection restarts the
+  /// auto-dismiss timer so rapid presses keep the toast visible.
+  @State private var limitToastToken: UUID?
   @FocusState private var focusedID: String?
 
-  /// Each card's media is a 16:9 thumbnail; this width keeps roughly three
-  /// cards visible per rail on a 1080/4K tvOS layout.
-  private let cardWidth: CGFloat = 440
+  private var cardSize: StreamCardSize { StreamCardSize.resolve(streamCardSizeRaw) }
 
   /// Live channels per section, deduped so a channel that appears in several
   /// pools is only offered once (in its highest-priority section).
@@ -61,27 +67,75 @@ struct MultiviewSetupView: View {
   }
 
   var body: some View {
-    ZStack {
-      AppBackground(palette: palette).ignoresSafeArea()
+    GeometryReader { proxy in
+      let rail = ChannelRailLayout.metrics(
+        availableWidth: proxy.size.width,
+        trailingSafeArea: proxy.safeAreaInsets.trailing,
+        visibleCardCount: cardSize.visibleCardCount
+      )
 
-      VStack(alignment: .leading, spacing: 0) {
-        header
+      ZStack {
+        AppBackground(palette: palette).ignoresSafeArea()
 
-        if !hasChannels {
-          emptyState
-        } else {
-          ScrollView {
-            LazyVStack(alignment: .leading, spacing: 36) {
-              ForEach(resolvedSections) { section in
-                sectionRail(section)
+        VStack(alignment: .leading, spacing: 0) {
+          header
+
+          if !hasChannels {
+            emptyState
+          } else {
+            ScrollView {
+              LazyVStack(alignment: .leading, spacing: 36) {
+                ForEach(resolvedSections) { section in
+                  sectionRail(section, rail: rail)
+                }
               }
+              .padding(.vertical, 28)
             }
-            .padding(.vertical, 28)
           }
         }
       }
+      .overlay(alignment: .bottom) {
+        if limitToastToken != nil {
+          limitToast
+            .padding(.bottom, 56)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+      }
+      .animation(.spring(response: 0.35, dampingFraction: 0.85), value: limitToastToken)
+      .task(id: limitToastToken) {
+        guard limitToastToken != nil else { return }
+        try? await Task.sleep(for: .seconds(2.4))
+        limitToastToken = nil
+      }
+      .onExitCommand(perform: onCancel)
     }
-    .onExitCommand(perform: onCancel)
+  }
+
+  /// Lightweight, non-focusable toast shown when the viewer tries to pick a 5th
+  /// stream. It never steals focus — the disabled tiles stay reachable — it just
+  /// explains why nothing happened.
+  private var limitToast: some View {
+    HStack(spacing: 12) {
+      Icon(glyph: .alertCircle, size: 26)
+        .foregroundStyle(.secondary)
+      Text("You can watch up to \(multiviewPaneLimit) streams at once")
+        .font(.headline)
+        .foregroundStyle(.primary)
+    }
+    .padding(.horizontal, 28)
+    .padding(.vertical, 18)
+    .background {
+      if glassDisabled {
+        Capsule().fill(palette.chromeOpaqueSurface)
+          .overlay(Capsule().strokeBorder(palette.chromeOpaqueBorder, lineWidth: 1))
+      } else if #available(tvOS 26.0, *) {
+        Capsule().glassEffect(.regular, in: Capsule())
+      } else {
+        Capsule().fill(.ultraThinMaterial)
+      }
+    }
+    .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+    .accessibilityElement(children: .combine)
   }
 
   // MARK: Header
@@ -129,7 +183,7 @@ struct MultiviewSetupView: View {
 
   // MARK: Section rail
 
-  private func sectionRail(_ section: MultiviewChannelSection) -> some View {
+  private func sectionRail(_ section: MultiviewChannelSection, rail: ChannelRailMetrics) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       Text(section.title)
         .font(.system(size: 30, weight: .bold))
@@ -137,10 +191,10 @@ struct MultiviewSetupView: View {
         .padding(.horizontal, AppLayout.horizontalPadding)
 
       ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 28) {
+        HStack(spacing: rail.spacing) {
           ForEach(section.channels) { channel in
             tile(channel)
-              .frame(width: cardWidth)
+              .frame(width: rail.outerCardWidth)
           }
         }
         .padding(.horizontal, AppLayout.horizontalPadding)
@@ -166,10 +220,14 @@ struct MultiviewSetupView: View {
       showsGameName: true
     )
     .overlay(alignment: .topTrailing) {
-      if let order {
-        selectionBadge(order: order + 1)
-          .padding(20)
+      Group {
+        if let order {
+          selectionBadge(order: order + 1)
+        } else {
+          selectionPlaceholder
+        }
       }
+      .padding(20)
     }
     .overlay {
       RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -216,10 +274,32 @@ struct MultiviewSetupView: View {
       .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
   }
 
+  /// Unselected (addable) indicator: a circle that exactly matches the numbered
+  /// badge's size and position, so every selectable stream advertises the same
+  /// tap target. A bold ring in the native selection color over a lightly
+  /// frosted disc — the glass material is dialed to a low opacity so there's
+  /// just a slight blur, not a heavy frost. Becomes an opaque palette disc under
+  /// Reduce Transparency.
+  private var selectionPlaceholder: some View {
+    ZStack {
+      if glassDisabled {
+        Circle().fill(palette.chromeOpaqueSurface.opacity(0.85))
+      } else {
+        Circle().fill(.ultraThinMaterial).opacity(0.55)
+        Circle().fill(selectionColor.opacity(0.08))
+      }
+      Circle().strokeBorder(selectionColor.opacity(0.9), lineWidth: 3)
+    }
+    .frame(width: 52, height: 52)
+    .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
+  }
+
   private func toggle(_ channel: FollowedChannel) {
     if let idx = selectedIDs.firstIndex(of: channel.id) {
       selectedIDs.remove(at: idx)
-    } else if !isAtLimit {
+    } else if isAtLimit {
+      limitToastToken = UUID()
+    } else {
       selectedIDs.append(channel.id)
     }
   }
