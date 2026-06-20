@@ -492,6 +492,10 @@ struct PlayerView: View {
     get { mon.lastSoftStallNudgeAt }
     nonmutating set { mon.lastSoftStallNudgeAt = newValue }
   }
+  var lastFrozenPlayheadNudgeAt: Date {
+    get { mon.lastFrozenPlayheadNudgeAt }
+    nonmutating set { mon.lastFrozenPlayheadNudgeAt = newValue }
+  }
   var streamUnstableWasPredicted: Bool {
     get { mon.streamUnstableWasPredicted }
     nonmutating set { mon.streamUnstableWasPredicted = newValue }
@@ -768,6 +772,20 @@ struct PlayerView: View {
   /// If repeated nudges can't break the deadlock within this long, reload — which
   /// also re-lands near live, recovering the latency that grew while we were stuck.
   let softStallReloadSeconds: Double = 12
+  /// Buffer-agnostic frozen-playhead failsafe. The hard- and soft-stall paths each
+  /// classify the buffer (empty / not-likely-to-keep-up, or a *known* forward
+  /// reading at/above the soft floor). AVPlayer's `toMinimizeStalls` deadlock can
+  /// satisfy neither: it parks `.waitingToPlayAtSpecifiedRate` while reporting the
+  /// buffer non-empty *and* likely to keep up, yet our own forward-buffer reading
+  /// is unknown (no loaded range spans the playhead) — so the soft-stall floor
+  /// check fails and the playhead simply freezes with nothing recovering it for
+  /// tens of seconds. This catches that gap on a fast timer: nudge with
+  /// playImmediately first (cheap, no rebuffer/latency reset — usually enough to
+  /// break the park), then reload as a backstop. Only runs while the live edge is
+  /// still advancing (a genuine still-live broadcast, not an ended one — the
+  /// offline paths own that), so it never reload-loops a dead stream.
+  let frozenPlayheadNudgeSeconds: Double = 2
+  let frozenPlayheadReloadSeconds: Double = 5
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
@@ -3675,6 +3693,9 @@ final class PlaybackMonitorBox {
   /// healthy buffer", and when we last issued a play nudge to break it.
   var softStallSince: Date?
   var lastSoftStallNudgeAt = Date.distantPast
+  /// When we last nudged a buffer-agnostic frozen playhead (the `toMinimizeStalls`
+  /// deadlock that satisfies neither the hard- nor soft-stall buffer signatures).
+  var lastFrozenPlayheadNudgeAt = Date.distantPast
 }
 
 /// The only latency state SwiftUI observes for the on-screen badge. Updated once

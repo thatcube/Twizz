@@ -282,6 +282,7 @@ extension PlayerView {
     streamPlaybackStartedAt = nil
     softStallSince = nil
     lastSoftStallNudgeAt = Date.distantPast
+    lastFrozenPlayheadNudgeAt = Date.distantPast
     // Drop the proxy's manifest-derived instability accumulators too, so the
     // predictive verdict is scoped to this channel session.
     lowLatencyProxy.resetInstabilityPrediction()

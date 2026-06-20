@@ -378,6 +378,7 @@ extension PlayerView {
     liveEdgeFrozenSince = nil
     softStallSince = nil
     lastSoftStallNudgeAt = Date.distantPast
+    lastFrozenPlayheadNudgeAt = Date.distantPast
     offlineProbeInFlight = false
     lastOfflineProbeAt = Date.distantPast
   }
@@ -667,6 +668,40 @@ extension PlayerView {
       }
     } else {
       softStallSince = nil
+    }
+
+    // Buffer-agnostic frozen-playhead failsafe. AVPlayer can park
+    // `.waitingToPlayAtSpecifiedRate` (reason `toMinimizeStalls`) while reporting
+    // the buffer non-empty *and* likely to keep up — so `isHardStallSignal` is
+    // false — yet our forward-buffer reading is unknown or below the soft floor,
+    // so `isSoftStallSignal` is false too. The playhead just freezes and neither
+    // recovery arm fires (observed as a 30-45s freeze with `Reloads: 0`). Catch
+    // that gap fast: a cheap playImmediately nudge first, escalating to a reload.
+    // Gated to a still-advancing live edge so an ended broadcast (frozen edge) is
+    // left to the offline-detection paths instead of being reload-looped.
+    let isFrozenWaitDeadlock =
+      !isVOD && pinnedToLive
+      && !isHardStallSignal && !isSoftStallSignal
+      && player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+      && liveEdgeFrozenSince == nil
+    if isFrozenWaitDeadlock, let frozenSince = diagFrozenSince {
+      let now = Date()
+      let frozenFor = now.timeIntervalSince(frozenSince)
+      if frozenFor >= frozenPlayheadReloadSeconds {
+        triggerRecoveryIfAllowed(reason: "frozen playhead")
+        lastFrozenPlayheadNudgeAt = Date.distantPast
+      } else if frozenFor >= frozenPlayheadNudgeSeconds,
+        now.timeIntervalSince(lastFrozenPlayheadNudgeAt) >= playbackWatchdogIntervalSeconds
+      {
+        lastFrozenPlayheadNudgeAt = now
+        player.playImmediately(atRate: desiredLivePlaybackRate(policy: activeLivePlaybackPolicy))
+        if showLatencyDiagnostics {
+          let buf = bufferAheadSeconds(item).map { diagFormat($0, decimals: 1) } ?? "—"
+          logDiagnosticsEvent("frozen nudge (buf \(buf)s)")
+        }
+      }
+    } else {
+      lastFrozenPlayheadNudgeAt = Date.distantPast
     }
 
     // Authoritative end-of-stream detection. The reload-recovery path above is

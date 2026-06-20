@@ -298,6 +298,34 @@ of stalling, and the slow-down rides out short buffer dips.
   reload (which also re-lands near live, recovering the latency that grew while
   stuck). On-device this surfaces a "soft-stall nudge (buf …s)" line in the
   Diagnostics event log. This also helps slow stream starts.
+- **Buffer-agnostic frozen-playhead failsafe (UNPROVEN — added 2026-06, not yet
+  confirmed to fix the freeze it targets).** Observed freeze: AVPlayer parked in
+  `.waitingToPlayAtSpecifiedRate` (reason `toMinimizeStalls`) with the overlay
+  showing `State: FROZEN` for 20s+ and **`Reloads: 0`** — i.e. *no recovery path
+  fired at all*, and the stream only un-stuck itself after ~30–45s when AVPlayer
+  self-healed. Root cause is a gap between the two existing detectors:
+  - The **hard-stall** reload needs `isHardStallSignal` (buffer empty / not
+    likely to keep up). In a `toMinimizeStalls` park AVPlayer stays *optimistic*
+    (`isPlaybackBufferEmpty == false`, `isPlaybackLikelyToKeepUp == true`), so it
+    never fires.
+  - The **soft-stall** path needs a *known* forward-buffer reading at/above its
+    floor (`(bufferAheadSeconds ?? 0) >= softStallBufferFloorSeconds`). The
+    overlay read `Buffer ahead: —` (no loaded range spanned the playhead), so its
+    floor check failed too.
+
+  `samplePlaybackHealth` now adds a third arm (`isFrozenWaitDeadlock`) that fires
+  precisely in that gap: `.waitingToPlayAtSpecifiedRate`, **not** a hard stall,
+  **not** a soft stall, while the **live edge is still advancing**
+  (`liveEdgeFrozenSince == nil`). The edge-advancing gate is what keeps it from
+  reload-looping an *ended* stream (whose edge freezes immediately — that case
+  stays owned by the offline-detection tiers). On a fast timer it nudges with
+  `player.playImmediately(atRate:)` after `frozenPlayheadNudgeSeconds` (2s) and
+  escalates to a reload after `frozenPlayheadReloadSeconds` (5s), so a freeze that
+  used to take 30–45s should now get a cheap nudge within ~2s and a hard reload
+  by ~5–6s. On-device this logs "frozen nudge (buf …s)" and "reload (frozen
+  playhead)". **Status: this is the intended fix for the `Reloads: 0` freeze but
+  it has NOT been reproduced/verified against a real freeze yet — the trigger is
+  intermittent. Treat as a hypothesis until the overlay shows it catching one.**
 - **End-of-stream / offline detection (the "stream ended but it just froze"
   bug).** When a broadcast ends or raids, Twitch's `streamLiveStatus` GraphQL
   keeps returning `.unknown` (not `.offline`) for tens of seconds to minutes, so
@@ -340,7 +368,10 @@ These are hypotheses. Do not treat them as fact until the Diagnostics overlay
 
 - **Remaining freezes.** Still observed occasionally. Exact trigger not yet
   pinned down. Candidate factors: forward buffer depth, a pinned rendition
-  whose bitrate the connection can't sustain, or proxy refresh timing.
+  whose bitrate the connection can't sustain, or proxy refresh timing. The new
+  buffer-agnostic frozen-playhead failsafe (see Recovery behavior) targets the
+  specific `toMinimizeStalls` + `Reloads: 0` variant of this, but is **unproven**
+  — it may not be the same freeze, and it hasn't been caught in the act yet.
 - **"Jumps."** Candidate causes, not yet separated:
   1. AVPlayer's own skip-to-live after the buffer dips (native behavior).
   2. The watchdog reload (confirmed mechanism; magnitude/frequency TBD).
