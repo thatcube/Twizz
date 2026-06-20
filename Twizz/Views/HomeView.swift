@@ -23,9 +23,10 @@ struct HomeView: View {
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
   @State private var pendingWatchChannel: FollowedChannel?
-  @State private var showingMultiview = false
-  /// When set, the multiview cover opens straight into the wall with this roster.
-  @State private var multiviewInitialChannels: [FollowedChannel]?
+  /// Active multiview launch (roster). Item-based so the cover always presents
+  /// with the chosen channels — `isPresented` + a separate roster var raced on
+  /// first launch and showed an empty (black) wall.
+  @State private var multiviewLaunch: MultiviewLaunch?
   /// Categories opened from the Home tab are pushed one level deep here, so the
   /// category view is genuinely L2 of Home rather than a tab switch into Browse.
   @State private var homePath: [TwitchCategory] = []
@@ -171,8 +172,7 @@ struct HomeView: View {
         MultiviewSetupView(
           sections: multiviewSections,
           onStart: { channels in
-            multiviewInitialChannels = channels
-            showingMultiview = true
+            multiviewLaunch = MultiviewLaunch(channels: channels)
           },
           onCancel: { selectedSidebarTab = .home }
         )
@@ -331,11 +331,9 @@ struct HomeView: View {
       .environment(\.themePalette, resolvedPalette)
       .preferredColorScheme(themeManager.theme.preferredColorScheme)
     }
-    .fullScreenCover(isPresented: $showingMultiview, onDismiss: {
-      multiviewInitialChannels = nil
-    }) {
+    .fullScreenCover(item: $multiviewLaunch) { launch in
       MultiviewPlayerView(
-        channels: multiviewInitialChannels ?? [],
+        channels: launch.channels,
         availableChannels: multiviewAvailablePool,
         auth: auth,
         goLive: goLive,
@@ -878,12 +876,18 @@ struct HomeView: View {
 
 // MARK: - Refresh toast
 
+/// One multiview session launch — wraps the chosen roster so the cover can be
+/// presented with `fullScreenCover(item:)`, which (unlike `isPresented` plus a
+/// separate roster var) always builds its content with the channels in hand.
+struct MultiviewLaunch: Identifiable {
+  let id = UUID()
+  let channels: [FollowedChannel]
+}
+
 enum RefreshToastState {
   case refreshing
   case done
-}
-
-/// Small pill that confirms a manual Home refresh is happening / finished, so a
+}/// Small pill that confirms a manual Home refresh is happening / finished, so a
 /// re-tap of the Home tab gives the viewer visible feedback.
 private struct RefreshToastView: View {
   let state: RefreshToastState
