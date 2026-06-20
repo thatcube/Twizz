@@ -359,6 +359,29 @@ struct ChatView: View {
   private func shouldHighlight(_ message: ChatMessage) -> Bool {
     guard highlightEnabled else { return false }
 
+    // Mention detection lowercases the message text and runs word-boundary scans
+    // per name/keyword. That's cheap once, but the line closure re-evaluates as
+    // rows scroll in and out, so memoize the result by message id plus a signature
+    // of the highlight inputs (viewer identity + keywords). When the signature
+    // changes, new keys are used and stale entries fall out via LRU eviction.
+    let key = HighlightCacheKey(id: message.id, configSignature: Self.highlightConfigSignature(self))
+    if let cached = Self.highlightCache[key] { return cached }
+
+    let result = Self.computeShouldHighlight(message, viewerLogin: viewerLogin, viewerDisplayName: viewerDisplayName, keywords: highlightKeywords)
+
+    Self.highlightCache[key] = result
+    Self.highlightCacheOrder.append(key)
+    if Self.highlightCacheOrder.count > Self.highlightCacheLimit {
+      let overflow = Self.highlightCacheOrder.count - Self.highlightCacheLimit
+      for evicted in Self.highlightCacheOrder.prefix(overflow) {
+        Self.highlightCache.removeValue(forKey: evicted)
+      }
+      Self.highlightCacheOrder.removeFirst(overflow)
+    }
+    return result
+  }
+
+  private static func computeShouldHighlight(_ message: ChatMessage, viewerLogin: String?, viewerDisplayName: String?, keywords: [String]) -> Bool {
     if let login = message.replyParentLogin,
        let viewerLogin, !viewerLogin.isEmpty,
        login == viewerLogin.lowercased() {
@@ -369,15 +392,34 @@ struct ChatView: View {
 
     for name in [viewerLogin, viewerDisplayName] {
       guard let name, !name.isEmpty else { continue }
-      if Self.containsWord(name.lowercased(), in: haystack) { return true }
+      if containsWord(name.lowercased(), in: haystack) { return true }
     }
 
-    for keyword in highlightKeywords where haystack.contains(keyword) {
+    for keyword in keywords where haystack.contains(keyword) {
       return true
     }
 
     return false
   }
+
+  /// Stable signature of the inputs that change which lines highlight. Folded
+  /// into the cache key so a viewer/keyword change invalidates memoized results.
+  private static func highlightConfigSignature(_ view: ChatView) -> Int {
+    var hasher = Hasher()
+    hasher.combine(view.viewerLogin)
+    hasher.combine(view.viewerDisplayName)
+    hasher.combine(view.highlightKeywords)
+    return hasher.finalize()
+  }
+
+  private struct HighlightCacheKey: Hashable {
+    let id: UUID
+    let configSignature: Int
+  }
+
+  private static var highlightCache: [HighlightCacheKey: Bool] = [:]
+  private static var highlightCacheOrder: [HighlightCacheKey] = []
+  private static let highlightCacheLimit = 3000
 
   /// Case-insensitive whole-token match for a username so "sam" doesn't fire on
   /// "same". Both inputs are expected lowercased. A leading `@` (as in a mention
@@ -416,10 +458,10 @@ struct ChatView: View {
 
   /// Shared container for every highlighted line (mention, subscription,
   /// watch-streak, first message). Gives a rounded, gradient-tinted card with a
-  /// rounded leading accent bar and a hairline accent stroke. In the translucent
-  /// overlay modes it floats over a thin material for depth; on the solid side
-  /// panel the gradient tint alone keeps it flat and legible. The card always
-  /// fills the available width so it never stops short of the panel edge.
+  /// rounded leading accent bar and a hairline accent stroke. The accent gradient
+  /// alone carries the highlight in every mode (no material blur — it's an
+  /// expensive per-row GPU cost on tvOS that's barely noticeable here). The card
+  /// always fills the available width so it never stops short of the panel edge.
   @ViewBuilder
   private func highlightCard<Content: View>(
     accent: Color,
@@ -427,7 +469,6 @@ struct ChatView: View {
   ) -> some View {
     let barWidth: CGFloat = 4
     let corner = highlightCornerRadius
-    let usesMaterial = !isSideLayout && !glassDisabled
     // Keep the card a touch inside the list edge so it still reads as a rounded
     // card, while the remaining left margin (`margin`) is exactly enough to land
     // the message text back on the same keyline as the surrounding chat lines —
@@ -441,9 +482,6 @@ struct ChatView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .background {
         ZStack(alignment: .leading) {
-          if usesMaterial {
-            Rectangle().fill(.ultraThinMaterial)
-          }
           LinearGradient(
             colors: [
               accent.opacity(isSideLayout ? 0.20 : 0.30),

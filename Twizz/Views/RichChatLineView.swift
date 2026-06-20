@@ -28,6 +28,11 @@ struct RichChatLineView: View {
     /// Overrides the default white body color (used by the light side-chat).
     var bodyColorOverride: Color? = nil
 
+    /// VoiceOver state. The combined spoken label is only built when VoiceOver is
+    /// actually running — otherwise computing it (segment walk + string split/join)
+    /// on every line during scroll is pure wasted work.
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+
     /// Whether this message should have its tokens scanned for cheermotes.
     private var shouldRenderCheers: Bool {
         guard !cheermotes.isEmpty else { return false }
@@ -115,7 +120,7 @@ struct RichChatLineView: View {
         // stepping through every badge/emote image node (which otherwise speak
         // raw emote URLs or surface empty, unlabeled image elements).
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
+        .accessibilityLabel(voiceOverEnabled ? accessibilityLabel : "")
     }
 
     /// Combined spoken label for the line: badges, the author name, then the
