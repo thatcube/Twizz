@@ -2065,6 +2065,13 @@ struct PlayerView: View {
   /// offline state's "Try Again" button, which is the control adjacent to the
   /// chat pane, so a subsequent right-press hops straight back into chat.
   func exitChatComposerLeft() {
+    // While actively scrolling, the chat list traps focus on the composer
+    // (see the `isChatScrolling` focus guard in the body's onChange(of: focus)).
+    // A left press here would briefly fling focus to the collapse button —
+    // playing a focus tick and flashing the chrome — before the trap snaps it
+    // back. Swallow it: the only ways out of an active scroll are Back (Menu)
+    // or scrolling down to the live bottom, which returns focus to the composer.
+    if isChatScrolling { return }
     if isOffline {
       focus = .offlineTryAgain
     } else {
