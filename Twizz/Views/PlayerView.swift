@@ -1095,6 +1095,23 @@ struct PlayerView: View {
     }
   }
 
+  /// Trailing inset for the full-bleed loading surface so it occupies only the
+  /// *uncovered* video region instead of stretching the full screen under the
+  /// (often translucent) chat in overlay/glass modes — which made the loading
+  /// art read as fullscreen even though the video is sharing the screen with
+  /// chat. Side mode already shrinks the video column, so no inset is needed.
+  var loadingChatInset: CGFloat {
+    guard showChat, chatLayoutMode.isOverlay else { return 0 }
+    switch chatLayoutMode {
+    case .glass:
+      return chatWidth + GlassChatPaneStyle.edgeInset
+    case .overlay:
+      return chatWidth
+    case .side:
+      return 0
+    }
+  }
+
   var body: some View {
     ZStack {
       palette.playerBackdrop.ignoresSafeArea()
@@ -1571,25 +1588,24 @@ struct PlayerView: View {
     ZStack(alignment: .bottom) {
       VideoSurface(player: player)
         .ignoresSafeArea()
-
-      // Seamless escalate: fill with the channel's frame while the full player
-      // spins up, then cross-fade to live video. Removes the black "Loading…"
-      // gap when opening a stream from a multiview pane. Letterboxed
-      // (scaledToFit) to match VideoSurface's .resizeAspect so the poster lands
-      // exactly where the live video will, and constrained to the video column
-      // so it never bleeds over the chat (whose width varies).
-      if let posterURL, errorMessage == nil, !isOffline {
-        AsyncImage(url: posterURL) { image in
-          image.resizable().scaledToFit()
-        } placeholder: {
-          Color.clear
+        // Shared loading surface: the stream's frame behind the channel's
+        // avatar, name, and a native spinner. Anchored as an overlay on the
+        // video so it tracks the *exact* video frame in every chat layout — the
+        // shrunken column in side mode, full-bleed in overlay/glass — instead of
+        // escaping to fullscreen. Cross-fades to live video once playback
+        // starts, so opening a stream reads as a quick sharpen instead of a
+        // black "Loading…" gap.
+        .overlay {
+          StreamLoadingView(
+            posterURL: posterURL,
+            avatarURL: channelAvatarURL,
+            title: isVOD ? vod?.title : offlineDisplayName
+          )
+          .padding(.trailing, loadingChatInset)
+          .opacity(isLoading && errorMessage == nil && !isOffline ? 1 : 0)
+          .allowsHitTesting(false)
+          .animation(.easeOut(duration: 0.45), value: isLoading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea()
-        .opacity(isLoading ? 1 : 0)
-        .allowsHitTesting(false)
-        .animation(.easeOut(duration: 0.45), value: isLoading)
-      }
 
       if isAudioOnlyActive, !isLoading, errorMessage == nil, !isOffline {
         AudioVisualizerContainer(
@@ -1681,19 +1697,6 @@ struct PlayerView: View {
           .focusable()
           .focused($focus, equals: .video)
           .onTapGesture { revealControls(preferredFocus: .quality) }
-      }
-
-      if isLoading {
-        if posterURL != nil {
-          // Over a poster the full "Loading…" treatment reads as a stall; a bare
-          // spinner makes the hand-off feel like a quick transition instead.
-          ProgressView()
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        } else {
-          ProgressView(isVOD ? "Loading broadcast…" : "Loading \(activeChannel)…")
-            .font(.title3)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        }
       }
 
       if isOffline {

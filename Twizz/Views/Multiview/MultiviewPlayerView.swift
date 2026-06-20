@@ -522,24 +522,19 @@ private struct MultiviewPaneTile: View {
         .opacity(pane.isLoading || pane.hasError ? 0 : 1)
 
       if pane.isLoading {
-        // Mask the initial cold load with the channel's frame instead of a black
-        // tile. Quality *changes* don't pass through here — they swap to a
-        // pre-rendered player (make-before-break), so they never show a poster.
-        AsyncImage(url: pane.channel.thumbnailURL) { image in
-          image.resizable().scaledToFill()
-        } placeholder: {
-          Color.black
-        }
-        .allowsHitTesting(false)
-
-        statusOverlay {
-          ProgressView()
-          if style == .full {
-            Text(pane.channel.displayName)
-              .font(.headline)
-              .foregroundStyle(.secondary)
-          }
-        }
+        // Mask the initial cold load with the shared loading surface (the
+        // channel's frame behind a spinner) instead of a black tile. Quality
+        // *changes* don't pass through here — they swap to a pre-rendered player
+        // (make-before-break), so they never show a poster. Same cluster as the
+        // full player — it just scales down to the pane. The pane wall is black,
+        // so skip the backdrop.
+        StreamLoadingView(
+          posterURL: pane.channel.thumbnailURL,
+          avatarURL: pane.channel.profileImageURL,
+          title: pane.channel.displayName,
+          drawsBackdrop: false
+        )
+        .environment(\.themePalette, palette)
       } else if pane.hasError {
         statusOverlay {
           Text(pane.channel.displayName)
