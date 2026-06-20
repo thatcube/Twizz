@@ -64,6 +64,9 @@ struct MultiviewPlayerView: View {
       Color.black.ignoresSafeArea()
 
       // The video wall fills the entire screen edge-to-edge — no outer margins.
+      // While the HUD is open it's disabled so the focus engine can't escape
+      // down into the panes — focus stays trapped in the controls until the
+      // viewer closes them (Close button or the Menu/Back button).
       Group {
         switch controller.layout {
         case .grid: gridLayout
@@ -72,6 +75,7 @@ struct MultiviewPlayerView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .ignoresSafeArea()
+      .disabled(showingControls)
 
       // While the HUD is open, dim the wall a touch for contrast/modality.
       if showingControls {
@@ -86,6 +90,7 @@ struct MultiviewPlayerView: View {
       VStack(spacing: 0) {
         if showingControls {
           controlsBar
+            .focusSection()
             .padding(.horizontal, 36)
             .padding(.top, 28)
             .transition(.move(edge: .top).combined(with: .opacity))
@@ -95,15 +100,6 @@ struct MultiviewPlayerView: View {
             .transition(.opacity)
         }
         Spacer(minLength: 0)
-      }
-    }
-    .onMoveCommand { direction in
-      // Swipe up while the HUD is open pushes it back away. (Reveal is bound to
-      // Play/Pause instead of a direction: in a 2×2 grid every swipe direction
-      // is already used to move between panes, so there's no reliably-free
-      // directional gesture to open the controls with.)
-      if direction == .up, showingControls {
-        hideControls()
       }
     }
     .onAppear {
@@ -157,17 +153,32 @@ struct MultiviewPlayerView: View {
 
   // MARK: Controls
 
+  /// A circular play/pause badge mirroring the Siri Remote's button — a play
+  /// triangle and pause bars side by side inside a ring — so the hint reads as
+  /// "press this physical button."
+  private var playPauseBadge: some View {
+    ZStack {
+      Circle().fill(Color.white.opacity(0.22))
+      HStack(spacing: 2.5) {
+        Icon(glyph: .playerPlayFilled, size: 11)
+        Icon(glyph: .playerPauseFilled, size: 11)
+      }
+    }
+    .frame(width: 32, height: 32)
+  }
+
   /// A slim, non-focusable coach mark shown briefly on appear so the hidden
   /// controls are discoverable. Styled as a standard tvOS material pill.
   private var revealHint: some View {
-    HStack(spacing: 10) {
-      Icon(glyph: .playerPlayFilled, size: 18)
+    HStack(spacing: 12) {
+      playPauseBadge
       Text("Press Play/Pause for controls")
         .font(.callout.weight(.medium))
     }
     .foregroundStyle(.white)
-    .padding(.horizontal, 20)
-    .padding(.vertical, 11)
+    .padding(.leading, 10)
+    .padding(.trailing, 22)
+    .padding(.vertical, 8)
     .background(
       Capsule().fill(glassDisabled ? AnyShapeStyle(Color.black.opacity(0.72))
                                    : AnyShapeStyle(.regularMaterial))
@@ -637,47 +648,3 @@ private struct MultiviewAddView: View {
   }
 }
 
-/// Container that runs the multiview flow inside a single full-screen cover:
-/// channel picker first, then the live grid. Keeps the chained-presentation
-/// timing issues of stacked covers out of the caller.
-struct MultiviewRootView: View {
-  /// Discovery sections offered in the setup picker (Following first, then
-  /// recommendations and popular).
-  let sections: [MultiviewChannelSection]
-  /// Every live channel across all sections — the pool the in-session "Add"
-  /// picker draws from, so additions aren't limited to follows.
-  let availablePool: [FollowedChannel]
-  /// When non-nil, multiview opens straight into the video wall with this
-  /// roster, skipping the setup picker — used to restore a session after the
-  /// viewer escalated a pane to full-screen and pressed Back.
-  var initialChannels: [FollowedChannel]? = nil
-  /// Called when the viewer escalates a pane to full-screen single-stream. The
-  /// second argument is the current roster, so the caller can restore it later.
-  var onWatchFull: (FollowedChannel, [FollowedChannel]) -> Void
-
-  @Environment(\.dismiss) private var dismiss
-  @State private var startedChannels: [FollowedChannel]?
-
-  var body: some View {
-    Group {
-      if let startedChannels {
-        MultiviewPlayerView(
-          channels: startedChannels,
-          availableChannels: availablePool,
-          onEscalate: onWatchFull
-        )
-      } else {
-        MultiviewSetupView(
-          sections: sections,
-          onStart: { startedChannels = $0 },
-          onCancel: { dismiss() }
-        )
-      }
-    }
-    .onAppear {
-      if startedChannels == nil, let initialChannels, !initialChannels.isEmpty {
-        startedChannels = initialChannels
-      }
-    }
-  }
-}

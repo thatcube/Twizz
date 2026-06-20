@@ -169,11 +169,18 @@ struct HomeView: View {
           Label(SidebarTab.home.rawValue, image: SidebarTab.home.tablerImageName)
         }
 
-      // Multiview is a cover-trigger tab: selecting it presents the existing,
-      // well-tested multiview full-screen cover over a blank backdrop, and
-      // dismissing it drops back to Home (handled in onChange/onDismiss).
+      // The Multiview tab shows the channel picker inline so the tab bar stays
+      // visible while choosing. Starting playback presents the immersive player
+      // as a full-screen cover (where hiding the tab bar is expected).
       tabContainer {
-        Color.clear
+        MultiviewSetupView(
+          sections: multiviewSections,
+          onStart: { channels in
+            multiviewInitialChannels = channels
+            showingMultiview = true
+          },
+          onCancel: { selectedSidebarTab = .home }
+        )
       }
       .tag(SidebarTab.multiview)
       .tabItem {
@@ -288,13 +295,6 @@ struct HomeView: View {
       }
     }
     .onChange(of: selectedSidebarTab) { _, tab in
-      if tab == .multiview {
-        // Present the multiview cover; it lives over a blank tab so closing it
-        // returns the viewer to Home rather than a placeholder screen.
-        multiviewInitialChannels = nil
-        showingMultiview = true
-        return
-      }
       guard tab == .home else { return }
       Task {
         async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: false)
@@ -349,16 +349,12 @@ struct HomeView: View {
       if let channel = pendingMultiviewWatch {
         pendingMultiviewWatch = nil
         selectedChannel = channel
-      } else if selectedSidebarTab == .multiview {
-        // Closing multiview from its own tab returns to Home.
-        selectedSidebarTab = .home
       }
     }) {
-      MultiviewRootView(
-        sections: multiviewSections,
-        availablePool: multiviewAvailablePool,
-        initialChannels: multiviewInitialChannels,
-        onWatchFull: { channel, roster in
+      MultiviewPlayerView(
+        channels: multiviewInitialChannels ?? [],
+        availableChannels: multiviewAvailablePool,
+        onEscalate: { channel, roster in
           pendingMultiviewWatch = channel
           multiviewResume = roster
           showingMultiview = false
