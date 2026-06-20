@@ -1929,6 +1929,14 @@ struct PlayerView: View {
         }
       }
       .fixedSize(horizontal: true, vertical: false)
+      // While the viewer is actively scrolling chat, drop the entire control row
+      // (channel, quality, settings, collapse) out of the focus engine. Focus is
+      // held on the composer; without this, a left press lands natively on the
+      // adjacent collapse button — playing a focus tick and flashing it focused —
+      // before the scroll focus-trap reverts it. Disabling removes them as focus
+      // neighbors so focus never moves there at all. Exit scroll via Back or by
+      // scrolling down to the live bottom, which re-enables the row.
+      .disabled(isChatScrolling)
       .TwizzControlButtonStyle()
       .background(
         GeometryReader { proxy in
