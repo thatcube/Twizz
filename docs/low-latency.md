@@ -355,7 +355,7 @@ of stalling, and the slow-down rides out short buffer dips.
   trustworthy signal is local: **a live broadcast keeps advancing its seekable
   edge; an ended one freezes it.** `samplePlaybackHealth` tracks the max edge and
   how long it has been frozen (`liveEdgeFrozenSince`). Two Twitch-independent
-  force-offline tiers (in addition to a 12s `probeOfflineIfStreamEnded` poke):
+  force-offline tiers (in addition to an 8s `probeOfflineIfStreamEnded` poke):
   - **Fast (`endOfStreamStalledForceOfflineSeconds`, 8s):** edge frozen **and**
     buffer starved (<1s) **and** a clean `isHardStallSignal`. This is the
     unambiguous "ended" signature — no content left to play and none arriving.
@@ -366,7 +366,7 @@ of stalling, and the slow-down rides out short buffer dips.
     never surfaces offline — the nmplol/this-stream report. Because the edge
     freezes *before* the playhead (the buffer drains first), this fast tier
     provably fires before the reload can reset it, for any buffer depth.
-  - **Slow (`endOfStreamEdgeForceOfflineSeconds`, 30s):** edge frozen + buffer
+  - **Slow (`endOfStreamEdgeForceOfflineSeconds`, 12s):** edge frozen + buffer
     starved even *without* a clean hard-stall signal (the anti-stall slow-down
     can keep flickering `timeControlStatus`), as a final backstop.
   A merely-struggling-but-live stream keeps advancing its edge (clears the timer)
