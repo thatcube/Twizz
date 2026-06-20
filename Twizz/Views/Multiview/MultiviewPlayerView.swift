@@ -500,6 +500,7 @@ private struct MultiviewPaneTile: View {
         // spinner/name don't look oversized in a small pane.
         StreamLoadingView(
           posterURL: pane.channel.thumbnailURL,
+          avatarURL: pane.channel.profileImageURL,
           title: style == .full ? pane.channel.displayName : nil,
           compact: true
         )
