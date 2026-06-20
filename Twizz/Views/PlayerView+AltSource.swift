@@ -22,6 +22,12 @@ extension PlayerView {
     let item = AVPlayerItem(asset: asset)
     item.audioTimePitchAlgorithm = .timeDomain
     item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+    // Frame tap so the diagnostics readout can prove real decoded video is
+    // arriving (not just a "ready" item over a black frame), and confirm it's
+    // the alt asset that's rendering.
+    let videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: [:])
+    item.add(videoOutput)
+    playerItemVideoOutput = videoOutput
     return item
   }
 
@@ -107,14 +113,21 @@ extension PlayerView {
   func updateAltSourceDiagnostics() {
     guard isUsingAltSource else { return }
     guard let item = player.currentItem else {
-      altSourceStatus = "YouTube: no player item"
+      altSourceStatus = "ALT: no player item"
       return
     }
+
+    // Ground truth: the host AVPlayer is actually fetching from. googlevideo /
+    // youtube = genuinely the YouTube simulcast; anything else (a Twitch CDN or
+    // the localhost proxy) means Twitch leaked back in and the label is lying.
+    let host = (item.asset as? AVURLAsset)?.url.host ?? "?"
+    let isYouTube = host.contains("googlevideo") || host.contains("youtube")
+    let srcTag = isYouTube ? "src=YouTube(\(host))" : "src=NOT-YT(\(host))"
 
     switch item.status {
     case .failed:
       let msg = item.error?.localizedDescription ?? "unknown error"
-      var detail = "YouTube failed: \(msg)"
+      var detail = "\(srcTag) failed: \(msg)"
       if let last = item.errorLog()?.events.last {
         let code = last.errorStatusCode
         let comment = last.errorComment ?? ""
@@ -128,32 +141,36 @@ extension PlayerView {
         altSourceStatus = detail + " · retrying once…"
         Task { await resolveAndPlayAltSource(reason: "failed-retry") }
       } else {
-        altSourceStatus =
-          "YouTube blocked the live segments (HTTP 403). YouTube now requires a "
-          + "proof-of-origin token for these streams, so the simulcast path is "
-          + "currently unavailable. Switch back to Twitch; re-select YouTube to retry later."
+        altSourceStatus = detail
+          + " · YouTube is blocking the live segments (403, proof-of-origin token "
+          + "required). Re-select YouTube to retry."
       }
     case .unknown:
-      altSourceStatus = "YouTube: loading manifest…"
+      altSourceStatus = "\(srcTag) · loading manifest…"
     case .readyToPlay:
       let ahead = bufferAheadSeconds(item).map { String(format: "%.1fs", $0) } ?? "—"
       let playing = player.timeControlStatus == .playing
       let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
       let size = item.presentationSize
-      let hasVideo = size.width > 0 && size.height > 0
-      if playing, hasVideo {
+      let dims = size.width > 0 ? "\(Int(size.width))×\(Int(size.height))" : "no-video"
+      // Definitive proof a decoded frame is actually available right now — not
+      // just an item that claims it's "ready" over a black screen.
+      let hasFrame =
+        playerItemVideoOutput?.hasNewPixelBuffer(forItemTime: item.currentTime()) ?? false
+      let frameTag = hasFrame ? "frame✓" : "frame✗"
+      if playing, size.width > 0 {
         altFailedRetries = 0
-        altSourceStatus = "Playing YouTube simulcast · buffer \(ahead)"
-      } else if playing, !hasVideo {
-        altSourceStatus = "YouTube: audio-only? no video track (buffer \(ahead))"
+        altSourceStatus = "PLAYING · \(srcTag) · \(dims) · \(frameTag) · buffer \(ahead)"
+      } else if playing {
+        altSourceStatus = "AUDIO-ONLY? · \(srcTag) · \(dims) · buffer \(ahead)"
       } else if waiting {
         let why = item.isPlaybackBufferEmpty ? "buffer empty — segments not arriving" : "buffering"
-        altSourceStatus = "YouTube waiting: \(why) (buffer \(ahead))"
+        altSourceStatus = "WAITING (\(why)) · \(srcTag) · \(dims) · buffer \(ahead)"
       } else {
-        altSourceStatus = "YouTube ready, paused (buffer \(ahead))"
+        altSourceStatus = "READY/paused · \(srcTag) · \(dims) · buffer \(ahead)"
       }
     @unknown default:
-      altSourceStatus = "YouTube: unknown status"
+      altSourceStatus = "\(srcTag) · unknown status"
     }
   }
 }
