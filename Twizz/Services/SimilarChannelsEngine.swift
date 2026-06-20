@@ -196,6 +196,67 @@ struct SimilarChannelsEngine {
 
   // MARK: - Candidate fetch
 
+  /// Looks up which of `logins` are **live right now** and returns them as
+  /// recommendation cards. Used by affinity expansion ("because you watch X")
+  /// to surface a watched channel's similar streamers regardless of category.
+  /// Applies the same hard `StreamLanguagePreference` filter as the main engine.
+  static func liveChannels(forLogins logins: [String]) async -> [FollowedChannel] {
+    let unique = Array(Set(logins.map { $0.lowercased() }.filter { !$0.isEmpty })).prefix(90)
+    guard !unique.isEmpty else { return [] }
+
+    let query = """
+      query AffinityLive($logins: [String!]) {
+        users(logins: $logins) {
+          login displayName
+          profileImageURL(width: 70)
+          broadcastSettings { language }
+          stream {
+            id title viewersCount
+            previewImageURL(width: 320, height: 180)
+            game { name displayName }
+            freeformTags { name }
+          }
+        }
+      }
+      """
+
+    guard
+      let data = try? await ChannelContentService.perform(
+        query: query, variables: ["logins": Array(unique)]),
+      let decoded = try? JSONDecoder().decode(UsersEnvelope.self, from: data),
+      let users = decoded.data?.users
+    else { return [] }
+
+    let requiredLanguage = StreamLanguagePreference.currentToken()
+
+    return users.compactMap { user -> FollowedChannel? in
+      guard let user,
+            let login = user.login?.trimmingCharacters(in: .whitespaces), !login.isEmpty,
+            let stream = user.stream
+      else { return nil }
+
+      if let required = requiredLanguage,
+         user.broadcastSettings?.language?.uppercased() != required {
+        return nil
+      }
+
+      let title = stream.title?.trimmingCharacters(in: .whitespaces) ?? ""
+      return FollowedChannel(
+        id: stream.id ?? login,
+        login: login,
+        displayName: user.displayName?.trimmingCharacters(in: .whitespaces) ?? login,
+        title: title.isEmpty ? "Live now" : title,
+        gameName: stream.game?.displayName?.trimmingCharacters(in: .whitespaces)
+          ?? stream.game?.name?.trimmingCharacters(in: .whitespaces) ?? "Live",
+        viewerCount: stream.viewersCount,
+        thumbnailURL: stream.previewImageURL.flatMap(URL.init(string:)),
+        profileImageURL: user.profileImageURL.flatMap(URL.init(string:)),
+        isLive: true,
+        isMature: false
+      )
+    }
+  }
+
   private static func fetchCandidates(inCategory category: String) async -> [CandidateStream] {
     let query = """
       query CategoryStreams($name: String!, $first: Int!) {
@@ -304,4 +365,22 @@ struct SimilarChannelsEngine {
   private struct BroadcastSettings: Decodable { let language: String? }
   private struct Game: Decodable { let name: String?; let displayName: String? }
   private struct Tag: Decodable { let name: String? }
+
+  private struct UsersEnvelope: Decodable { let data: UsersData? }
+  private struct UsersData: Decodable { let users: [AffinityUser?]? }
+  private struct AffinityUser: Decodable {
+    let login: String?
+    let displayName: String?
+    let profileImageURL: String?
+    let broadcastSettings: BroadcastSettings?
+    let stream: AffinityStream?
+  }
+  private struct AffinityStream: Decodable {
+    let id: String?
+    let title: String?
+    let viewersCount: Int?
+    let previewImageURL: String?
+    let game: Game?
+    let freeformTags: [Tag]?
+  }
 }

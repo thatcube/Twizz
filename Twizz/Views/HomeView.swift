@@ -18,6 +18,7 @@ struct HomeView: View {
   @State private var personalized = PersonalizedRecommendationsService()
   @State private var watchHistory = WatchHistoryService()
   @State private var feedback = RecommendationFeedbackService()
+  @State private var affinity = StreamerAffinityService()
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
@@ -754,12 +755,14 @@ struct HomeView: View {
 
   private func refreshPersonalizedIfNeeded(force: Bool) async {
     guard force || shouldAutoRefreshPersonalized() else { return }
+    await affinity.refreshIfNeeded()
     await personalized.refresh(
       follows: follows.channels,
       followedCategories: follows.followedCategories,
       followedLogins: follows.followedLogins,
       history: watchHistory,
-      feedback: feedback.snapshot
+      feedback: feedback.snapshot,
+      affinity: affinity.snapshot
     )
   }
 
