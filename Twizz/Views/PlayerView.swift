@@ -3547,11 +3547,23 @@ private struct QualityMenu: View, Equatable {
     .monospacedDigit()
     .lineLimit(1)
     .fixedSize()
+    // Reserve the full `.subheadline` line height for every label so the
+    // smaller-font "Auto (1080p60)" form occupies the same vertical space as a
+    // regular label (e.g. "720p"). Without this the button's platter shrinks to
+    // the compact label and sits shorter than its neighbors. `minHeight` only
+    // affects height, so the variable button width is untouched.
+    .frame(minHeight: Self.regularQualityLineHeight)
   }
 
   /// 20% smaller than `.subheadline`, used for the "Auto (1080p60)" label.
   private static var compactQualityFontSize: CGFloat {
     UIFont.preferredFont(forTextStyle: .subheadline).pointSize * 0.8
+  }
+
+  /// Line height of the regular `.subheadline` quality label, used to keep the
+  /// button height constant across both the compact and regular label fonts.
+  private static var regularQualityLineHeight: CGFloat {
+    UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
   }
 }
 
