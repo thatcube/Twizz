@@ -69,8 +69,10 @@ extension PlayerView {
   /// raid to bring a meaningful slice of their current audience.
   func shouldShowIncomingRaid(_ raid: RaidEvent) -> Bool {
     // Channels at or below this many concurrent viewers are "small" enough that
-    // every raid is meaningful, so always show it.
-    let smallChannelCeiling = 100
+    // every raid is meaningful, so always show it. Small-stream raid culture is
+    // strong well past 100, and the cost is tiny (the power law only asks for
+    // ~10–17 in the 100–250 range anyway), so keep the always-show band generous.
+    let smallChannelCeiling = 150
 
     // Unknown audience size (count not resolved yet): show it rather than risk
     // silently dropping a real raid.
