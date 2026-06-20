@@ -2,6 +2,12 @@ import SwiftUI
 
 /// Picks up to ``multiviewPaneLimit`` live channels to watch together, then
 /// hands the ordered selection to the multiview grid.
+///
+/// Each option is a real ``StreamChannelCard`` — the same card the Home grid
+/// uses, so it brings the thumbnail, hover-preview video, LIVE/viewer badge,
+/// avatar, and title for free — wrapped in a selection overlay that shows the
+/// pick order, a purple ring when selected, and dims unselected cards once the
+/// four-pick limit is reached.
 struct MultiviewSetupView: View {
   let channels: [FollowedChannel]
   var onStart: ([FollowedChannel]) -> Void
@@ -12,7 +18,7 @@ struct MultiviewSetupView: View {
   @State private var selectedIDs: [String] = []
   @FocusState private var focusedID: String?
 
-  private let columns = [GridItem(.adaptive(minimum: 320, maximum: 460), spacing: 28)]
+  private let columns = [GridItem(.adaptive(minimum: 360, maximum: 480), spacing: 28)]
 
   private var liveChannels: [FollowedChannel] { channels.filter(\.isLive) }
   private var isAtLimit: Bool { selectedIDs.count >= multiviewPaneLimit }
@@ -99,53 +105,54 @@ struct MultiviewSetupView: View {
     let isFocused = focusedID == channel.id
     let dimmed = isAtLimit && !isSelected
 
-    return Button {
-      toggle(channel)
-    } label: {
-      VStack(alignment: .leading, spacing: 10) {
-        ZStack(alignment: .topTrailing) {
-          CachedAsyncImage(url: channel.thumbnailURL) { image in
-            image.resizable().scaledToFill()
-          } placeholder: {
-            Rectangle().fill(Color.primary.opacity(0.12))
-          }
-          .aspectRatio(16.0 / 9.0, contentMode: .fill)
-          .frame(maxWidth: .infinity)
-          .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-          if let order {
-            selectionBadge(order: order + 1)
-              .padding(12)
-          }
-        }
-        .overlay {
-          RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(
-              isSelected ? ThemePalette.brandPurple : Color.clear,
-              lineWidth: 5
-            )
-        }
-
-        Text(channel.displayName)
-          .font(.headline)
-          .lineLimit(1)
-          .foregroundStyle(.primary)
+    return StreamChannelCard(
+      channel: channel,
+      isFocused: isFocused,
+      layout: .grid(),
+      showsGameName: true
+    )
+    .overlay(alignment: .topTrailing) {
+      if let order {
+        selectionBadge(order: order + 1)
+          .padding(26)
       }
     }
-    .buttonStyle(.card)
-    .focused($focusedID, equals: channel.id)
+    .overlay {
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .strokeBorder(
+          isSelected ? ThemePalette.brandPurple : Color.clear,
+          lineWidth: 5
+        )
+    }
     .opacity(dimmed ? 0.4 : 1)
     .scaleEffect(isFocused ? 1.04 : 1)
     .animation(.easeOut(duration: 0.18), value: isFocused)
+    .animation(.easeOut(duration: 0.18), value: isSelected)
+    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .focusable(true)
+    .focused($focusedID, equals: channel.id)
+    .focusEffectDisabled()
+    .onTapGesture { toggle(channel) }
+    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    .accessibilityHint(
+      dimmed
+        ? "Limit of \(multiviewPaneLimit) reached"
+        : (isSelected
+            ? "Selected, position \((order ?? 0) + 1). Click to remove."
+            : "Click to add to multiview")
+    )
   }
 
+  /// Numbered pick-order badge. White on the brand fill reads against any
+  /// thumbnail; the brand purple keeps it consistent with the selection ring.
   private func selectionBadge(order: Int) -> some View {
     Text("\(order)")
-      .font(.headline.weight(.bold))
+      .font(.title3.weight(.bold))
       .foregroundStyle(.white)
-      .frame(width: 40, height: 40)
+      .frame(width: 46, height: 46)
       .background(ThemePalette.brandPurple, in: Circle())
       .overlay(Circle().strokeBorder(.white.opacity(0.9), lineWidth: 2))
+      .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
   }
 
   private func toggle(_ channel: FollowedChannel) {
