@@ -215,6 +215,12 @@ struct RichChatLineView: View {
         message.source == .kick ? (Color(twitchHex: "#53FC18") ?? .green) : .white
     }
 
+    private var sourceBadgeStrokeColor: Color {
+        // Outline the dark Kick tile so it stays visible on dark/OLED chat
+        // surfaces where the near-black fill would otherwise blend in.
+        message.source == .kick ? (Color(twitchHex: "#53FC18") ?? .green).opacity(0.55) : .clear
+    }
+
     private var sourceBadgeView: some View {
         ZStack {
             RoundedRectangle(cornerRadius: sourceBadgeCornerRadius, style: .continuous)
@@ -223,6 +229,10 @@ struct RichChatLineView: View {
             sourceBadgeSymbol
         }
         .frame(width: sourceBadgeWidth, height: badgeSize)
+        .overlay(
+            RoundedRectangle(cornerRadius: sourceBadgeCornerRadius, style: .continuous)
+                .strokeBorder(sourceBadgeStrokeColor, lineWidth: 1)
+        )
         .accessibilityHidden(true)
     }
 
