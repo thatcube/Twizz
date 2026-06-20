@@ -1781,14 +1781,15 @@ struct PlayerView: View {
         .TwizzControlButtonStyle()
         .accessibilityLabel("Channel info")
         .accessibilityHint("Opens the channel page")
-        // While the viewer is scrolling chat, drop every control-row button out
-        // of the focus engine (mirroring the scrubber's `scrubberFocusable`
-        // gate). Focus is held on the composer; without this the engine treats
-        // these as neighbors and a left press jumps here — flashing a focused
-        // button and an audible tick — before our trap reverts it. Removing them
-        // entirely means focus simply can't move here. Exit via Back or by
-        // scrolling to the live bottom, which re-enables the row.
-        .focusable(!isChatScrolling)
+        // While the viewer is scrolling chat, lift every control-row button out
+        // of the focus engine (the scrubber does the same via its
+        // `scrubberFocusable` gate). Focus is held on the composer; without this
+        // the engine treats these as neighbors and a left press jumps here —
+        // flashing a focused button and an audible tick — before our trap reverts
+        // it. We remove rather than `.focusable(false/true)`-toggle so the button
+        // keeps its own native focus styling when it IS reachable. Exit via Back
+        // or by scrolling to the live bottom, which re-enables the row.
+        .focusRemoved(isChatScrolling)
         .focused($focus, equals: .streamInfo)
         .onMoveCommand { direction in
           switch direction {
@@ -1862,7 +1863,7 @@ struct PlayerView: View {
           onSelectSleep: { selectSleepTimer(at: $0) }
         )
         .equatable()
-        .focusable(!isChatScrolling)
+        .focusRemoved(isChatScrolling)
         .focused($focus, equals: .quality)
         .onMoveCommand { direction in
           switch direction {
@@ -1891,7 +1892,7 @@ struct PlayerView: View {
               .frame(minWidth: 52)
               .accessibilityLabel("Playback Speed")
           }
-          .focusable(!isChatScrolling)
+          .focusRemoved(isChatScrolling)
           .focused($focus, equals: .quality)
           .onMoveCommand { direction in
             switch direction {
@@ -1913,7 +1914,7 @@ struct PlayerView: View {
           Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
             .accessibilityLabel("Chat Settings")
         }
-        .focusable(!isChatScrolling)
+        .focusRemoved(isChatScrolling)
         .focused($focus, equals: .chatSettingsButton)
         .onMoveCommand { direction in
           switch direction {
@@ -1938,7 +1939,7 @@ struct PlayerView: View {
           Icon(glyph: showChat ? .sidebarRightCollapse : .sidebarRightExpand)
             .accessibilityLabel(showChat ? "Hide Chat" : "Show Chat")
         }
-        .focusable(!isChatScrolling)
+        .focusRemoved(isChatScrolling)
         .focused($focus, equals: .chatToggle)
         .onMoveCommand { direction in
           switch direction {
@@ -2859,6 +2860,21 @@ extension View {
   @ViewBuilder
   fileprivate func TwizzControlButtonStyle(shape: TwizzControlShape = .capsule) -> some View {
     modifier(TwizzControlButtonStyleModifier(shape: shape))
+  }
+
+  /// Removes the view from the focus engine while `removed` is true, leaving it
+  /// completely untouched otherwise. Used to lift the control row out of focus
+  /// while the viewer scrolls chat. Unlike an always-on `.focusable(true)` this
+  /// doesn't suppress a Button's own focus styling (which reads the environment
+  /// `isFocused` / the system focus effect), and unlike `.disabled` it never
+  /// dims the native-glass buttons.
+  @ViewBuilder
+  fileprivate func focusRemoved(_ removed: Bool) -> some View {
+    if removed {
+      self.focusable(false)
+    } else {
+      self
+    }
   }
 
   /// Native Liquid Glass for the compact chat-settings controls: the exact same
