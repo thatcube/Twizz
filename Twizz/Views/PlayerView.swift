@@ -3060,12 +3060,21 @@ struct PlayerView: View {
       return fallback
     }
 
-    let candidates = kickSlugCandidates(
+    var candidates = kickSlugCandidates(
       login: login,
       displayName: profile.displayName,
       socialLinks: profile.socialLinks,
       description: profile.description
     )
+
+    // Broaden coverage for streamers who neither reuse their name nor link Kick:
+    // ask Kick's own search for their display name and login, folding in any
+    // matches to be verified below.
+    for term in [profile.displayName, login] {
+      for slug in await ChatService.searchKickChannels(term: term) where !candidates.contains(slug) {
+        candidates.append(slug)
+      }
+    }
 
     var firstExisting: String?
     for slug in candidates {

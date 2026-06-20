@@ -223,6 +223,54 @@ extension ChatService {
   private static let kickAPIUserAgent =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 
+  /// Searches Kick for channels matching `term`, returning their slugs (most
+  /// relevant first). Used to find a streamer's Kick channel when their Twitch
+  /// profile carries no explicit link and their handles don't line up. Best
+  /// effort: returns an empty list on any failure so callers can fall back.
+  static func searchKickChannels(term: String, limit: Int = 6) async -> [String] {
+    let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty,
+      let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+      let url = URL(string: "https://kick.com/api/v2/search/channels?search=\(encoded)")
+    else {
+      return []
+    }
+
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 15
+    request.setValue(kickAPIUserAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+
+    guard let (data, response) = try? await URLSession.shared.data(for: request),
+      let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+      let root = try? JSONSerialization.jsonObject(with: data)
+    else {
+      return []
+    }
+
+    // The endpoint has shifted shape over time; accept the common variants.
+    let items: [[String: Any]]
+    if let dict = root as? [String: Any], let arr = dict["data"] as? [[String: Any]] {
+      items = arr
+    } else if let dict = root as? [String: Any], let arr = dict["channels"] as? [[String: Any]] {
+      items = arr
+    } else if let arr = root as? [[String: Any]] {
+      items = arr
+    } else {
+      items = []
+    }
+
+    var slugs: [String] = []
+    for item in items.prefix(limit) {
+      let slug = (item["slug"] as? String)
+        ?? (item["username"] as? String)
+        ?? ((item["user"] as? [String: Any])?["username"] as? String)
+      if let slug, !slug.isEmpty, !slugs.contains(slug) { slugs.append(slug) }
+    }
+    return slugs
+  }
+
   private func filterAndRememberKickMessages(_ entries: [KickEntry]) -> [ChatMessage] {
     guard !entries.isEmpty else { return [] }
 

@@ -230,12 +230,14 @@ struct RichChatLineView: View {
     private var sourceBadgeSymbol: some View {
         switch message.source {
         case .kick:
-            // Kick's logo is a bold black "K" on its green tile; mirror that here
-            // rather than reusing the generic play glyph.
-            Text("K")
-                .font(.system(size: badgeSize * 0.7, weight: .black, design: .rounded))
+            // Kick's logo mark: the official angular "K" tile, tinted black on
+            // the green badge like their app icon.
+            Image("kick-logo")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: badgeSize * 0.6, height: badgeSize * 0.6)
                 .foregroundStyle(sourceBadgeIconColor)
-                .minimumScaleFactor(0.5)
         default:
             Icon(glyph: .playerPlayFilled, size: sourceBadgePlayIconSize)
                 .foregroundStyle(sourceBadgeIconColor)
