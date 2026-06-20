@@ -15,17 +15,20 @@ enum MultiviewLayout {
 }
 
 /// Quality budget for a single pane, chosen by how large it renders so we spend
-/// bandwidth/decode where it shows. Bigger tiles get more bits; the tiny
-/// spotlight filmstrip thumbnails get the least.
+/// bandwidth/decode where it shows. Every pane loads the same master playlist
+/// (so all renditions are available); the tier only sets the bitrate cap, which
+/// lets a pane move between renditions live — promoting to the spotlight raises
+/// the cap and ABR climbs in place, no reload.
 enum MultiviewQualityTier {
-  /// Spotlight primary: full source/auto playlist, no bitrate cap.
+  /// Spotlight primary: no bitrate cap (adapt up to the source).
   case source
-  /// A grid tile (up to a quarter of the screen): preview rendition, mid cap.
+  /// A grid tile (up to a quarter of the screen): mid cap.
   case standard
-  /// A tiny spotlight filmstrip thumbnail: preview rendition, low cap.
+  /// A tiny spotlight filmstrip thumbnail: low cap.
   case thumbnail
 
-  /// `nil` peak means "unlimited" (let AVPlayer adapt up to the source).
+  /// `0` means "unlimited" — `AVPlayerItem.preferredPeakBitRate` treats 0 as no
+  /// cap, letting the player adapt up to the source rendition.
   var peakBitRate: Double {
     switch self {
     case .source: return 0
@@ -33,10 +36,6 @@ enum MultiviewQualityTier {
     case .thumbnail: return 800_000
     }
   }
-
-  /// The spotlight primary pulls the full master playlist; smaller tiles use the
-  /// lightweight preview rendition the Home grid already plays.
-  var usesSourcePlaylist: Bool { self == .source }
 }
 
 /// One tile in a multiview grid: a channel bound to its own `AVPlayer`.
@@ -89,7 +88,7 @@ final class MultiviewController {
   private(set) var audiblePaneID: String?
 
   /// Active on-screen arrangement.
-  var layout: MultiviewLayout = .grid
+  private(set) var layout: MultiviewLayout = .grid
   /// In spotlight mode, the pane shown large. `nil` falls back to the first
   /// pane. Always points at a pane that still exists.
   private(set) var primaryPaneID: String?
@@ -113,12 +112,11 @@ final class MultiviewController {
     for pane in panes { load(pane) }
   }
 
-  /// (Re)resolve a single pane's stream URL and start it muted. The spotlight
-  /// primary pulls the full source/auto playlist with no bitrate cap; grid tiles
-  /// use the lightweight preview rendition at a mid cap; tiny spotlight filmstrip
-  /// thumbnails use the same preview rendition at the lowest cap so a 2×2 wall —
-  /// and the spotlight's small tiles — stay smooth and leave headroom for the
-  /// primary.
+  /// (Re)resolve a single pane's stream URL and start it muted. Every pane loads
+  /// the full master playlist so all renditions are available; the per-tile
+  /// bitrate cap (set here and adjustable live in ``refreshQuality``) keeps the
+  /// small tiles light while letting the spotlight primary climb to source
+  /// quality without a reload.
   func load(_ pane: MultiviewPane) {
     pane.isLoading = true
     pane.hasError = false
@@ -127,9 +125,7 @@ final class MultiviewController {
     pane.resolveTask = Task { [weak pane] in
       guard let pane else { return }
       do {
-        let url = tier.usesSourcePlaylist
-          ? try await PlaybackService.hlsURL(for: pane.channel.login)
-          : try await PlaybackService.previewHLSURL(for: pane.channel.login)
+        let url = try await PlaybackService.hlsURL(for: pane.channel.login)
         guard !Task.isCancelled else { return }
         let asset = AVURLAsset(
           url: url,
@@ -137,7 +133,7 @@ final class MultiviewController {
         )
         let item = AVPlayerItem(asset: asset)
         item.preferredForwardBufferDuration = 1.0
-        // 0 = unlimited: let AVPlayer adapt up to the source for the spotlight.
+        // Cap the starting rendition by tier; 0 = unlimited for the spotlight.
         item.preferredPeakBitRate = tier.peakBitRate
         pane.player.replaceCurrentItem(with: item)
         pane.player.isMuted = !pane.isAudible
@@ -191,12 +187,25 @@ final class MultiviewController {
     if audiblePaneID == paneID {
       setAudiblePane(panes.first?.id)
     }
+    // The new primary (and the rest) may now warrant a different tier.
+    refreshQuality()
   }
 
-  /// Promote a pane to the spotlight primary slot.
+  /// Promote a pane to the spotlight primary slot (staying in the current
+  /// layout). Use ``spotlight(_:)`` to also switch into spotlight.
   func makePrimary(_ paneID: String) {
     guard panes.contains(where: { $0.id == paneID }) else { return }
     primaryPaneID = paneID
+    refreshQuality()
+  }
+
+  /// Switch into spotlight with `paneID` as the primary in one step, so the
+  /// quality refresh sees the final layout *and* primary together (setting them
+  /// separately would refresh while still in grid and miss the upgrade).
+  func spotlight(_ paneID: String) {
+    guard panes.contains(where: { $0.id == paneID }) else { return }
+    primaryPaneID = paneID
+    layout = .spotlight
     refreshQuality()
   }
 
@@ -222,13 +231,19 @@ final class MultiviewController {
     for pane in panes { pane.qualityTier = desiredTier(for: pane) }
   }
 
-  /// Re-evaluate quality tiers and reload only the panes whose tier changed, so
-  /// switching layout or primary pane upgrades/downgrades just those streams.
+  /// Re-evaluate quality tiers and apply them. Because every pane already holds
+  /// the full master playlist, a tier change is just a new bitrate cap on the
+  /// live item — AVPlayer's ABR adapts up/down within a few segments with no
+  /// reload or black flash. Only panes that never started (or errored) are
+  /// reloaded.
   private func refreshQuality() {
     for pane in panes {
       let desired = desiredTier(for: pane)
-      if desired != pane.qualityTier {
-        pane.qualityTier = desired
+      guard desired != pane.qualityTier else { continue }
+      pane.qualityTier = desired
+      if pane.player.currentItem != nil, !pane.hasError {
+        pane.player.currentItem?.preferredPeakBitRate = desired.peakBitRate
+      } else {
         load(pane)
       }
     }
