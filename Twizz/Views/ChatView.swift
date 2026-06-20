@@ -432,7 +432,7 @@ struct ChatView: View {
     // card, while the remaining left margin (`margin`) is exactly enough to land
     // the message text back on the same keyline as the surrounding chat lines —
     // the accent bar floats in that margin, left of the text, like Twitch.
-    let cardInset: CGFloat = 6
+    let cardInset: CGFloat = 5
     let margin = max(barWidth + 8, horizontalPadding - cardInset)
 
     content()
@@ -452,14 +452,15 @@ struct ChatView: View {
             startPoint: .leading,
             endPoint: .trailing
           )
-          GeometryReader { geo in
-            Capsule(style: .continuous)
-              .fill(accent)
-              // ~70% of the card height so it grows with the card and stops just
-              // shy of the rounded corners, centered in the left margin.
-              .frame(width: barWidth, height: geo.size.height * 0.7)
-              .position(x: margin / 2, y: geo.size.height / 2)
-          }
+          Capsule(style: .continuous)
+            .fill(accent)
+            // Fill the card height minus a fixed top/bottom inset so the bar
+            // keeps a consistent margin from the card edges at any height (it no
+            // longer shrinks proportionally on tall, multi-line messages).
+            .frame(width: barWidth)
+            .frame(maxHeight: .infinity)
+            .padding(.vertical, 14)
+            .padding(.leading, (margin - barWidth) / 2 + 1)
         }
       }
       .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
