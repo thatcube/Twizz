@@ -261,44 +261,49 @@ struct SignInView: View {
 /// right from the sign-in screen. `accent` tints the pulsing dots to match the
 /// host screen.
 ///
-/// Emotes are pinned by 7TV ID (not looked up by name in the global set, which
-/// only carries a handful of these) and warmed into SDWebImage's disk cache on
-/// appear. A phrase only enters rotation once its emote is confirmed cached, so
-/// the emote slot is never blank.
+/// Emotes are pinned by 7TV ID — specifically the most-used (canonical) variant
+/// of each name, resolved via 7TV's popularity sort — rather than looked up by
+/// name, which can land on an obscure re-upload. They're warmed into SDWebImage's
+/// disk cache on appear, and a phrase only enters rotation once its emote is
+/// confirmed cached, so the emote slot is never blank.
 struct SignInWaitingView: View {
   var accent: Color = Color(red: 0.58, green: 0.41, blue: 0.96)
 
   private struct Line {
     let text: String
-    /// 7TV emote ID. Resolved once (most-popular variant) and pinned so it
-    /// always loads regardless of the global emote set.
+    /// Canonical 7TV emote ID (most-used variant), pinned so it always loads.
     let emote: String
 
     var url: URL? { URL(string: "https://cdn.7tv.app/emote/\(emote)/2x.webp") }
   }
 
   private static let lines: [Line] = [
-    Line(text: "Waiting on you", emote: "01KTR4A3Z08TPFNFA5CRVM9319"),        // peepoHappy
-    Line(text: "Any second now", emote: "01KTFW0YRNDPZ6FATQG0CQZ6A7"),        // monkaS
-    Line(text: "We're so back", emote: "01JTF4D0CN6QHA3A68NNZK3FD7"),         // FeelsAmazingMan
-    Line(text: "Easy clap", emote: "01KTVPGWKSKYVEY7G53DP0BPY5"),            // EZ
-    Line(text: "Hop in already", emote: "01KQXPJTS2RM5TX8K1VWFKETEX"),        // AYAYA
-    Line(text: "Vibing till you're in", emote: "01KTBJSRP2QAY765T51QPGVJ2B"), // catJAM
-    Line(text: "Let's gooo", emote: "01K5CGV5P7C2WZFXFAD38VNF8G"),           // PepePls
-    Line(text: "Is it loading yet", emote: "01KT2RGK5MH64Q75MDWJPC468V"),     // PauseChamp
-    Line(text: "Two more minutes", emote: "01KTVV0RVEWNDAJ2N3VEDMV6K8"),      // Copium
-    Line(text: "Trust the process", emote: "01KT72MTR32MVPWA6VCGRDN7PR"),     // Prayge
-    Line(text: "First!", emote: "01KVG21PGGY1C9WT2G07ENZSCA"),               // KEKW
-    Line(text: "Still here, still hyping", emote: "01KJVJXHDFJXFCJGTN4R1EKJQK"), // peepoClap
-    Line(text: "Big if true", emote: "01KTM1TVMBYHS7Y4G9D3W2H97J"),          // Pepega
-    Line(text: "Patiently malding", emote: "01KTT576FP1C7VKWN1VCCB98ZQ"),     // Madge
-    Line(text: "Buffering good vibes", emote: "01KTCNQ8E5J8FG3QWJPC1VG1BD"),  // widepeepoHappy
-    Line(text: "Nodders while we wait", emote: "01KTVV5R0FK1MB84QQ6ZXM9SJH"), // NODDERS
-    Line(text: "Chat's been patient", emote: "01KV0F3BNGAR3ZMPHN586FDJ6S"),   // Sadge
-    Line(text: "Hold the W", emote: "01KVGFXBX0E9DK1M9YNR0NKT7Z"),           // Pog
-    Line(text: "Clip it when you're in", emote: "01KV02YD3A6XD0MTWZK056MJJC"), // Clap
-    Line(text: "Just staring at the door", emote: "01KV9DYTQS7H565JXS11FYZE2C"), // Stare
-    Line(text: "WAYTOODANK loading", emote: "01KQZMQM5AQK6PG7DFBAGF5V15"),    // WAYTOODANK
+    Line(text: "Waiting on you", emote: "01F6RC8C1G0003SBEQ3QZTEE99"),        // peepoHappy
+    Line(text: "Any second now", emote: "01F78CHJ2G0005TDSTZFBDGMK4"),        // monkaS
+    Line(text: "We're so back", emote: "01FAPBB2400009222ZMH0DD1HS"),         // FeelsAmazingMan
+    Line(text: "No rush, chat", emote: "01F7YR10C00004BT9YH569GV48"),         // FeelsGoodMan
+    Line(text: "Easy clap", emote: "01F9FS6EEG0006XXD6DX0K9Y04"),            // EZ
+    Line(text: "Hop in already", emote: "01F8CTQCZ800099FQVFJ9XQRM1"),        // AYAYA
+    Line(text: "Vibing till you're in", emote: "01F6MQ33FG000FFJ97ZB8MWV52"), // catJAM
+    Line(text: "Let's gooo", emote: "01FAJSRS8000093YGWG35GMV60"),           // PepePls
+    Line(text: "Is it loading yet", emote: "01F6N2GFVR000F76KNAAVCSDGX"),     // PauseChamp
+    Line(text: "Two more minutes", emote: "01F6ME7ADR0000WDA7ERT9H30R"),      // Copium
+    Line(text: "Trust the process", emote: "01F6NACCD80006SZ7ZW5FMWKWK"),     // Prayge
+    Line(text: "First!", emote: "01F61B1440000991F7SWQNMVX7"),               // KEKW
+    Line(text: "Still here, still hyping", emote: "01F6NET6G00009JYTB75QDKV1S"), // peepoClap
+    Line(text: "Big if true", emote: "01EZTD6KQ800012PTN006Q50PV"),          // Pepega
+    Line(text: "Patiently malding", emote: "01F6ASPNM00009TPCEMWQTT4XX"),     // Madge
+    Line(text: "Buffering good vibes", emote: "01GF1Y2Q5G0000BGNJSP34TQRD"),  // widepeepoHappy
+    Line(text: "Nodders while we wait", emote: "01F6MDFCSR0000WDA7ERT623YT"), // NODDERS
+    Line(text: "Chat's been patient", emote: "01EZPG1FN80001SNAW00ADK2DY"),   // Sadge
+    Line(text: "Hold the W", emote: "01EZTCN91800012PTN006Q50PR"),           // Pog
+    Line(text: "Clip it when you're in", emote: "01F6NE9AER000CKKT9BSDYGT0J"), // Clap
+    Line(text: "We're aware, hop in", emote: "01FFWH9WV80000JT8GHDKHJNZC"),   // Aware
+    Line(text: "Bedge, it's past your bedtime", emote: "01F6MXJD8R000F76KNAAV5HDGD"), // Bedge
+    Line(text: "Just here chatting", emote: "01FAK9C8MR0004HKF2ZK1YPQ5A"),    // Chatting
+    Line(text: "Hmm, any moment now", emote: "01F6MA6Y100002B6P5MWZ5D916"),   // Hmm
+    Line(text: "ratJAM till you load", emote: "01F6QV6G8R0000TEKRM6BFG0Z3"),  // ratJAM
+    Line(text: "monkaW the suspense", emote: "01F6NPHCN0000BEKN8ZXWQNSDC"),   // monkaW
   ]
 
   @State private var deck: [Line] = SignInWaitingView.lines.shuffled()
