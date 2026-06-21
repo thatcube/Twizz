@@ -335,6 +335,13 @@ struct RichChatLineView: View {
     private static var segmentCache: [SegmentCacheKey: [ChatLineSegment]] = [:]
     private static var segmentCacheOrder: [SegmentCacheKey] = []
     private static let segmentCacheLimit = 3000
+
+    /// Drops the process-global segment cache. Called on channel change and on
+    /// memory pressure (see `ChatService.clearLineCaches`).
+    static func clearSegmentCache() {
+        segmentCache.removeAll(keepingCapacity: false)
+        segmentCacheOrder.removeAll(keepingCapacity: false)
+    }
 }
 
 private struct EmoteView: View {

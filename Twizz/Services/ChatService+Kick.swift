@@ -109,7 +109,7 @@ extension ChatService {
       @unknown default: continue
       }
 
-      handleKickFrame(text, chatroomID: chatroomID)
+      await handleKickFrame(text, chatroomID: chatroomID)
 
       // A reconnect (or teardown) replaces the socket; stop reading the old one
       // so the next loop iteration receives on the fresh task instead.
@@ -117,7 +117,7 @@ extension ChatService {
     }
   }
 
-  private func handleKickFrame(_ text: String, chatroomID: Int) {
+  private func handleKickFrame(_ text: String, chatroomID: Int) async {
     guard let data = text.data(using: .utf8),
       let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let event = envelope["event"] as? String
@@ -146,7 +146,7 @@ extension ChatService {
         kickStatusMessage = kickConnectedStatus()
       }
       let fresh = filterAndRememberKickMessages([entry])
-      if !fresh.isEmpty { enqueue(fresh) }
+      if !fresh.isEmpty { await enqueueTokenized(fresh) }
     default:
       break
     }
