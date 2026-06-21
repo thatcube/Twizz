@@ -24,8 +24,8 @@ final class YouTubeLiveSnapshotService {
     string: "https://raw.githubusercontent.com/thatcube/Twizz/data/youtube-live.json")!
   private static let bundledResource = "YouTubeLive"
   private static let cacheFileName = "YouTubeLive.cache.json"
-  private static let etagDefaultsKey = "youTubeLiveETag"
-  private static let lastFetchDefaultsKey = "youTubeLiveLastFetch"
+  private static let etagDefaultsKey = PersistenceKey.youTubeLiveETag
+  private static let lastFetchDefaultsKey = PersistenceKey.youTubeLiveLastFetch
   /// Live status is time-sensitive, so refresh far more often than the slow
   /// alias/affinity tables — but still throttle to protect the CDN and battery.
   private static let minFetchInterval: TimeInterval = 120

@@ -24,8 +24,8 @@ final class TwitchYouTubeAliasService {
     string: "https://raw.githubusercontent.com/thatcube/Twizz/data/twitch-youtube-aliases.json")!
   private static let bundledResource = "TwitchYouTubeAliases"
   private static let cacheFileName = "TwitchYouTubeAliases.cache.json"
-  private static let etagDefaultsKey = "twitchYouTubeAliasETag"
-  private static let lastFetchDefaultsKey = "twitchYouTubeAliasLastFetch"
+  private static let etagDefaultsKey = PersistenceKey.twitchYouTubeAliasETag
+  private static let lastFetchDefaultsKey = PersistenceKey.twitchYouTubeAliasLastFetch
   /// Don't re-check the remote more than once a day; the mapping changes slowly.
   private static let minFetchInterval: TimeInterval = 24 * 3600
 

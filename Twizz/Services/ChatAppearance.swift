@@ -203,7 +203,7 @@ enum ChatFontStyle: String, CaseIterable, Identifiable {
 /// numeric `@AppStorage` keys, preserving each user's exact prior look. Brand-new
 /// installs skip this and fall through to the numeric defaults (the Normal preset).
 enum ChatAppearanceMigration {
-  private static let flagKey = "chatAppearanceMigratedV1"
+  private static let flagKey = PersistenceKey.chatAppearanceMigratedV1
 
   static func runIfNeeded(_ defaults: UserDefaults = .standard) {
     guard !defaults.bool(forKey: flagKey) else { return }
@@ -211,41 +211,41 @@ enum ChatAppearanceMigration {
 
     // Only migrate when the new keys are absent, so we never clobber values the
     // user has already set through the new UI.
-    if defaults.object(forKey: "chatTextSizeValue") == nil,
-      let raw = defaults.string(forKey: "chatTextSize") {
+    if defaults.object(forKey: PersistenceKey.chatTextSizeValue) == nil,
+      let raw = defaults.string(forKey: PersistenceKey.chatTextSizeLegacy) {
       let value: CGFloat
       switch raw {
       case "small": value = 22
       case "large": value = 28
       default: value = 26
       }
-      defaults.set(Double(value), forKey: "chatTextSizeValue")
+      defaults.set(Double(value), forKey: PersistenceKey.chatTextSizeValue)
     }
 
-    if defaults.object(forKey: "chatLineHeightValue") == nil,
-      let raw = defaults.string(forKey: "chatLineHeight") {
+    if defaults.object(forKey: PersistenceKey.chatLineHeightValue) == nil,
+      let raw = defaults.string(forKey: PersistenceKey.chatLineHeightLegacy) {
       let value: CGFloat
       switch raw {
       case "tight": value = -1
       case "relaxed": value = 6
       default: value = 2
       }
-      defaults.set(Double(value), forKey: "chatLineHeightValue")
+      defaults.set(Double(value), forKey: PersistenceKey.chatLineHeightValue)
     }
 
-    if defaults.object(forKey: "chatMessageSpacingValue") == nil,
-      let raw = defaults.string(forKey: "chatLineSpacing") {
+    if defaults.object(forKey: PersistenceKey.chatMessageSpacingValue) == nil,
+      let raw = defaults.string(forKey: PersistenceKey.chatLineSpacingLegacy) {
       let value: CGFloat
       switch raw {
       case "tight": value = 6
       case "relaxed": value = 14
       default: value = 10
       }
-      defaults.set(Double(value), forKey: "chatMessageSpacingValue")
+      defaults.set(Double(value), forKey: PersistenceKey.chatMessageSpacingValue)
     }
 
-    if defaults.object(forKey: "chatWidthValue") == nil,
-      let raw = defaults.string(forKey: "chatWidthMode") {
+    if defaults.object(forKey: PersistenceKey.chatWidthValue) == nil,
+      let raw = defaults.string(forKey: PersistenceKey.chatWidthModeLegacy) {
       let value: CGFloat
       switch raw {
       case "narrow": value = 380
@@ -253,7 +253,7 @@ enum ChatAppearanceMigration {
       case "extraWide": value = 680
       default: value = 460
       }
-      defaults.set(Double(value), forKey: "chatWidthValue")
+      defaults.set(Double(value), forKey: PersistenceKey.chatWidthValue)
     }
   }
 }

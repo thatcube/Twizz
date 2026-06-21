@@ -23,8 +23,8 @@ final class KickAliasService {
     string: "https://raw.githubusercontent.com/thatcube/Twizz/data/kick-aliases.json")!
   private static let bundledResource = "KickAliases"
   private static let cacheFileName = "KickAliases.cache.json"
-  private static let etagDefaultsKey = "kickAliasETag"
-  private static let lastFetchDefaultsKey = "kickAliasLastFetch"
+  private static let etagDefaultsKey = PersistenceKey.kickAliasETag
+  private static let lastFetchDefaultsKey = PersistenceKey.kickAliasLastFetch
   /// Don't re-check the remote more than once a day; the data changes monthly.
   private static let minFetchInterval: TimeInterval = 24 * 3600
 

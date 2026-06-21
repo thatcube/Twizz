@@ -6,7 +6,7 @@ import Observation
 /// touching the `@MainActor`-isolated service.
 enum RecommendationPreferences {
   /// Whether personalized "Recommended for you" is on. Defaults to enabled.
-  static let enabledDefaultsKey = "personalizedRecommendationsEnabled"
+  static let enabledDefaultsKey = PersistenceKey.personalizedRecommendationsEnabled
 }
 
 /// One channel the viewer has watched, used purely to personalize recommendations.
@@ -31,7 +31,7 @@ struct WatchHistoryEntry: Codable, Identifiable, Sendable {
 @MainActor
 @Observable
 final class WatchHistoryService {
-  private static let storageKey = "watchHistoryEntriesV1"
+  private static let storageKey = PersistenceKey.watchHistoryEntries
   private static let maxEntries = 120
   /// Watches this old contribute half the weight of a fresh watch.
   private static let recencyHalfLife: TimeInterval = 14 * 24 * 3600
@@ -123,10 +123,9 @@ final class WatchHistoryService {
   // MARK: - Persistence (local UserDefaults only)
 
   private func load() {
-    guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
-          let decoded = try? JSONDecoder().decode([WatchHistoryEntry].self, from: data)
-    else { return }
-    entries = decoded
+    if let decoded: [WatchHistoryEntry] = Defaults.load(forKey: Self.storageKey) {
+      entries = decoded
+    }
   }
 
   /// Serial queue so JSON encoding and the UserDefaults write happen off the
@@ -137,8 +136,7 @@ final class WatchHistoryService {
   private func persist() {
     let snapshot = entries
     Self.persistQueue.async {
-      guard let data = try? JSONEncoder().encode(snapshot) else { return }
-      UserDefaults.standard.set(data, forKey: Self.storageKey)
+      Defaults.save(snapshot, forKey: Self.storageKey)
     }
   }
 }

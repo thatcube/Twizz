@@ -39,8 +39,8 @@ final class StreamerAffinityService {
     string: "https://raw.githubusercontent.com/thatcube/Twizz/data/streamer-affinity.json")!
   private static let bundledResource = "StreamerAffinity"
   private static let cacheFileName = "StreamerAffinity.cache.json"
-  private static let etagDefaultsKey = "streamerAffinityETag"
-  private static let lastFetchDefaultsKey = "streamerAffinityLastFetch"
+  private static let etagDefaultsKey = PersistenceKey.streamerAffinityETag
+  private static let lastFetchDefaultsKey = PersistenceKey.streamerAffinityLastFetch
   /// Don't re-check the remote more than once a day; the data changes monthly.
   private static let minFetchInterval: TimeInterval = 24 * 3600
 

@@ -11,9 +11,9 @@ import Observation
 /// devices.
 enum GoLiveNotificationPreferences {
   /// Master on/off for go-live toasts. Defaults to enabled.
-  static let enabledKey = "goLiveNotificationsEnabled"
+  static let enabledKey = PersistenceKey.goLiveNotificationsEnabled
   /// Lowercased logins the viewer has muted (opt-out model). Stored as `[String]`.
-  static let mutedLoginsKey = "goLiveMutedChannelsV1"
+  static let mutedLoginsKey = PersistenceKey.goLiveMutedChannels
 }
 
 /// On-device store for which followed channels may surface a go-live toast.

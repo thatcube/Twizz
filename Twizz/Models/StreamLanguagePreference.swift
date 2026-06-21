@@ -9,7 +9,7 @@ import Foundation
 /// `broadcastSettings.language` in exactly this uppercase token form, so values can
 /// be compared directly and safely inlined into GQL `broadcasterLanguages` options.
 enum StreamLanguagePreference {
-  static let storageKey = "streamLanguageFilter"
+  static let storageKey = PersistenceKey.streamLanguageFilter
   static let allValue = "all"
 
   /// Curated, ordered list for the Settings picker: (stored value, display name).

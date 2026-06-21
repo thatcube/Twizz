@@ -75,7 +75,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
 @MainActor
 @Observable
 final class ThemeManager {
-  private let storageKey = "appTheme"
+  private let storageKey = PersistenceKey.appTheme
 
   var theme: AppTheme {
     didSet { UserDefaults.standard.set(theme.rawValue, forKey: storageKey) }

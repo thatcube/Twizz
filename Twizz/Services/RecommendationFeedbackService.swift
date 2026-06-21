@@ -27,7 +27,7 @@ struct RecommendationFeedback: Sendable {
 @MainActor
 @Observable
 final class RecommendationFeedbackService {
-  private static let storageKey = "recommendationFeedbackV1"
+  private static let storageKey = PersistenceKey.recommendationFeedback
   /// Keep the muted-token map bounded so it can't grow without limit; the
   /// lowest-weight tokens are dropped first when over the cap.
   private static let maxMutedTokens = 240
@@ -118,9 +118,7 @@ final class RecommendationFeedbackService {
   }
 
   private func load() {
-    guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
-          let decoded = try? JSONDecoder().decode(Stored.self, from: data)
-    else { return }
+    guard let decoded: Stored = Defaults.load(forKey: Self.storageKey) else { return }
     blockedLogins = Set(decoded.blockedLogins)
     mutedTitleTokens = decoded.mutedTitleTokens
   }
@@ -128,7 +126,6 @@ final class RecommendationFeedbackService {
   private func persist() {
     let stored = Stored(
       blockedLogins: Array(blockedLogins), mutedTitleTokens: mutedTitleTokens)
-    guard let data = try? JSONEncoder().encode(stored) else { return }
-    UserDefaults.standard.set(data, forKey: Self.storageKey)
+    Defaults.save(stored, forKey: Self.storageKey)
   }
 }

@@ -53,7 +53,7 @@ enum StreamCardSize: String, CaseIterable, Identifiable {
   }
 
   /// `UserDefaults`/`@AppStorage` key shared by every surface.
-  static let storageKey = "streamCardSize"
+  static let storageKey = PersistenceKey.streamCardSize
 
   /// Default used when no preference has been saved.
   static let fallback: StreamCardSize = .large

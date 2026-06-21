@@ -33,10 +33,10 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     static let scheme = "twizz-ll"
 
     /// `@AppStorage`/`UserDefaults` key for the experimental toggle.
-    static let settingsKey = "lowLatencyProxyEnabled"
+    static let settingsKey = PersistenceKey.lowLatencyProxyEnabled
 
     /// `@AppStorage`/`UserDefaults` key for the Stream Rewind (DVR) toggle.
-    static let rewindSettingsKey = "streamRewindEnabled"
+    static let rewindSettingsKey = PersistenceKey.streamRewindEnabled
 
     private static let prefetchTag = "#EXT-X-TWITCH-PREFETCH:"
     private static let streamInfTag = "#EXT-X-STREAM-INF"

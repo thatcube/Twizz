@@ -30,9 +30,9 @@ final class YouTubeAuthSession {
   private var refreshInFlight: Task<String, Error>?
 
   enum StorageKey {
-    static let accessToken = "youtube.auth.accessToken"
-    static let refreshToken = "youtube.auth.refreshToken"
-    static let expiry = "youtube.auth.expiry"
+    static let accessToken = PersistenceKey.youTubeAccessToken
+    static let refreshToken = PersistenceKey.youTubeRefreshToken
+    static let expiry = PersistenceKey.youTubeTokenExpiry
   }
 
   /// Whether the OAuth client credentials are present (so the UI can hide the

@@ -89,13 +89,13 @@ final class TwitchAuthSession {
     }
 
     enum StorageKey {
-        static let accessToken = TopShelfCredentialStore.accessTokenKey
-        static let refreshToken = TopShelfCredentialStore.refreshTokenKey
-        static let userID = TopShelfCredentialStore.userIDKey
-        static let clientID = TopShelfCredentialStore.clientIDKey
-        static let userLogin = "twitch.auth.userLogin"
-        static let userDisplayName = "twitch.auth.userDisplayName"
-        static let profileImageURL = "twitch.auth.profileImageURL"
+        static let accessToken = PersistenceKey.twitchAccessToken
+        static let refreshToken = PersistenceKey.twitchRefreshToken
+        static let userID = PersistenceKey.twitchUserID
+        static let clientID = PersistenceKey.twitchClientID
+        static let userLogin = PersistenceKey.twitchUserLogin
+        static let userDisplayName = PersistenceKey.twitchUserDisplayName
+        static let profileImageURL = PersistenceKey.twitchProfileImageURL
     }
 
     /// One-time copy of any auth previously stored in `UserDefaults.standard`
@@ -104,15 +104,15 @@ final class TwitchAuthSession {
     /// this migration, already-signed-in users would appear signed out after the
     /// switch. The legacy values are left in place harmlessly.
     private static func migrateLegacyAuthIfNeeded(into suite: UserDefaults) {
-        guard suite.string(forKey: TopShelfCredentialStore.accessTokenKey) == nil else { return }
+        guard suite.string(forKey: PersistenceKey.twitchAccessToken) == nil else { return }
         let legacy = UserDefaults.standard
         let keys = [
-            TopShelfCredentialStore.accessTokenKey,
-            TopShelfCredentialStore.refreshTokenKey,
-            TopShelfCredentialStore.userIDKey,
-            "twitch.auth.userLogin",
-            "twitch.auth.userDisplayName",
-            "twitch.auth.profileImageURL"
+            PersistenceKey.twitchAccessToken,
+            PersistenceKey.twitchRefreshToken,
+            PersistenceKey.twitchUserID,
+            PersistenceKey.twitchUserLogin,
+            PersistenceKey.twitchUserDisplayName,
+            PersistenceKey.twitchProfileImageURL
         ]
         for key in keys {
             if let value = legacy.string(forKey: key) {

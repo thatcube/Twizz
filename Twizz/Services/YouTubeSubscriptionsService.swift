@@ -28,7 +28,7 @@ final class YouTubeSubscriptionsService {
   private static let cacheFileName = "YouTubeSubscriptions.cache.json"
   /// Don't refetch the (slowly-changing) subscription list more than this often.
   private static let minFetchInterval: TimeInterval = 6 * 60 * 60
-  private static let lastFetchDefaultsKey = "youTubeSubscriptionsLastFetch"
+  private static let lastFetchDefaultsKey = PersistenceKey.youTubeSubscriptionsLastFetch
   private static let pageSize = 50
 
   init() {
