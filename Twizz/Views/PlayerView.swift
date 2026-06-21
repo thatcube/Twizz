@@ -1250,6 +1250,7 @@ struct PlayerView: View {
       altYouTubeMasterURL = nil
       altSourceStatus = nil
       youtubeSourceAvailable = false
+      youtubeViewerCount = nil
       // Auto-default vs. manual intent is per-channel: clear the manual flag so
       // the "prefer YouTube" auto-default can apply once on the new channel.
       didManuallySelectSource = false

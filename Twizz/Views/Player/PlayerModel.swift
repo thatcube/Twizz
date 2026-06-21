@@ -128,6 +128,11 @@ final class PlayerModel {
   /// Whether the active channel actually has a resolvable YouTube simulcast.
   /// Probed on channel load; gates the Stream Source picker in the quality menu.
   var youtubeSourceAvailable = false
+  /// Concurrent YouTube ("watching now") viewer count for the active channel's
+  /// live simulcast, or nil when it isn't live on YouTube. Captured for free from
+  /// the same watch page the alt-source resolver already fetches (no extra
+  /// request, no metered YouTube Data API call). Reset on channel change.
+  var youtubeViewerCount: Int?
   /// True once the viewer has made a deliberate Stream Source choice for the
   /// current channel. Suppresses the "prefer YouTube" auto-default so a manual
   /// switch (in either direction) is never yanked back. Reset on channel change.
@@ -325,6 +330,10 @@ extension PlayerView {
   var youtubeSourceAvailable: Bool {
     get { model.youtubeSourceAvailable }
     nonmutating set { model.youtubeSourceAvailable = newValue }
+  }
+  var youtubeViewerCount: Int? {
+    get { model.youtubeViewerCount }
+    nonmutating set { model.youtubeViewerCount = newValue }
   }
   var didManuallySelectSource: Bool {
     get { model.didManuallySelectSource }

@@ -72,9 +72,10 @@ extension PlayerView {
     }
     youtubeAutoResolvedTarget = target
 
-    let master = await AltSourceService.youtubeHLSMaster(forTarget: target)
+    let resolved = await AltSourceService.youtubeLive(forTarget: target)
     guard login == activeChannel, isUsingAltSource else { return }
-    guard let master else {
+    youtubeViewerCount = resolved.concurrentViewers
+    guard let master = resolved.hlsMaster else {
       altSourceStatus = "YouTube simulcast not live / not found."
       return
     }
@@ -140,15 +141,16 @@ extension PlayerView {
     }
     guard login == activeChannel, !target.isEmpty else { return }
 
-    let master = await AltSourceService.youtubeHLSMaster(forTarget: target)
+    let resolved = await AltSourceService.youtubeLive(forTarget: target)
     guard login == activeChannel else { return }
-    youtubeSourceAvailable = (master != nil)
+    youtubeSourceAvailable = (resolved.hlsMaster != nil)
+    youtubeViewerCount = resolved.concurrentViewers
 
     // With a confirmed simulcast in hand, honor the "prefer YouTube" default by
     // promoting it to the active source. Done here (rather than in `load()`) so
     // it fires the moment availability resolves, even if the Twitch pipeline
     // came up first — yielding a single clean switch instead of a flap.
-    if master != nil {
+    if resolved.hlsMaster != nil {
       await autoSelectYouTubeSourceIfPreferred()
     }
   }
