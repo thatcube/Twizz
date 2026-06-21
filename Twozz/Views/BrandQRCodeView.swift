@@ -6,14 +6,11 @@ import UIKit
 /// theme-aware card. Shared by the Twitch and YouTube sign-in screens so both
 /// pages render an identical, on-brand code.
 ///
-/// The outer card follows the active `ThemePalette` (white in Light, dark in
-/// Dark/OLED) so it sits naturally on every background. The QR itself stays on
-/// an opaque white tile that supplies the light quiet zone scanners need —
-/// brand-color modules on white — so it never inverts to a hard-to-scan
-/// light-on-dark code regardless of theme.
-///
-/// The center logo occludes part of the code, so the QR is generated at the
-/// highest error-correction level ("H", ~30% recoverable) to stay scannable.
+/// Both the card and the QR's own background follow the active `ThemePalette`
+/// (white in Light, dark in Dark/OLED), so the code blends into the page
+/// instead of sitting on a hardcoded white tile. The brand-color modules stay
+/// fully saturated against that background, and the code keeps "H" error
+/// correction so it remains scannable.
 struct BrandQRCodeView: View {
   /// The URL the QR encodes (the activation link to open on a phone).
   let payload: String
@@ -22,40 +19,39 @@ struct BrandQRCodeView: View {
   /// Color applied to the dark QR modules, matching the inset logo's brand
   /// color (e.g. Twitch purple, YouTube red). Defaults to black.
   var moduleColor: Color = .black
-  /// Side length of the QR image inside the white card.
+  /// Side length of the QR image inside the card.
   var size: CGFloat = 500
 
   @Environment(\.themePalette) private var palette
 
+  /// Theme surface painted behind the code (and as the QR's own background),
+  /// so the card respects the active theme instead of always being white.
+  private var surface: Color { palette.cardOpaqueSurface }
+
   var body: some View {
-    qrTile
-      .padding(24)
-      .background(palette.cardOpaqueSurface, in: RoundedRectangle(cornerRadius: 52))
+    qrContent
+      .frame(width: size, height: size)
+      .padding(40)
+      .background(surface, in: RoundedRectangle(cornerRadius: 44))
       .overlay {
-        RoundedRectangle(cornerRadius: 52)
+        RoundedRectangle(cornerRadius: 44)
           .strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
       }
   }
 
-  /// The scannable code on its required white quiet-zone tile. White here is
-  /// intentional (the QR background scanners expect), not a themed surface.
-  private var qrTile: some View {
-    Group {
-      if let image = Self.makeQRCode(from: payload, moduleColor: moduleColor) {
-        Image(uiImage: image)
-          .interpolation(.none)
-          .resizable()
-          .scaledToFit()
-          .overlay { logoBadge }
-      } else {
-        RoundedRectangle(cornerRadius: 16)
-          .fill(Color.black.opacity(0.05))
-          .overlay(ProgressView())
-      }
+  @ViewBuilder
+  private var qrContent: some View {
+    if let image = Self.makeQRCode(from: payload, moduleColor: moduleColor, backgroundColor: surface) {
+      Image(uiImage: image)
+        .interpolation(.none)
+        .resizable()
+        .scaledToFit()
+        .overlay { logoBadge }
+    } else {
+      RoundedRectangle(cornerRadius: 16)
+        .fill(Color.primary.opacity(0.05))
+        .overlay(ProgressView())
     }
-    .frame(width: size, height: size)
-    .padding(32)
-    .background(Color.white, in: RoundedRectangle(cornerRadius: 36))
   }
 
   private var logoBadge: some View {
@@ -64,14 +60,18 @@ struct BrandQRCodeView: View {
       .aspectRatio(contentMode: .fit)
       .frame(width: size * 0.2, height: size * 0.2)
       .padding(size * 0.03)
-      .background(Color.white)
+      .background(surface)
   }
 
   // MARK: - QR generation
 
   private static let ciContext = CIContext()
 
-  static func makeQRCode(from string: String, moduleColor: Color = .black) -> UIImage? {
+  static func makeQRCode(
+    from string: String,
+    moduleColor: Color = .black,
+    backgroundColor: Color = .white
+  ) -> UIImage? {
     let filter = CIFilter.qrCodeGenerator()
     filter.message = Data(string.utf8)
     filter.correctionLevel = "H"
@@ -81,7 +81,7 @@ struct BrandQRCodeView: View {
     let falseColor = CIFilter.falseColor()
     falseColor.inputImage = output
     falseColor.color0 = CIColor(color: UIColor(moduleColor))
-    falseColor.color1 = CIColor(color: .white)
+    falseColor.color1 = CIColor(color: UIColor(backgroundColor))
 
     guard let tinted = falseColor.outputImage else { return nil }
     let scaled = tinted.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
