@@ -13,7 +13,12 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 
 # The first entry from `git worktree list` is always the primary worktree.
-main_worktree="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+# NB: do not let awk `exit` early here — closing the pipe makes `git` take a
+# SIGPIPE, which under `set -o pipefail` fails the command and (with `set -e`)
+# kills this script silently before any secret is copied. That only bites when
+# the worktree list is large (many worktrees), so print just the first match
+# without exiting and let git finish writing.
+main_worktree="$(git worktree list --porcelain | awk '/^worktree / && !seen { print $2; seen = 1 }')"
 
 # Files that are gitignored but wanted in every worktree: maintainer-local agent
 # instructions, plus EVERY local build-secrets xcconfig. The secrets list is

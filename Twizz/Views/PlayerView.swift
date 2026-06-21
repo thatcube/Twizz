@@ -60,41 +60,41 @@ struct PlayerView: View {
   @Environment(\.themePalette) var palette
   @Environment(\.glassDisabled) var glassDisabled
   @Environment(\.accessibilityReduceMotion) var reduceMotion
-  @AppStorage("preferredQuality") var preferredQuality = "Auto"
+  @AppStorage(PersistenceKey.preferredQuality) var preferredQuality = "Auto"
   /// Latency-vs-quality profile for the adaptive ("Auto") stream, surfaced as the
   /// two Auto rows in the quality picker. Stored as the enum raw value; read it
   /// through `livePlaybackProfile`.
-  @AppStorage("livePlaybackProfile") var livePlaybackProfileRaw = LivePlaybackProfile.default
+  @AppStorage(PersistenceKey.livePlaybackProfile) var livePlaybackProfileRaw = LivePlaybackProfile.default
     .rawValue
-  @AppStorage("chatTextSizeValue") var chatTextSizeValue = Double(
+  @AppStorage(PersistenceKey.chatTextSizeValue) var chatTextSizeValue = Double(
     ChatAppearance.defaultTextSize)
-  @AppStorage("chatEmoteAuto") var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
-  @AppStorage("chatEmoteSizeValue") var chatEmoteSizeValue = Double(
+  @AppStorage(PersistenceKey.chatEmoteAuto) var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
+  @AppStorage(PersistenceKey.chatEmoteSizeValue) var chatEmoteSizeValue = Double(
     ChatAppearance.defaultEmoteSize)
-  @AppStorage("chatLineHeightValue") var chatLineHeightValue = Double(
+  @AppStorage(PersistenceKey.chatLineHeightValue) var chatLineHeightValue = Double(
     ChatAppearance.defaultLineHeight)
-  @AppStorage("chatLetterSpacingValue") var chatLetterSpacingValue = Double(
+  @AppStorage(PersistenceKey.chatLetterSpacingValue) var chatLetterSpacingValue = Double(
     ChatAppearance.defaultLetterSpacing)
-  @AppStorage("chatMessageSpacingValue") var chatMessageSpacingValue = Double(
+  @AppStorage(PersistenceKey.chatMessageSpacingValue) var chatMessageSpacingValue = Double(
     ChatAppearance.defaultMessageSpacing)
-  @AppStorage("chatWidthValue") var chatWidthValue = Double(ChatAppearance.defaultWidth)
-  @AppStorage("chatAnimatedEmotes") var chatAnimatedEmotes = ChatAppearance
+  @AppStorage(PersistenceKey.chatWidthValue) var chatWidthValue = Double(ChatAppearance.defaultWidth)
+  @AppStorage(PersistenceKey.chatAnimatedEmotes) var chatAnimatedEmotes = ChatAppearance
     .defaultAnimatedEmotes
-  @AppStorage("chatFontStyle") var chatFontStyleRaw = ChatAppearance.defaultFontStyle
+  @AppStorage(PersistenceKey.chatFontStyle) var chatFontStyleRaw = ChatAppearance.defaultFontStyle
     .rawValue
-  @AppStorage("chatShowBadges") var chatShowBadges = ChatAppearance.defaultShowBadges
-  @AppStorage("chatShowPlatformBadges") var chatShowPlatformBadges = ChatAppearance
+  @AppStorage(PersistenceKey.chatShowBadges) var chatShowBadges = ChatAppearance.defaultShowBadges
+  @AppStorage(PersistenceKey.chatShowPlatformBadges) var chatShowPlatformBadges = ChatAppearance
     .defaultShowPlatformBadges
   /// Global on/off for highlighting chat lines that mention the signed-in user
   /// (and any user keywords below). On by default.
-  @AppStorage("chatHighlightMentionsEnabled") var chatHighlightMentionsEnabled = true
+  @AppStorage(PersistenceKey.chatHighlightMentionsEnabled) var chatHighlightMentionsEnabled = true
   /// User-defined extra highlight keywords (other handles, "giveaway", a game
   /// name…), stored as a single comma/newline-separated string and parsed into a
   /// normalized list by `chatHighlightKeywordList`.
-  @AppStorage("chatHighlightKeywords") var chatHighlightKeywords = ""
-  @AppStorage("chatLayoutMode") var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
-  @AppStorage("chatSyncToStream") var chatSyncToStream = false
-  @AppStorage("experimentalYouTubeMergeEnabled") var experimentalYouTubeMergeEnabled = false
+  @AppStorage(PersistenceKey.chatHighlightKeywords) var chatHighlightKeywords = ""
+  @AppStorage(PersistenceKey.chatLayoutMode) var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
+  @AppStorage(PersistenceKey.chatSyncToStream) var chatSyncToStream = false
+  @AppStorage(PersistenceKey.experimentalYouTubeMergeEnabled) var experimentalYouTubeMergeEnabled = false
   /// Optional manual override for the YouTube merge target. Kept per-channel and
   /// non-persistent so a value entered for one streamer never leaks into another
   /// (previously this was global `@AppStorage`, which made every channel merge
@@ -102,7 +102,7 @@ struct PlayerView: View {
   @State var experimentalYouTubeMergeChannelOrURL = ""
   /// Best-effort YouTube target derived from the active Twitch channel (its
   /// social links, then description, then a name-based guess). (State on PlayerModel.)
-  @AppStorage("experimentalKickMergeEnabled") var experimentalKickMergeEnabled = false
+  @AppStorage(PersistenceKey.experimentalKickMergeEnabled) var experimentalKickMergeEnabled = false
   /// Optional manual override for the Kick merge target. Per-channel and
   /// non-persistent for the same reason as the YouTube override, so a handle
   /// entered for one streamer never leaks into another.
@@ -111,40 +111,40 @@ struct PlayerView: View {
   /// links, then description, then a name-based guess). (State on PlayerModel.)
   @AppStorage(LowLatencyHLSProxy.settingsKey) var lowLatencyProxyEnabled = true
   @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) var streamRewindEnabled = true
-  @AppStorage("showLatencyDiagnostics") var showLatencyDiagnostics = false
+  @AppStorage(PersistenceKey.showLatencyDiagnostics) var showLatencyDiagnostics = false
   /// On-device live captions toggle (beta). See `captionController`.
-  @AppStorage("captionsEnabled") var captionsEnabled = false
+  @AppStorage(PersistenceKey.captionsEnabled) var captionsEnabled = false
   /// Caption appearance + timing controls (the Captions settings sub-page).
   /// Font multiplier on the base caption size (0.7…1.6).
-  @AppStorage("captionsFontScale") var captionsFontScale = 1.0
+  @AppStorage(PersistenceKey.captionsFontScale) var captionsFontScale = 1.0
   /// Vertical placement, 0 = bottom of safe area, 1 = top.
-  @AppStorage("captionsVerticalPosition") var captionsVerticalPosition = 0.0
+  @AppStorage(PersistenceKey.captionsVerticalPosition) var captionsVerticalPosition = 0.0
   /// User timing fine-tune in seconds (+ = captions appear earlier/faster).
-  @AppStorage("captionsTimingOffset") var captionsTimingOffset = 0.0
+  @AppStorage(PersistenceKey.captionsTimingOffset) var captionsTimingOffset = 0.0
   /// Slab background style (`CaptionBackgroundStyle` raw value).
-  @AppStorage("captionsBackgroundStyle") var captionsBackgroundStyleRaw = CaptionBackgroundStyle.blur.rawValue
+  @AppStorage(PersistenceKey.captionsBackgroundStyle) var captionsBackgroundStyleRaw = CaptionBackgroundStyle.blur.rawValue
   /// Draw a dark outline around caption glyphs for legibility.
-  @AppStorage("captionsOutline") var captionsOutline = false
+  @AppStorage(PersistenceKey.captionsOutline) var captionsOutline = false
   /// Caption text color (`CaptionTextColor` raw value).
-  @AppStorage("captionsTextColor") var captionsTextColorRaw = CaptionTextColor.white.rawValue
+  @AppStorage(PersistenceKey.captionsTextColor) var captionsTextColorRaw = CaptionTextColor.white.rawValue
   /// Caption text opacity, 0.3…1.0.
-  @AppStorage("captionsTextOpacity") var captionsTextOpacity = 1.0
+  @AppStorage(PersistenceKey.captionsTextOpacity) var captionsTextOpacity = 1.0
   /// Live viewer count badge in the top-left HUD. On by default — a glanceable,
   /// non-diagnostic stat most viewers want while watching.
-  @AppStorage("showViewerCount") var showViewerCount = true
+  @AppStorage(PersistenceKey.showViewerCount) var showViewerCount = true
   /// Latency readout in the top-left HUD chip. Off by default and independent of
   /// the full Diagnostics Overlay, so viewers who just want the latency number
   /// can enable it without the developer event log.
-  @AppStorage("showLatencyBadge") var showLatencyBadge = false
+  @AppStorage(PersistenceKey.showLatencyBadge) var showLatencyBadge = false
 
   // Per-event visibility for the passive, read-only event banners (Events
   // sub-page of chat settings). All on by default — they mirror what Twitch
   // shows every viewer — but each can be hidden independently.
-  @AppStorage("showRaidEvents") var showRaidEvents = true
-  @AppStorage("showHypeTrainEvents") var showHypeTrainEvents = true
-  @AppStorage("showPollEvents") var showPollEvents = true
-  @AppStorage("showPredictionEvents") var showPredictionEvents = true
-  @AppStorage("showGoalEvents") var showGoalEvents = true
+  @AppStorage(PersistenceKey.showRaidEvents) var showRaidEvents = true
+  @AppStorage(PersistenceKey.showHypeTrainEvents) var showHypeTrainEvents = true
+  @AppStorage(PersistenceKey.showPollEvents) var showPollEvents = true
+  @AppStorage(PersistenceKey.showPredictionEvents) var showPredictionEvents = true
+  @AppStorage(PersistenceKey.showGoalEvents) var showGoalEvents = true
 
   /// Owns the playback engine + chat/events/captions services and the per-frame
   /// monitoring boxes. The engine members are reached by their original names via

@@ -86,6 +86,52 @@ enum PersistenceKey {
 
   static let showChatByDefault = "showChatByDefault"
   static let disableLiquidGlass = "disableLiquidGlass"
+
+  // MARK: Player playback (bound via `@AppStorage` in PlayerView)
+
+  static let preferredQuality = "preferredQuality"
+  static let livePlaybackProfile = "livePlaybackProfile"
+
+  // MARK: Chat appearance — live controls (bound via `@AppStorage` in PlayerView)
+
+  static let chatEmoteAuto = "chatEmoteAuto"
+  static let chatEmoteSizeValue = "chatEmoteSizeValue"
+  static let chatLetterSpacingValue = "chatLetterSpacingValue"
+  static let chatAnimatedEmotes = "chatAnimatedEmotes"
+  static let chatFontStyle = "chatFontStyle"
+  static let chatShowBadges = "chatShowBadges"
+  static let chatShowPlatformBadges = "chatShowPlatformBadges"
+  static let chatHighlightMentionsEnabled = "chatHighlightMentionsEnabled"
+  static let chatHighlightKeywords = "chatHighlightKeywords"
+  static let chatLayoutMode = "chatLayoutMode"
+  static let chatSyncToStream = "chatSyncToStream"
+
+  // MARK: Experimental cross-platform chat merge (bound via `@AppStorage` in PlayerView)
+
+  static let experimentalYouTubeMergeEnabled = "experimentalYouTubeMergeEnabled"
+  static let experimentalKickMergeEnabled = "experimentalKickMergeEnabled"
+
+  // MARK: Captions / subtitles (bound via `@AppStorage` in PlayerView)
+
+  static let captionsEnabled = "captionsEnabled"
+  static let captionsFontScale = "captionsFontScale"
+  static let captionsVerticalPosition = "captionsVerticalPosition"
+  static let captionsTimingOffset = "captionsTimingOffset"
+  static let captionsBackgroundStyle = "captionsBackgroundStyle"
+  static let captionsOutline = "captionsOutline"
+  static let captionsTextColor = "captionsTextColor"
+  static let captionsTextOpacity = "captionsTextOpacity"
+
+  // MARK: Player HUD / event-overlay toggles (bound via `@AppStorage` in PlayerView)
+
+  static let showLatencyDiagnostics = "showLatencyDiagnostics"
+  static let showViewerCount = "showViewerCount"
+  static let showLatencyBadge = "showLatencyBadge"
+  static let showRaidEvents = "showRaidEvents"
+  static let showHypeTrainEvents = "showHypeTrainEvents"
+  static let showPollEvents = "showPollEvents"
+  static let showPredictionEvents = "showPredictionEvents"
+  static let showGoalEvents = "showGoalEvents"
 }
 
 /// Small typed helpers that wrap the `JSONEncoder`/`JSONDecoder` round-trip used
