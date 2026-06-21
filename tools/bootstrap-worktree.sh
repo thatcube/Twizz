@@ -10,17 +10,24 @@
 #
 set -euo pipefail
 
-# Files that are gitignored but wanted in every worktree (build secrets plus
-# maintainer-local agent instructions).
-LOCAL_FILES=(
-  "Config/TwitchSecrets.xcconfig.local"
-  "AGENTS.local.md"
-)
-
 repo_root="$(git rev-parse --show-toplevel)"
 
 # The first entry from `git worktree list` is always the primary worktree.
 main_worktree="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+
+# Files that are gitignored but wanted in every worktree: maintainer-local agent
+# instructions, plus EVERY local build-secrets xcconfig. The secrets list is
+# discovered dynamically (not hardcoded) so adding a new Config/*.xcconfig.local
+# in the primary worktree — e.g. YouTubeSecrets — is picked up automatically and
+# can never be silently dropped, which previously hid YouTube sign-in.
+LOCAL_FILES=(
+  "AGENTS.local.md"
+)
+if [[ -d "$main_worktree/Config" ]]; then
+  while IFS= read -r secret; do
+    LOCAL_FILES+=("Config/$(basename "$secret")")
+  done < <(find "$main_worktree/Config" -maxdepth 1 -name '*.xcconfig.local' -type f | sort)
+fi
 
 if [[ "$main_worktree" == "$repo_root" ]]; then
   echo "You are in the primary worktree ($repo_root); nothing to copy."
