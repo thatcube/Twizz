@@ -3654,10 +3654,21 @@ private struct QualityMenu: View, Equatable {
       }
 
       Menu {
-        // Quality is now a nested submenu alongside Stream Source and Sleep
-        // timer. The lifecycle hooks live on this submenu's row (a direct child
-        // of the top-level menu) so they fire on the top menu's open/close, not
-        // when drilling into a sibling submenu.
+        // NOTE (tvOS 27 dev-beta regression, build 24J5289o): on a focused
+        // submenu row the white focus pill correctly inverts the row's text and
+        // leading icon to dark, but the *system* trailing disclosure chevron does
+        // NOT invert — it stays white and disappears on the white pill. Verified
+        // fine on the tvOS 26.5 simulator with identical code, so this is an OS
+        // bug, not ours. There is no public API to recolor/hide that specific
+        // chevron (`.menuIndicator(.hidden)` doesn't affect the nested-submenu
+        // indicator, and a hand-drawn chevron just doubles up with the system
+        // one). Left as-is intentionally — do not add custom chevrons or color
+        // overrides to "fix" it; revisit when the tvOS 27 GA ships.
+        //
+        // Quality is a nested submenu alongside Stream Source and Sleep timer.
+        // The lifecycle hooks live on this submenu's row (a direct child of the
+        // top-level menu) so they fire on the top menu's open/close, not when
+        // drilling into a sibling submenu.
         Menu {
           // A `Picker` is Apple's recommended single-selection control inside a
           // menu: it renders a checkmark in a reserved leading gutter so every
@@ -3672,15 +3683,6 @@ private struct QualityMenu: View, Equatable {
         } label: {
           Label(qualityMenuLabel, systemImage: "rectangle.on.rectangle")
         }
-        // The control-button style paints its label a *concrete* white
-        // (`palette.chromeOnOpaque`) when unfocused, and a Menu propagates that
-        // foreground into its presented rows. A concrete color can't take part
-        // in tvOS's focus inversion, so the system disclosure chevron stayed
-        // white and vanished on the white focus pill. Re-stating the rows'
-        // foreground as the *semantic* `.primary` lets tvOS invert it (light on
-        // the dark menu material, dark on the focused white pill) so the chevron
-        // and icon stay visible in every theme.
-        .foregroundStyle(.primary)
         .onAppear(perform: onMenuPresented)
         .onDisappear(perform: onMenuDismissed)
 
@@ -3698,7 +3700,6 @@ private struct QualityMenu: View, Equatable {
           } label: {
             Label(sourceMenuLabel, systemImage: "dot.radiowaves.left.and.right")
           }
-          .foregroundStyle(.primary)
         }
 
         Divider()
@@ -3715,7 +3716,6 @@ private struct QualityMenu: View, Equatable {
         } label: {
           Label(sleepMenuLabel, systemImage: "moon.zzz")
         }
-        .foregroundStyle(.primary)
       } label: {
         qualityLabelText(buttonLabel)
           .accessibilityLabel("Quality, \(buttonLabel)")
