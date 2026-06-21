@@ -41,7 +41,7 @@ struct BrandQRCodeView: View {
       .aspectRatio(contentMode: .fit)
       .frame(width: size * 0.2, height: size * 0.2)
       .padding(size * 0.03)
-      .background(Color.white, in: RoundedRectangle(cornerRadius: size * 0.05))
+      .background(Color.white)
   }
 
   // MARK: - QR generation
