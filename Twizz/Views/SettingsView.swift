@@ -382,7 +382,7 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 4) {
             Text("Sign in with Twitch")
               .font(.title3.weight(.bold))
-            Text("Connect your account to see the channels you follow and join the chat.")
+            Text("See the channels you follow and join their chat.")
               .font(.callout)
               .foregroundStyle(.secondary)
           }
@@ -471,9 +471,9 @@ struct SettingsView: View {
             .frame(height: 52)
 
           VStack(alignment: .leading, spacing: 4) {
-            Text("Connect YouTube")
+            Text("Sign in with YouTube")
               .font(.title3.weight(.bold))
-            Text("Sign in to bring your subscribed YouTube streamers into Twizz.")
+            Text("See the channels you’re subscribed to, right in Twizz.")
               .font(.callout)
               .foregroundStyle(.secondary)
           }
