@@ -60,6 +60,10 @@ struct PlayerView: View {
   @Environment(\.themePalette) var palette
   @Environment(\.glassDisabled) var glassDisabled
   @Environment(\.accessibilityReduceMotion) var reduceMotion
+  /// App-global services. Used here to source the in-player YouTube viewer count
+  /// from the same public live snapshot the Home cards use (followed channels
+  /// carry the streamer's YouTube channel ID; the snapshot holds its live count).
+  @Environment(AppEnvironment.self) var environment
   @AppStorage(PersistenceKey.preferredQuality) var preferredQuality = "Auto"
   /// Latency-vs-quality profile for the adaptive ("Auto") stream, surfaced as the
   /// two Auto rows in the quality picker. Stored as the enum raw value; read it
@@ -111,6 +115,7 @@ struct PlayerView: View {
   /// links, then description, then a name-based guess). (State on PlayerModel.)
   @AppStorage(LowLatencyHLSProxy.settingsKey) var lowLatencyProxyEnabled = true
   @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) var streamRewindEnabled = true
+  @AppStorage(PersistenceKey.preferYouTubeSource) var preferYouTubeSource = true
   @AppStorage(PersistenceKey.showLatencyDiagnostics) var showLatencyDiagnostics = false
   /// On-device live captions toggle (beta). See `captionController`.
   @AppStorage(PersistenceKey.captionsEnabled) var captionsEnabled = false
@@ -1237,6 +1242,9 @@ struct PlayerView: View {
       altYouTubeMasterURL = nil
       altSourceStatus = nil
       youtubeSourceAvailable = false
+      // Auto-default vs. manual intent is per-channel: clear the manual flag so
+      // the "prefer YouTube" auto-default can apply once on the new channel.
+      didManuallySelectSource = false
       experimentalKickMergeChannelOrURL = ""
       kickAutoResolvedTarget = ""
       // The rewind window is per-stream: drop the previous channel's DVR history.
