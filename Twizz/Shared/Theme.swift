@@ -140,7 +140,7 @@ struct ThemePalette: Equatable {
     liftPrimaryText: .black.opacity(0.92),
     liftSecondaryText: .black.opacity(0.62),
     playerBackdrop: .black,
-    chatSideSurface: Color(white: 0.07).opacity(0.96),
+    chatSideSurface: .black,
     chatSidePrimaryText: .white,
     topGlow: nil
   )
