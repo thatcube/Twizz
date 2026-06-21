@@ -115,6 +115,9 @@ struct PlayerTitleHeader: View {
   /// Source of the Kick live viewer count when a Kick target is merged into the
   /// player; `@Observable`, so the per-platform row re-renders as it resolves.
   let chat: ChatService
+  /// Concurrent YouTube viewers for this stream, already gated to "live on
+  /// YouTube" by the caller (`nil` when the creator isn't live on YouTube).
+  let youtubeViewerCount: Int?
   /// Whether the viewer/latency subheader may appear at all (live only).
   let showSubheader: Bool
   let showLatency: Bool
@@ -126,15 +129,18 @@ struct PlayerTitleHeader: View {
 
   /// Per-platform viewer counts for the platforms the stream is *currently live
   /// on*: Twitch from the pubsub-backed `hermes.viewerCount` (the header only
-  /// renders while the Twitch channel is live), and Kick from the merged channel
-  /// when its Kick target resolved live with a known count. YouTube merges are
-  /// chat-only in the player (no viewer metadata), so YouTube never appears here.
-  /// A platform is only included when it's live and its count is known.
+  /// renders while the Twitch channel is live), YouTube from the public live
+  /// snapshot (passed in pre-gated to "live on YouTube"), and Kick from the
+  /// merged channel when its Kick target resolved live with a known count. A
+  /// platform is only included when it's live and its count is known.
   private var platformViewerCounts: [PlatformViewerCount] {
     guard showViewerCount else { return [] }
     var counts: [PlatformViewerCount] = []
     if let twitchViewers = hermes.viewerCount {
       counts.append(PlatformViewerCount(platform: .twitch, count: twitchViewers))
+    }
+    if let youtubeViewers = youtubeViewerCount {
+      counts.append(PlatformViewerCount(platform: .youtube, count: youtubeViewers))
     }
     if chat.kickMergeEnabled, chat.kickResolvedIsLive, let kickViewers = chat.kickViewerCount {
       counts.append(PlatformViewerCount(platform: .kick, count: kickViewers))

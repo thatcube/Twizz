@@ -5,6 +5,29 @@ import SwiftUI
 import UIKit
 
 extension PlayerView {
+  /// The concurrent YouTube viewer count to show in the player's per-platform
+  /// row, or `nil` when this stream's creator isn't live on YouTube (or isn't a
+  /// known dual-platform streamer). Sourced from the same public live snapshot
+  /// the Home cards use: the followed channel carries the streamer's YouTube
+  /// channel ID, and the snapshot service holds the live presence + viewers for
+  /// it — so we never show a YouTube count for a channel that isn't live there,
+  /// and never call the YouTube API from the device. YouTube chat-merge has no
+  /// viewer metadata, so the snapshot is the only honest source in the player.
+  var youtubeViewerCountForCurrentStream: Int? {
+    guard !isVOD else { return nil }
+    let login = activeChannel.isEmpty ? channel : activeChannel
+    guard !login.isEmpty,
+      let presence = environment.follows.channels
+        .first(where: { $0.login.caseInsensitiveCompare(login) == .orderedSame })?.youtube
+    else { return nil }
+    // Prefer the freshest snapshot reading, falling back to the value already
+    // enriched onto the followed channel; only show it while live on YouTube.
+    let snapshot = environment.youtubeLive.presence(forChannelID: presence.channelID)
+    let isLive = snapshot?.isLive ?? presence.isLive
+    guard isLive else { return nil }
+    return snapshot?.viewerCount ?? presence.viewerCount
+  }
+
   var videoColumn: some View {
     ZStack(alignment: .bottom) {
       VideoSurface(player: player)
@@ -69,6 +92,7 @@ extension PlayerView {
               latency: latencyReadout,
               hermes: hermes,
               chat: chat,
+              youtubeViewerCount: youtubeViewerCountForCurrentStream,
               showSubheader: !isVOD,
               showLatency: showLatencyBadge,
               showViewerCount: showViewerCount
