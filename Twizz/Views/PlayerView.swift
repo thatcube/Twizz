@@ -2853,7 +2853,7 @@ struct PlayerView: View {
             : AnyShapeStyle(Color(white: 0.99).opacity(0.96)))
           : (chatLayoutMode == .overlay
             ? AnyShapeStyle(Color(white: 0.13).opacity(0.90))
-            : AnyShapeStyle(Color(white: 0.07).opacity(0.96))))
+            : AnyShapeStyle(palette.chatSideSurface)))
     )
   }
 
