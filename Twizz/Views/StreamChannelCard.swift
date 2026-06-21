@@ -206,33 +206,42 @@ struct StreamChannelCard: View {
 
   @ViewBuilder
   private var media: some View {
-    ZStack(alignment: .bottomLeading) {
-      Color.primary.opacity(0.08)
-
-      AsyncImage(url: channel.thumbnailURL) { image in
-        image.resizable().scaledToFill()
-      } placeholder: {
-        Color.clear
+    // The placeholder color is the layout anchor; the thumbnail, preview, scrim
+    // and badge are overlays so the media always sizes to the fixed 16:9 frame.
+    // A `scaledToFill` thumbnail with a non-16:9 source (e.g. a 4:3 YouTube
+    // hqdefault) overflows its bounds; as a ZStack sibling that overflow would
+    // grow the stack taller than the frame, which then centers and clips it —
+    // pushing the bottom-aligned LiveBadge off the visible thumbnail. As an
+    // overlay it can't affect the anchor's size, so the badge stays in frame.
+    Color.primary.opacity(0.08)
+      .overlay {
+        AsyncImage(url: channel.thumbnailURL) { image in
+          image.resizable().scaledToFill()
+        } placeholder: {
+          Color.clear
+        }
       }
-
-      if isShowingLivePreviewSurface {
-        PreviewVideoSurface(player: previewPlayer, cornerRadius: layout.mediaCornerRadius)
-          .opacity(livePreviewOpacity)
-          .transition(.opacity)
+      .overlay {
+        if isShowingLivePreviewSurface {
+          PreviewVideoSurface(player: previewPlayer, cornerRadius: layout.mediaCornerRadius)
+            .opacity(livePreviewOpacity)
+            .transition(.opacity)
+        }
       }
-
-      LinearGradient(
-        colors: [Color.clear, Color.black.opacity(0.82)],
-        startPoint: .top,
-        endPoint: .bottom
-      )
-
-      LiveBadge(isLive: channel.isLive, viewerCount: channel.viewerCount)
-        .padding(12)
-    }
+      .overlay {
+        LinearGradient(
+          colors: [Color.clear, Color.black.opacity(0.82)],
+          startPoint: .top,
+          endPoint: .bottom
+        )
+      }
+      .overlay(alignment: .bottomLeading) {
+        LiveBadge(isLive: channel.isLive, viewerCount: channel.viewerCount)
+          .padding(12)
+      }
     .frame(width: layout.mediaWidth, height: layout.mediaHeight)
     .frame(maxWidth: layout.mediaWidth == nil ? .infinity : nil, alignment: .leading)
-    .aspectRatio(layout.mediaWidth == nil ? 16 / 9 : nil, contentMode: .fit)
+    .mediaAspectRatio(layout.mediaWidth == nil ? 16 / 9 : nil)
     .clipShape(RoundedRectangle(cornerRadius: layout.mediaCornerRadius, style: .continuous))
     .overlay {
       // A hairline rim on the media edge. It matches the frosted-glass tone of
@@ -448,6 +457,22 @@ private extension View {
           }
         }
       }
+    }
+  }
+}
+
+private extension View {
+  /// Applies a fixed media aspect ratio only when a ratio is supplied. Passing
+  /// `nil` leaves the view's existing (fixed-frame) sizing untouched — unlike
+  /// `aspectRatio(nil, contentMode:)`, which would make the view adopt its
+  /// content's intrinsic ratio (e.g. a 4:3 YouTube thumbnail) and overflow the
+  /// 16:9 rail frame.
+  @ViewBuilder
+  func mediaAspectRatio(_ ratio: CGFloat?) -> some View {
+    if let ratio {
+      aspectRatio(ratio, contentMode: .fit)
+    } else {
+      self
     }
   }
 }

@@ -25,6 +25,8 @@ struct RichChatLineView: View {
     var fontStyle: ChatFontStyle = ChatAppearance.defaultFontStyle
     /// When false, per-user chat badges (mod/sub/etc.) are hidden.
     var showBadges: Bool = ChatAppearance.defaultShowBadges
+    /// When false, the platform-source badge (YouTube/Kick) is hidden.
+    var showPlatformBadges: Bool = ChatAppearance.defaultShowPlatformBadges
     /// Overrides the default white body color (used by the light side-chat).
     var bodyColorOverride: Color? = nil
 
@@ -52,15 +54,23 @@ struct RichChatLineView: View {
     }
 
     private var shouldShowSourceBadge: Bool {
-        message.source == .youtube
+        guard showPlatformBadges else { return false }
+        return message.source == .youtube || message.source == .kick
     }
 
     private var sourceBadgeFill: Color {
-        Color(twitchHex: "#FF0000") ?? .red
+        switch message.source {
+        case .kick:
+            // Kick brand dark (green "K" sits on top).
+            return Color(twitchHex: "#0B0E0F") ?? .black
+        default:
+            return Color(twitchHex: "#FF0000") ?? .red
+        }
     }
 
     private var sourceBadgeWidth: CGFloat {
-        badgeSize * 1.42
+        // Kick's mark is a square logo tile; YouTube's play badge is wider.
+        message.source == .kick ? badgeSize : badgeSize * 1.42
     }
 
     private var sourceBadgeCornerRadius: CGFloat {
@@ -132,7 +142,7 @@ struct RichChatLineView: View {
             parts.append(contentsOf: message.badgeKeys.compactMap(Self.badgeAccessibilityName))
         }
         if shouldShowSourceBadge {
-            parts.append("YouTube")
+            parts.append(message.source == .kick ? "Kick" : "YouTube")
         }
 
         if !message.username.isEmpty {
@@ -200,17 +210,49 @@ struct RichChatLineView: View {
         return "\(friendly) badge"
     }
 
+    private var sourceBadgeIconColor: Color {
+        // Kick's mark is brand green on its dark tile; YouTube's is white on red.
+        message.source == .kick ? (Color(twitchHex: "#53FC18") ?? .green) : .white
+    }
+
+    private var sourceBadgeStrokeColor: Color {
+        // Outline the dark Kick tile so it stays visible on dark/OLED chat
+        // surfaces where the near-black fill would otherwise blend in.
+        message.source == .kick ? (Color(twitchHex: "#53FC18") ?? .green).opacity(0.55) : .clear
+    }
+
     private var sourceBadgeView: some View {
         ZStack {
             RoundedRectangle(cornerRadius: sourceBadgeCornerRadius, style: .continuous)
                 .fill(sourceBadgeFill)
 
-            Icon(glyph: .playerPlayFilled, size: sourceBadgePlayIconSize)
-                .foregroundStyle(.white)
-                .offset(x: 0.8)
+            sourceBadgeSymbol
         }
         .frame(width: sourceBadgeWidth, height: badgeSize)
+        .overlay(
+            RoundedRectangle(cornerRadius: sourceBadgeCornerRadius, style: .continuous)
+                .strokeBorder(sourceBadgeStrokeColor, lineWidth: 1)
+        )
         .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var sourceBadgeSymbol: some View {
+        switch message.source {
+        case .kick:
+            // Kick's logo mark: the official angular "K" tile, tinted black on
+            // the green badge like their app icon.
+            Image("kick-logo")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: badgeSize * 0.74, height: badgeSize * 0.74)
+                .foregroundStyle(sourceBadgeIconColor)
+        default:
+            Icon(glyph: .playerPlayFilled, size: sourceBadgePlayIconSize)
+                .foregroundStyle(sourceBadgeIconColor)
+                .offset(x: 0.8)
+        }
     }
 
     private func badgeView(url: URL) -> some View {
@@ -267,6 +309,7 @@ struct RichChatLineView: View {
             text: message.text,
             twitchEmoteURLs: message.twitchEmoteURLs,
             youtubeEmoteURLs: message.youtubeEmoteURLs,
+            kickEmoteURLs: message.kickEmoteURLs,
             globalEmoteURLs: globalEmoteURLs,
             cheermotes: cheermotes,
             shouldRenderCheers: shouldRenderCheers

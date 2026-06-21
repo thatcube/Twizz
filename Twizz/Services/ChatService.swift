@@ -96,6 +96,7 @@ final class ChatService {
   private(set) var cheermotes: [Cheermote] = []
   private(set) var condensedMessagesCount = 0
   var youtubeStatusMessage: String?
+  var kickStatusMessage: String?
   /// Set when a raid USERNOTICE arrives. Cleared by the consumer after handling.
   var pendingRaid: RaidEvent?
 
@@ -149,6 +150,22 @@ final class ChatService {
   let youtubePollMinDelayMs: UInt64 = 900
   let youtubeUserAgent =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+  /// Experimental Kick live-chat merge state. Mirrors the YouTube merge path but
+  /// rides Kick's Pusher WebSocket instead of polling. Owns its own socket so a
+  /// Kick reconnect never disturbs the Twitch IRC connection.
+  var kickMergeEnabled = false
+  var kickChannelOrURL = ""
+  let kickConnection = WebSocketConnection()
+  var kickReceiveTask: Task<Void, Never>?
+  var kickChatroomID: Int?
+  var kickSubscribedChannel: String?
+  /// Canonical slug + liveness captured when the channel API last resolved, so
+  /// the status line can show *which* Kick channel we joined and whether it's
+  /// actually live (rather than just "connected").
+  var kickResolvedSlug: String?
+  var kickResolvedIsLive = false
+  var kickSeenMessageIDs: Set<String> = []
+  var kickSeenMessageOrder: [String] = []
   /// Rolling cap on retained chat lines. The live list backs a `LazyVStack`
   /// whose `ForEach` is diffed on every append, and both `visibleChatMessages`
   /// and the gesture scroll loop scan/copy this array (the loop does so up to
@@ -162,6 +179,12 @@ final class ChatService {
     youtubeMergeEnabled = enabled
     youtubeChannelOrURL = channelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
     restartYouTubeLoopIfNeeded()
+  }
+
+  func configureExperimentalKickMerge(enabled: Bool, channelOrURL: String) {
+    kickMergeEnabled = enabled
+    kickChannelOrURL = channelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    restartKickLoopIfNeeded()
   }
 
   /// Configure stream-sync chat delay. When `enabled` and `delaySeconds` is
@@ -207,6 +230,9 @@ final class ChatService {
     youtubeSeenMessageIDs.removeAll()
     youtubeSeenMessageOrder.removeAll()
     youtubeStatusMessage = nil
+    kickSeenMessageIDs.removeAll()
+    kickSeenMessageOrder.removeAll()
+    kickStatusMessage = nil
     syncWarmupStart = Date()
     connection.resetBackoff()
 
@@ -241,6 +267,7 @@ final class ChatService {
 
     receiveTask = Task { [weak self] in await self?.receiveLoop() }
     restartYouTubeLoopIfNeeded()
+    restartKickLoopIfNeeded()
   }
 
   /// Tear down the connection and clear the buffer.
@@ -249,6 +276,7 @@ final class ChatService {
     receiveTask = nil
     connection.cancel()
     stopYouTubeLoop(clearStatus: true)
+    stopKickLoop(clearStatus: true)
     isConnected = false
     messages.removeAll()
     syncDrainTask?.cancel()
@@ -261,6 +289,8 @@ final class ChatService {
     cheermotes.removeAll()
     youtubeSeenMessageIDs.removeAll()
     youtubeSeenMessageOrder.removeAll()
+    kickSeenMessageIDs.removeAll()
+    kickSeenMessageOrder.removeAll()
     channel = nil
     hasSentJoin = false
     hasCapAck = false

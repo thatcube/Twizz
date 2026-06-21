@@ -23,11 +23,14 @@ enum ChatLineTokenizer {
         text: String,
         twitchEmoteURLs: [String: URL],
         youtubeEmoteURLs: [String: URL],
+        kickEmoteURLs: [String: URL] = [:],
         globalEmoteURLs: [String: URL],
         cheermotes: [Cheermote],
         shouldRenderCheers: Bool
     ) -> [ChatLineSegment] {
-        let scopedEmoteURLs = twitchEmoteURLs.merging(youtubeEmoteURLs) { current, _ in current }
+        let scopedEmoteURLs = twitchEmoteURLs
+            .merging(youtubeEmoteURLs) { current, _ in current }
+            .merging(kickEmoteURLs) { current, _ in current }
         let scopedKeysByLength = scopedEmoteURLs.keys.sorted { lhs, rhs in
             if lhs.count == rhs.count {
                 return lhs < rhs

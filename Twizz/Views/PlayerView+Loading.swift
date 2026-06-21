@@ -42,6 +42,15 @@ extension PlayerView {
     for attempt in 1...maxAttempts {
       do {
         let resolved = try await resolvePlaybackWithTimeout()
+        // The view was dismissed (its `.task` cancelled) while we were resolving.
+        // Bail out instead of resurrecting playback on an orphaned AVPlayer, which
+        // would keep audio running off-screen — and double up if the user reopens
+        // the stream.
+        if Task.isCancelled {
+          player.pause()
+          player.replaceCurrentItem(with: nil)
+          return
+        }
         playback = resolved
         player.replaceCurrentItem(with: makeItem(url: resolved.master))
         applyQualityPreference(preferredQuality)

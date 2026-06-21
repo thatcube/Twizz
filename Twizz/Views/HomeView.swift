@@ -19,6 +19,11 @@ struct HomeView: View {
   @State private var watchHistory = WatchHistoryService()
   @State private var feedback = RecommendationFeedbackService()
   @State private var affinity = StreamerAffinityService()
+  @State private var youtubeAliases = TwitchYouTubeAliasService()
+  @State private var youtubeLive = YouTubeLiveSnapshotService()
+  @State private var youtubeAuth = YouTubeAuthSession()
+  @State private var youtubeSubscriptions = YouTubeSubscriptionsService()
+  @State private var youtubeResolver = YouTubeLiveResolver()
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
@@ -33,6 +38,9 @@ struct HomeView: View {
   @State private var showingFollowingDirectory = false
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
+  @State private var showYouTubeSignIn = false
+  @State private var youtubePlayback: YouTubePlaybackTarget?
+  @AppStorage(YouTubePreferences.showSubscriptionsKey) private var showYouTubeSubscriptions = true
   @State private var refreshToast: RefreshToastState?
   @State private var goLive = GoLiveWatcher()
   @State private var goLiveSettings = GoLiveNotificationSettings()
@@ -204,10 +212,13 @@ struct HomeView: View {
         SettingsView(
           themeManager: themeManager,
           auth: auth,
+          youtubeAuth: youtubeAuth,
+          youtubeSubscriptions: youtubeSubscriptions,
           follows: follows,
           goLiveSettings: goLiveSettings,
           recommendationFeedback: feedback,
           onRequestSignIn: { showSignIn = true },
+          onRequestYouTubeSignIn: { showYouTubeSignIn = true },
           onClearWatchHistory: {
             watchHistory.clear()
             Task { await refreshPersonalizedIfNeeded(force: true) }
@@ -256,6 +267,7 @@ struct HomeView: View {
     .animation(.motionAware(.easeOut(duration: 0.25), reduceMotion: reduceMotion), value: goLive.pending)
     .task {
       auth.restore()
+      youtubeAuth.restore()
       goLive.notificationSettings = goLiveSettings
       goLive.start(using: auth)
       promptFirstLaunchSignInIfNeeded()
@@ -270,6 +282,8 @@ struct HomeView: View {
       await refreshPersonalizedIfNeeded(force: true)
       requestFocusIfPossible(force: true)
       openDeepLinkedChannelIfNeeded(deepLinkRouter.pendingChannelLogin)
+      await youtubeSubscriptions.refresh(using: youtubeAuth)
+      await refreshYouTubeSubscriptionLiveness()
     }
     .onChange(of: follows.channels) { _, _ in
       requestFocusIfPossible(force: false)
@@ -288,6 +302,12 @@ struct HomeView: View {
       Task {
         await refreshFollowedChannelsIfNeeded(force: true)
         requestFocusIfPossible(force: true)
+      }
+    }
+    .onChange(of: youtubeAuth.isAuthenticated) { _, _ in
+      Task {
+        await youtubeSubscriptions.refresh(using: youtubeAuth, force: true)
+        await refreshYouTubeSubscriptionLiveness(force: true)
       }
     }
     .onChange(of: selectedSidebarTab) { _, tab in
@@ -352,6 +372,21 @@ struct HomeView: View {
       }
       .environment(\.themePalette, resolvedPalette)
       .preferredColorScheme(themeManager.theme.preferredColorScheme)
+    }
+    .fullScreenCover(isPresented: $showYouTubeSignIn) {
+      YouTubeSignInView(auth: youtubeAuth) {
+        Task {
+          await youtubeSubscriptions.refresh(using: youtubeAuth, force: true)
+          await refreshYouTubeSubscriptionLiveness(force: true)
+        }
+      }
+      .environment(\.themePalette, resolvedPalette)
+      .preferredColorScheme(themeManager.theme.preferredColorScheme)
+    }
+    .fullScreenCover(item: $youtubePlayback) { target in
+      YouTubeLivePlayerView(videoID: target.videoID, title: target.title)
+        .environment(\.themePalette, resolvedPalette)
+        .preferredColorScheme(themeManager.theme.preferredColorScheme)
     }
   }
 
@@ -432,7 +467,7 @@ struct HomeView: View {
 
       ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: rail.spacing) {
-          ForEach(follows.channels) { channel in
+          ForEach(followingRowChannels) { channel in
             let itemID = "following-\(channel.id)"
             let isFocused = focusedItemID == itemID
 
@@ -448,15 +483,21 @@ struct HomeView: View {
                 mediaCornerRadius: mediaCornerRadius
               ),
               showsGameName: true,
-              onWatch: { selectedChannel = $0 },
-              onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
+              onWatch: { openFollowingChannel($0) },
+              onGoToChannel: { channel in
+                if isYouTubeOnly(channel) {
+                  playYouTube(channel)
+                } else {
+                  channelPageTarget = ChannelPageTarget(channel: channel)
+                }
+              }
             )
             .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
             .focusable(true)
             .focused($focusedItemID, equals: itemID)
             .focusEffectDisabled()
             .onTapGesture {
-              selectedChannel = channel
+              openFollowingChannel(channel)
             }
             .accessibilityAddTraits(.isButton)
             .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
@@ -468,12 +509,107 @@ struct HomeView: View {
       }
       .scrollClipDisabled()
 
-      if follows.channels.isEmpty {
+      if followingRowChannels.isEmpty {
         Text(follows.isUsingDemoData ? "No trending channels are available right now." : "No followed channels are available yet.")
           .foregroundStyle(.secondary)
       }
     }
     .focusSection()
+  }
+
+  // MARK: - YouTube subscriptions
+
+  /// Normalizes a streamer name for cross-platform identity matching: lowercased
+  /// with everything but letters/digits stripped, so "Ludwig" (Twitch) and
+  /// "Ludwig" (YouTube), or "fuslie"/"Fuslie", collapse to the same key.
+  private func normalizedStreamerKey(_ name: String) -> String {
+    name.lowercased().unicodeScalars.filter {
+      CharacterSet.alphanumerics.contains($0)
+    }.map(String.init).joined()
+  }
+
+  /// Identity keys for streamers already shown on the Following (Twitch) rail —
+  /// by YouTube channel ID (enriched presence or alias table) and by normalized
+  /// display name / login — so a streamer live on both platforms is never
+  /// duplicated as a separate YouTube card.
+  private var twitchRepresentedKeys: (channelIDs: Set<String>, names: Set<String>) {
+    var channelIDs = Set(follows.channels.compactMap { $0.youtube?.channelID })
+    var names = Set<String>()
+    for channel in follows.channels {
+      if let mapped = youtubeAliases.youtubeChannelID(forTwitchLogin: channel.login) {
+        channelIDs.insert(mapped)
+      }
+      names.insert(normalizedStreamerKey(channel.displayName))
+      names.insert(normalizedStreamerKey(channel.login))
+    }
+    names.remove("")
+    return (channelIDs, names)
+  }
+
+  /// Subscribed YouTube streamers who are live right now, as standard cards, with
+  /// any streamer already on the Following (Twitch) rail removed so there's a
+  /// single card per streamer. Rendered with the shared `LiveBadge` like every
+  /// other card — `isLive`/`viewerCount` carry the YouTube live state.
+  private var liveYouTubeSubscriptionCards: [FollowedChannel] {
+    guard showYouTubeSubscriptions else { return [] }
+    let represented = twitchRepresentedKeys
+    return youtubeSubscriptions.subscriptions.compactMap { sub in
+      guard let presence = youtubeResolver.presence(forChannelID: sub.channelID),
+        presence.isLive,
+        !represented.channelIDs.contains(sub.channelID),
+        !represented.names.contains(normalizedStreamerKey(sub.title))
+      else { return nil }
+
+      let thumbnailURL = presence.videoID.flatMap {
+        URL(string: "https://i.ytimg.com/vi/\($0)/hqdefault.jpg")
+      }
+      var channel = FollowedChannel(
+        id: "yt-\(sub.channelID)",
+        login: sub.channelID,
+        displayName: sub.title,
+        title: presence.title ?? "",
+        gameName: "",
+        viewerCount: presence.viewerCount,
+        thumbnailURL: thumbnailURL,
+        profileImageURL: sub.thumbnailURL,
+        isLive: true
+      )
+      channel.youtube = presence
+      return channel
+    }
+  }
+
+  /// The single Following rail: Twitch follows plus the deduped, currently-live
+  /// YouTube-only subscriptions.
+  private var followingRowChannels: [FollowedChannel] {
+    follows.channels + liveYouTubeSubscriptionCards
+  }
+
+  /// A merged card that should play via YouTube (no Twitch equivalent).
+  private func isYouTubeOnly(_ channel: FollowedChannel) -> Bool {
+    channel.id.hasPrefix("yt-")
+  }
+
+  private func openFollowingChannel(_ channel: FollowedChannel) {
+    if isYouTubeOnly(channel) {
+      playYouTube(channel)
+    } else {
+      selectedChannel = channel
+    }
+  }
+
+  private func refreshYouTubeSubscriptionLiveness(force: Bool = false) async {
+    guard youtubeAuth.isAuthenticated, showYouTubeSubscriptions else { return }
+    let ids = youtubeSubscriptions.subscriptions.map(\.channelID)
+    await youtubeResolver.refresh(channelIDs: ids, using: youtubeAuth, force: force)
+  }
+
+  private func playYouTube(_ channel: FollowedChannel) {
+    guard let videoID = channel.youtube?.videoID else { return }
+    watchHistory.record(channel)
+    youtubePlayback = YouTubePlaybackTarget(
+      videoID: videoID,
+      title: channel.displayName)
   }
 
   @ViewBuilder
@@ -744,7 +880,17 @@ struct HomeView: View {
   private func refreshFollowedChannelsIfNeeded(force: Bool) async {
     guard force || shouldAutoRefreshFollowedChannels() else { return }
     await follows.refresh(using: auth)
+    await refreshYouTubePresence()
     publishTopShelfSnapshot()
+  }
+
+  /// Pulls the latest Twitch→YouTube alias table and live snapshot (both public,
+  /// parameter-free downloads) and merges any live YouTube presence into the
+  /// followed channels so dual-platform streamers render as one combined card.
+  private func refreshYouTubePresence() async {
+    await youtubeAliases.refreshIfNeeded()
+    await youtubeLive.refreshIfNeeded()
+    follows.applyYouTubePresence(aliases: youtubeAliases, live: youtubeLive)
   }
 
   private func refreshRecommendationsIfNeeded(force: Bool) async {
@@ -874,6 +1020,14 @@ struct HomeView: View {
 struct MultiviewLaunch: Identifiable {
   let id = UUID()
   let channels: [FollowedChannel]
+}
+
+/// A YouTube-only live stream the viewer chose to play (no Twitch equivalent),
+/// identified by its live video ID.
+struct YouTubePlaybackTarget: Identifiable {
+  let id = UUID()
+  let videoID: String
+  let title: String?
 }
 
 enum RefreshToastState {
