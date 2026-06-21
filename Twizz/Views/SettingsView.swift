@@ -406,12 +406,13 @@ struct SettingsView: View {
   @ViewBuilder
   private var youTubeAccountSection: some View {
     if youtubeAuth.isConfigured {
-      let youTubeRed = Color(red: 1.0, green: 0.0, blue: 0.0)
       if youtubeAuth.isAuthenticated {
         VStack(alignment: .leading, spacing: 18) {
           HStack(spacing: 20) {
-            Icon(glyph: .brandYoutube, size: 44)
-              .foregroundStyle(youTubeRed)
+            Image("youtube-logo")
+              .resizable()
+              .aspectRatio(contentMode: .fit)
+              .frame(height: 44)
 
             VStack(alignment: .leading, spacing: 4) {
               Text("YouTube connected")
