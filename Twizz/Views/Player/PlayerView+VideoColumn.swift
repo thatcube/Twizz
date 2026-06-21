@@ -81,6 +81,8 @@ extension PlayerView {
           verticalPosition: captionsVerticalPosition,
           backgroundStyle: CaptionBackgroundStyle.from(captionsBackgroundStyleRaw),
           outline: captionsOutline,
+          shadow: captionsShadow,
+          fontWeight: CaptionFontWeight.from(captionsFontWeightRaw).weight,
           textColor: CaptionTextColor.from(captionsTextColorRaw).color,
           textOpacity: captionsTextOpacity
         )

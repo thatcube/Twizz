@@ -148,6 +148,33 @@ struct PlayerTitleHeader: View {
     return counts
   }
 
+  /// Official platform logo for the viewer-count row. Twitch and YouTube use the
+  /// bundled official solid marks — Twitch tinted white, YouTube's two-tone
+  /// red/white mark drawn as-is — instead of the thin Tabler outline glyphs that
+  /// read as a faded/older variant over video. Kick keeps its Tabler brand
+  /// glyph, which already reads well here.
+  @ViewBuilder
+  private func brandLogo(for platform: PlatformViewerCount.Platform) -> some View {
+    switch platform {
+    case .twitch:
+      Image("twitch-logo")
+        .renderingMode(.template)
+        .resizable()
+        .scaledToFit()
+        .frame(width: 24, height: 24)
+        .foregroundStyle(.white)
+    case .youtube:
+      Image("youtube-logo")
+        .renderingMode(.original)
+        .resizable()
+        .scaledToFit()
+        .frame(width: 24, height: 24)
+    case .kick:
+      Icon(glyph: platform.glyph, size: 24)
+        .foregroundStyle(platform.tint)
+    }
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       Text(title)
@@ -166,8 +193,7 @@ struct PlayerTitleHeader: View {
               HStack(spacing: 16) {
                 ForEach(counts) { entry in
                   HStack(spacing: 8) {
-                    Icon(glyph: entry.platform.glyph, size: 24)
-                      .foregroundStyle(entry.platform.tint)
+                    brandLogo(for: entry.platform)
                     Text(entry.count.formatted(.number))
                       .font(.footnote)
                       .fontWeight(.semibold)

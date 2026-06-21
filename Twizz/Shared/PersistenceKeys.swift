@@ -124,6 +124,8 @@ enum PersistenceKey {
   static let captionsTimingOffset = "captionsTimingOffset"
   static let captionsBackgroundStyle = "captionsBackgroundStyle"
   static let captionsOutline = "captionsOutline"
+  static let captionsShadow = "captionsShadow"
+  static let captionsFontWeight = "captionsFontWeight"
   static let captionsTextColor = "captionsTextColor"
   static let captionsTextOpacity = "captionsTextOpacity"
 

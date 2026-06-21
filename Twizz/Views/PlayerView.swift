@@ -130,6 +130,11 @@ struct PlayerView: View {
   @AppStorage(PersistenceKey.captionsBackgroundStyle) var captionsBackgroundStyleRaw = CaptionBackgroundStyle.blur.rawValue
   /// Draw a dark outline around caption glyphs for legibility.
   @AppStorage(PersistenceKey.captionsOutline) var captionsOutline = false
+  /// Draw a soft drop shadow behind caption glyphs (separate from the hard
+  /// outline) for legibility over busy/bright video.
+  @AppStorage(PersistenceKey.captionsShadow) var captionsShadow = false
+  /// Caption font weight (`CaptionFontWeight` raw value).
+  @AppStorage(PersistenceKey.captionsFontWeight) var captionsFontWeightRaw = CaptionFontWeight.semibold.rawValue
   /// Caption text color (`CaptionTextColor` raw value).
   @AppStorage(PersistenceKey.captionsTextColor) var captionsTextColorRaw = CaptionTextColor.white.rawValue
   /// Caption text opacity, 0.3…1.0.
@@ -645,6 +650,9 @@ struct PlayerView: View {
     case chatCaptionsBackgroundOption(Int)
     case chatCaptionsColorOption(Int)
     case chatCaptionsOutlineToggle
+    case chatCaptionsShadowToggle
+    case chatCaptionsWeightOption(Int)
+    case chatSyncToggle
     case youtubeMergeToggle
     case youtubeMergeURL
     case kickMergeToggle
@@ -1285,7 +1293,7 @@ struct PlayerView: View {
     }
     .onChange(of: captionsEnabled) { _, _ in syncCaptions() }
     .onChange(of: captionsTimingOffset) { _, _ in syncCaptions() }
-    .onChange(of: audioOnlyPlaylistURL) { _, _ in syncCaptions() }
+    .onChange(of: captionAudioSourceURL) { _, _ in syncCaptions() }
     .onChange(of: isLoading) { _, _ in syncCaptions() }
     .onChange(of: isOffline) { _, _ in syncCaptions() }
     .fullScreenCover(isPresented: $showSignInSheet) {
@@ -1311,6 +1319,21 @@ struct PlayerView: View {
     playback?.qualities.first(where: { $0.isAudioOnly })?.url
   }
 
+  /// Playlist the caption engine pulls audio from. Prefers the dedicated
+  /// audio-only rendition (least bandwidth), but **falls back to the
+  /// lowest-bitrate video rendition** when a stream doesn't publish an
+  /// audio-only variant — without this, captions silently never start on those
+  /// streams, which is the "works on some streams, not others" inconsistency.
+  /// Any rendition carries the same audio track, so the lowest one is the
+  /// cheapest usable source.
+  var captionAudioSourceURL: URL? {
+    guard let qualities = playback?.qualities, !qualities.isEmpty else { return nil }
+    if let audioOnly = qualities.first(where: { $0.isAudioOnly }) {
+      return audioOnly.url
+    }
+    return qualities.min(by: { $0.bitrate < $1.bitrate })?.url
+  }
+
   /// Reconcile the on-device caption engine with current playback state. Cheap
   /// to call from multiple hooks — the controller no-ops on unchanged inputs.
   /// Live-only: captioning rides the audio-only side-channel, which doesn't
@@ -1318,7 +1341,7 @@ struct PlayerView: View {
   func syncCaptions() {
     captionController.sync(
       enabled: captionsEnabled,
-      playlistURL: audioOnlyPlaylistURL,
+      playlistURL: captionAudioSourceURL,
       headers: PlaybackService.streamHeaders,
       isLive: !isVOD,
       isReady: !isLoading && errorMessage == nil && !isOffline,

@@ -138,8 +138,6 @@ struct QualityMenu: View, Equatable {
   let onToggleLatencyBadge: () -> Void
   let diagnosticsEnabled: Bool
   let onToggleDiagnostics: () -> Void
-  let chatSyncEnabled: Bool
-  let onToggleChatSync: () -> Void
   let prefetchProxyEnabled: Bool
   let onTogglePrefetchProxy: () -> Void
   let onSimulateOutgoingRaid: () -> Void
@@ -164,7 +162,6 @@ struct QualityMenu: View, Equatable {
       && lhs.captionsEnabled == rhs.captionsEnabled
       && lhs.latencyBadgeEnabled == rhs.latencyBadgeEnabled
       && lhs.diagnosticsEnabled == rhs.diagnosticsEnabled
-      && lhs.chatSyncEnabled == rhs.chatSyncEnabled
       && lhs.prefetchProxyEnabled == rhs.prefetchProxyEnabled
   }
 
@@ -221,9 +218,6 @@ struct QualityMenu: View, Equatable {
   }
   private var diagnosticsBinding: Binding<Bool> {
     Binding(get: { diagnosticsEnabled }, set: { _ in onToggleDiagnostics() })
-  }
-  private var chatSyncBinding: Binding<Bool> {
-    Binding(get: { chatSyncEnabled }, set: { _ in onToggleChatSync() })
   }
   private var prefetchProxyBinding: Binding<Bool> {
     Binding(get: { prefetchProxyEnabled }, set: { _ in onTogglePrefetchProxy() })
@@ -299,58 +293,40 @@ struct QualityMenu: View, Equatable {
 
         Divider()
 
-        // Playback toggles relocated from the old custom Playback page. Native
-        // Toggles render as checkmark rows in the menu.
-        Toggle(isOn: rewindBinding) {
-          Label("Stream Rewind", systemImage: "gobackward")
-        }
-        Toggle(isOn: viewerCountBinding) {
-          Label("Viewer Count", systemImage: "person.2")
-        }
-
-        // Captions: deliberately low-key here rather than a dedicated transport
-        // button. On/off inline; the fiddly appearance controls hide behind
-        // "Caption Options…", which opens the dedicated captions panel.
+        // Captions: its own submenu — an "Enable Captions" toggle with the
+        // appearance/timing controls one level deeper behind "Caption Options".
+        // Hidden on hardware that can't run on-device captioning.
         if captionsSupported {
-          Toggle(isOn: captionsBinding) {
-            Label("Captions", systemImage: "captions.bubble")
-          }
-          if captionsEnabled {
+          Menu {
+            Toggle(isOn: captionsBinding) {
+              Label("Enable Captions", systemImage: "captions.bubble")
+            }
             Button {
               onOpenCaptionOptions()
             } label: {
-              Label("Caption Options…", systemImage: "textformat")
+              Label("Caption Options", systemImage: "textformat")
             }
+          } label: {
+            Label("Captions", systemImage: "captions.bubble")
           }
         }
 
-        Divider()
-
-        // Sleep timer kept as a nested submenu so Quality stays the primary,
-        // one-tap control while the timer hides one level deeper.
+        // Overlays: the on-screen display toggles the user *does* reach for
+        // (Stream Rewind, Viewer Count) sit at the top, with the rarely-touched
+        // latency/diagnostics knobs — and, while the Diagnostics overlay is on,
+        // the placeholder Simulate actions — below them in the same submenu.
         Menu {
-          Picker("Sleep timer", selection: sleepSelection) {
-            ForEach(Array(sleepOptions.enumerated()), id: \.element) { index, option in
-              Text(option).tag(index)
-            }
+          Toggle(isOn: rewindBinding) {
+            Label("Stream Rewind", systemImage: "gobackward")
           }
-          .pickerStyle(.inline)
-        } label: {
-          Label(sleepMenuLabel, systemImage: "moon.zzz")
-        }
-
-        // Diagnostics: the latency/debug knobs end users never touch, tucked one
-        // level deeper. Prefetch proxy + the Simulate actions only surface once
-        // the Diagnostics overlay is on.
-        Menu {
+          Toggle(isOn: viewerCountBinding) {
+            Label("Viewer Count", systemImage: "person.2")
+          }
           Toggle(isOn: latencyBadgeBinding) {
             Label("Latency Readout", systemImage: "speedometer")
           }
           Toggle(isOn: diagnosticsBinding) {
             Label("Diagnostics Overlay", systemImage: "waveform.path.ecg")
-          }
-          Toggle(isOn: chatSyncBinding) {
-            Label("Match Stream Delay", systemImage: "timer")
           }
 
           if diagnosticsEnabled {
@@ -377,7 +353,22 @@ struct QualityMenu: View, Equatable {
             }
           }
         } label: {
-          Label("Diagnostics", systemImage: "stethoscope")
+          Label("Overlays", systemImage: "square.stack.3d.up")
+        }
+
+        Divider()
+
+        // Sleep timer kept as a nested submenu so Quality stays the primary,
+        // one-tap control while the timer hides one level deeper.
+        Menu {
+          Picker("Sleep timer", selection: sleepSelection) {
+            ForEach(Array(sleepOptions.enumerated()), id: \.element) { index, option in
+              Text(option).tag(index)
+            }
+          }
+          .pickerStyle(.inline)
+        } label: {
+          Label(sleepMenuLabel, systemImage: "moon.zzz")
         }
       } label: {
         qualityLabelText(buttonLabel)

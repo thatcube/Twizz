@@ -150,6 +150,26 @@ extension PlayerView {
         .focusSection()
       }
 
+      VStack(alignment: .leading, spacing: 7) {
+        settingsSectionHeader("Stream Delay")
+
+        settingsPill(
+          title: chatSyncToStream ? "Match Stream Delay On" : "Match Stream Delay Off",
+          isSelected: chatSyncToStream,
+          focusTag: .chatSyncToggle
+        ) {
+          chatSyncToStream.toggle()
+          applyChatSyncSettings()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+
+        Text("Holds chat back to line up with the broadcast delay, so messages appear as the moment they react to plays on screen.")
+          .font(.caption2)
+          .foregroundStyle(chatSettingsForeground.opacity(0.6))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
       settingsDisclosureRow(
         title: "Events",
         detail: eventsSettingsSummary,
@@ -582,7 +602,7 @@ extension PlayerView {
       captionsSettingsRow
         .focusSection()
 
-      if CaptionController.isSupported, captionsEnabled {
+      if CaptionController.isSupported {
         captionsAppearanceSection
         captionsTimingSection
       }
@@ -630,6 +650,25 @@ extension PlayerView {
 
       settingsStepperRow(.captionOpacity)
 
+      Text("Weight")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(chatSettingsForeground.opacity(0.7))
+        .padding(.top, 4)
+
+      HStack(spacing: 8) {
+        ForEach(Array(CaptionFontWeight.allCases.enumerated()), id: \.element) { index, weight in
+          settingsPill(
+            title: weight.label,
+            isSelected: CaptionFontWeight.from(captionsFontWeightRaw) == weight,
+            focusTag: .chatCaptionsWeightOption(index)
+          ) {
+            captionsFontWeightRaw = weight.rawValue
+          }
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .focusSection()
+
       Text("Background")
         .font(.caption.weight(.semibold))
         .foregroundStyle(chatSettingsForeground.opacity(0.7))
@@ -649,12 +688,21 @@ extension PlayerView {
       .frame(maxWidth: .infinity, alignment: .leading)
       .focusSection()
 
-      settingsPill(
-        title: captionsOutline ? "Outline On" : "Outline Off",
-        isSelected: captionsOutline,
-        focusTag: .chatCaptionsOutlineToggle
-      ) {
-        captionsOutline.toggle()
+      HStack(spacing: 8) {
+        settingsPill(
+          title: captionsOutline ? "Outline On" : "Outline Off",
+          isSelected: captionsOutline,
+          focusTag: .chatCaptionsOutlineToggle
+        ) {
+          captionsOutline.toggle()
+        }
+        settingsPill(
+          title: captionsShadow ? "Shadow On" : "Shadow Off",
+          isSelected: captionsShadow,
+          focusTag: .chatCaptionsShadowToggle
+        ) {
+          captionsShadow.toggle()
+        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .focusSection()

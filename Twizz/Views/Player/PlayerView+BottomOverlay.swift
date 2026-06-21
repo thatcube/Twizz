@@ -179,11 +179,6 @@ extension PlayerView {
           onToggleLatencyBadge: { showLatencyBadge.toggle() },
           diagnosticsEnabled: showLatencyDiagnostics,
           onToggleDiagnostics: { showLatencyDiagnostics.toggle() },
-          chatSyncEnabled: chatSyncToStream,
-          onToggleChatSync: {
-            chatSyncToStream.toggle()
-            applyChatSyncSettings()
-          },
           prefetchProxyEnabled: lowLatencyProxyEnabled,
           onTogglePrefetchProxy: { lowLatencyProxyEnabled.toggle() },
           onSimulateOutgoingRaid: { simulateOutgoingRaid() },

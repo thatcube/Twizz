@@ -78,6 +78,40 @@ enum CaptionTextColor: String, CaseIterable, Identifiable {
     }
 }
 
+/// Caption font weight, user-selectable in caption settings. Stored as a raw
+/// string in `@AppStorage` (same pattern as the other caption enums); maps to a
+/// SwiftUI `Font.Weight` for rendering.
+enum CaptionFontWeight: String, CaseIterable, Identifiable {
+    case regular
+    case medium
+    case semibold
+    case bold
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .regular: return "Regular"
+        case .medium: return "Medium"
+        case .semibold: return "Semibold"
+        case .bold: return "Bold"
+        }
+    }
+
+    var weight: Font.Weight {
+        switch self {
+        case .regular: return .regular
+        case .medium: return .medium
+        case .semibold: return .semibold
+        case .bold: return .bold
+        }
+    }
+
+    static func from(_ raw: String) -> CaptionFontWeight {
+        CaptionFontWeight(rawValue: raw) ?? .semibold
+    }
+}
+
 /// Bridges the (tvOS 26-gated) `LiveCaptionEngine` to SwiftUI, and owns the
 /// rolling caption text shown by `CaptionOverlayView`.
 ///
@@ -285,6 +319,10 @@ struct CaptionOverlayView: View {
     var backgroundStyle: CaptionBackgroundStyle = .blur
     /// Draw a dark outline around the glyphs for legibility (user toggle).
     var outline: Bool = false
+    /// Draw a soft drop shadow behind the glyphs for legibility (user toggle).
+    var shadow: Bool = false
+    /// Caption font weight (user "Weight" control).
+    var fontWeight: Font.Weight = .semibold
     /// Caption text color (user "Color" control).
     var textColor: Color = .white
     /// Caption text opacity 0…1 (user "Opacity" control).
@@ -326,7 +364,7 @@ struct CaptionOverlayView: View {
 
     private var captionSlab: some View {
         Text(text)
-            .font(.system(size: baseFontSize * fontScale, weight: .semibold))
+            .font(.system(size: baseFontSize * fontScale, weight: fontWeight))
             .multilineTextAlignment(.center)
             .foregroundStyle(textColor.opacity(textOpacity))
             .lineLimit(1)
@@ -335,6 +373,7 @@ struct CaptionOverlayView: View {
             // growing to two lines and snapping back to one.
             .truncationMode(.head)
             .captionOutline(outline)
+            .captionShadow(shadow)
             .padding(.horizontal, 28)
             .padding(.vertical, 14)
             .background(captionBackground)
@@ -422,6 +461,21 @@ private extension View {
                 .shadow(color: .black.opacity(0.9), radius: 0, x: -1.5, y: 1.5)
                 .shadow(color: .black.opacity(0.9), radius: 0, x: 1.5, y: -1.5)
                 .shadow(color: .black.opacity(0.9), radius: 0, x: -1.5, y: -1.5)
+        } else {
+            self
+        }
+    }
+}
+
+private extension View {
+    /// Soft drop shadow behind caption glyphs. Distinct from the hard 4-corner
+    /// outline: a single blurred shadow that lifts the text off busy/bright
+    /// video without the heavier stencil look. Applied only when the user
+    /// enables it.
+    @ViewBuilder
+    func captionShadow(_ enabled: Bool) -> some View {
+        if enabled {
+            self.shadow(color: .black.opacity(0.7), radius: 5, x: 0, y: 2)
         } else {
             self
         }
