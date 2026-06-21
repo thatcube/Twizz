@@ -36,6 +36,16 @@ extension ChatService {
     return full * progress
   }
 
+  /// Attach segments off the main actor (via the ingest pipeline), then enqueue.
+  /// Used by the YouTube/Kick merge paths, whose `ChatMessage`s are built from
+  /// JSON without precomputed segments, so their tokenization stays off the
+  /// scroll thread like the Twitch IRC path.
+  func enqueueTokenized(_ incoming: [ChatMessage]) async {
+    guard !incoming.isEmpty else { return }
+    let tokenized = await ingestPipeline.tokenize(incoming)
+    enqueue(tokenized)
+  }
+
   func enqueue(_ incoming: [ChatMessage]) {
     let sorted = incoming.sorted { lhs, rhs in
       if lhs.timestamp == rhs.timestamp {
@@ -124,13 +134,72 @@ extension ChatService {
     }
   }
 
+  /// Funnels a releasable batch into the observable list through the adaptive
+  /// coalescer. Segments are already attached upstream (the background pipeline);
+  /// the rare message that arrives without them (e.g. a producer that bypassed
+  /// the pipeline) is tokenized here as a safety net so it never renders wrong.
   private func appendVisible(_ sorted: [ChatMessage]) {
     guard !sorted.isEmpty else { return }
-    var tokenized = sorted
-    for index in tokenized.indices {
-      tokenized[index].segments = computeSegments(for: tokenized[index])
+    var batch = sorted
+    for index in batch.indices where batch[index].segments == nil {
+      batch[index].segments = computeSegments(for: batch[index])
     }
-    messages.append(contentsOf: tokenized)
+    pendingAppends.append(contentsOf: batch)
+    scheduleAppendFlush()
+  }
+
+  /// Flushes pending appends immediately when the previous flush is already older
+  /// than one display tick (low traffic → zero added latency), otherwise schedules
+  /// a single coalesced flush for the remainder of the tick so a burst collapses
+  /// into one array mutation.
+  private func scheduleAppendFlush() {
+    guard !appendFlushScheduled else { return }
+    let elapsed = Date().timeIntervalSince(lastAppendFlushAt)
+    if elapsed >= appendCoalesceInterval {
+      flushPendingAppends()
+      return
+    }
+    appendFlushScheduled = true
+    let delay = appendCoalesceInterval - elapsed
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+      guard let self else { return }
+      self.appendFlushScheduled = false
+      self.flushPendingAppends()
+    }
+  }
+
+  /// Folds the accumulated batch into `messages` as a single mutation: add + the
+  /// 500-cap trim happen together so the `ForEach` diffs once. Updates the
+  /// smoothed inbound rate and, only above the extreme-rate threshold, sheds the
+  /// oldest messages within the just-arrived burst.
+  private func flushPendingAppends() {
+    let now = Date()
+    let elapsed = now.timeIntervalSince(lastAppendFlushAt)
+    lastAppendFlushAt = now
+
+    guard !pendingAppends.isEmpty else { return }
+    var batch = pendingAppends
+    pendingAppends.removeAll(keepingCapacity: true)
+
+    // Estimate the inbound rate from this tick (messages / elapsed) and smooth it
+    // so a single bursty frame doesn't trip shedding. `elapsed` is the real time
+    // since the last flush, so an isolated message after a quiet gap reads as a
+    // low rate and never sheds.
+    if elapsed > 0, elapsed.isFinite {
+      let instantaneous = Double(batch.count) / elapsed
+      smoothedMessageRate = smoothedMessageRate * 0.6 + instantaneous * 0.4
+    }
+
+    // Graceful shedding ONLY at extreme sustained rates: cap how many lines a
+    // single flush appends, dropping the oldest within the burst (they'd be
+    // trimmed off the 500 cap within ~1s of a raid anyway). Below the threshold
+    // every message renders — normal/small streams are never touched.
+    if smoothedMessageRate > extremeMessageRateThreshold,
+      batch.count > maxMessagesPerFlushUnderLoad {
+      batch.removeFirst(batch.count - maxMessagesPerFlushUnderLoad)
+    }
+
+    messages.append(contentsOf: batch)
     if messages.count > maxBufferedMessages {
       messages.removeFirst(messages.count - maxBufferedMessages)
     }

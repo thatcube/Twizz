@@ -91,7 +91,7 @@ extension ChatService {
           // First load: enqueue normally. The playhead + warm-up rule shows
           // recent backlog right away (capped) and eases live messages in,
           // so the panel fills instantly instead of waiting out the full delay.
-          if !freshMessages.isEmpty { enqueue(freshMessages) }
+          if !freshMessages.isEmpty { await enqueueTokenized(freshMessages) }
           isFirstPoll = false
           try? await Task.sleep(for: .milliseconds(Int(clampedDelay)))
         } else if freshMessages.count > 1 {
@@ -99,11 +99,11 @@ extension ChatService {
           // one-by-one rather than all at once.
           let perMs = clampedDelay / UInt64(freshMessages.count)
           for msg in freshMessages {
-            enqueue([msg])
+            await enqueueTokenized([msg])
             try? await Task.sleep(for: .milliseconds(Int(perMs)))
           }
         } else {
-          if !freshMessages.isEmpty { enqueue(freshMessages) }
+          if !freshMessages.isEmpty { await enqueueTokenized(freshMessages) }
           try? await Task.sleep(for: .milliseconds(Int(clampedDelay)))
         }
       } catch {

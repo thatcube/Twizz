@@ -21,8 +21,8 @@ extension ChatService {
         let frame = try await currentSocket.receive()
         connection.resetBackoff()
         switch frame {
-        case .string(let text): handle(text)
-        case .data(let data): handle(String(decoding: data, as: UTF8.self))
+        case .string(let text): await handle(text)
+        case .data(let data): await handle(String(decoding: data, as: UTF8.self))
         @unknown default: break
         }
       } catch {
@@ -47,9 +47,14 @@ extension ChatService {
     }
   }
 
-  func handle(_ raw: String) {
-    // A single frame can batch multiple IRC lines.
-    var parsedMessages: [ChatMessage] = []
+  func handle(_ raw: String) async {
+    // A single frame can batch multiple IRC lines. Control lines (PING/PONG,
+    // CAP/JOIN handshake, end-of-NAMES, raids) touch connection state and stay on
+    // the main actor — they're cheap and rare. The expensive PRIVMSG/USERNOTICE
+    // lines are handed to the serial background pipeline, which parses them into
+    // `ChatMessage`s and computes their `segments` off the main actor before we
+    // enqueue the finished batch.
+    var messagePieces: [String] = []
     for piece in raw.components(separatedBy: "\r\n") where !piece.isEmpty {
       if piece.hasPrefix("PING") {
         send("PONG :tmi.twitch.tv")
@@ -68,15 +73,11 @@ extension ChatService {
         pendingRaid = raid
         continue
       }
-      if let subMessage = ChatMessage(highlightedUSERNOTICE: piece) {
-        parsedMessages.append(subMessage)
-        continue
-      }
-      if let message = ChatMessage(ircLine: piece) {
-        parsedMessages.append(message)
-      }
+      messagePieces.append(piece)
     }
 
+    guard !messagePieces.isEmpty else { return }
+    let parsedMessages = await ingestPipeline.parseAndTokenize(messagePieces)
     guard !parsedMessages.isEmpty else { return }
     enqueue(parsedMessages)
   }

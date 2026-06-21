@@ -175,6 +175,51 @@ final class ChatService {
   /// the Apple TV's modest CPU.
   let maxBufferedMessages = 500
 
+  /// Background ingest stage: parses raw frames into `ChatMessage`s and computes
+  /// their `segments` off the main actor, then hands finished batches back to the
+  /// existing `enqueue()` → sync → `appendVisible` path. Serial, so order is
+  /// preserved. See `ChatIngestPipeline`.
+  let ingestPipeline = ChatIngestPipeline()
+
+  // MARK: - Adaptive UI coalescing (frame-bucketed appends)
+
+  /// Finished, segment-attached messages waiting to be folded into the
+  /// observable `messages` array. Under load these accumulate for at most one
+  /// display tick so a burst becomes a single array mutation (one `ForEach`
+  /// diff) instead of one per batch; at low traffic the very next message
+  /// flushes immediately, so a lone line on a small stream appears instantly.
+  var pendingAppends: [ChatMessage] = []
+  /// True while a coalesced flush is already scheduled for the current tick.
+  var appendFlushScheduled = false
+  /// Wall-clock of the last flush, used to flush instantly when the previous
+  /// flush is already older than one tick (i.e. traffic is low).
+  var lastAppendFlushAt: Date = .distantPast
+  /// One display tick. Appends arriving within this window of the last flush are
+  /// coalesced into a single mutation; an isolated append older than this flushes
+  /// with zero added latency.
+  let appendCoalesceInterval: Double = 1.0 / 60.0
+  /// Smoothed inbound message rate (msg/s), updated on each flush and used to
+  /// decide whether to shed under extreme load.
+  var smoothedMessageRate: Double = 0
+
+  /// Sustained inbound rate (msg/s) above which we start shedding the oldest
+  /// messages within an arriving burst. Far beyond a readable rate and well
+  /// above any normal/small streamer, so below it every message renders.
+  let extremeMessageRateThreshold: Double = 45
+  /// Hard cap on how many messages a single coalesced flush will append while
+  /// shedding is active. Anything beyond this in one tick is dropped from the
+  /// front of the burst — those oldest lines would be trimmed off the 500 cap
+  /// within ~1s of a raid anyway.
+  let maxMessagesPerFlushUnderLoad = 24
+
+  /// Coalesces the emote + cheermote catalog loads so the visible buffer is
+  /// re-tokenized once (off the main actor) instead of twice on main.
+  var retokenizeCoalesceTask: Task<Void, Never>?
+
+  /// One-time registration guard for the process memory-pressure observer that
+  /// clears the chat line caches.
+  private static var memoryPressureSource: DispatchSourceMemoryPressure?
+
   func configureExperimentalYouTubeMerge(enabled: Bool, channelOrURL: String) {
     youtubeMergeEnabled = enabled
     youtubeChannelOrURL = channelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -236,6 +281,13 @@ final class ChatService {
     syncWarmupStart = Date()
     connection.resetBackoff()
 
+    // Channel change: drop the freshly-irrelevant ingest snapshot and clear the
+    // process-global chat line caches so a new channel doesn't render against the
+    // previous channel's colors/segments and the caches don't accumulate.
+    Task { [ingestPipeline] in await ingestPipeline.updateSnapshot(.empty) }
+    ChatService.clearLineCaches()
+    ChatService.installMemoryPressureObserverIfNeeded()
+
     connection.connect(to: endpoint)
 
     send("PASS SCHMOOPIIE")
@@ -247,7 +299,7 @@ final class ChatService {
       let catalog = await EmoteCatalogService.shared.catalog(for: normalized)
       guard self.channel == normalized else { return }
       self.emoteURLs = catalog
-      self.retokenizeVisibleBuffer()
+      self.requestRetokenize()
     }
 
     Task { [weak self] in
@@ -262,7 +314,7 @@ final class ChatService {
       let catalog = await CheermoteCatalogService.shared.catalog(for: normalized)
       guard self.channel == normalized else { return }
       self.cheermotes = catalog
-      self.retokenizeVisibleBuffer()
+      self.requestRetokenize()
     }
 
     receiveTask = Task { [weak self] in await self?.receiveLoop() }
@@ -279,6 +331,12 @@ final class ChatService {
     stopKickLoop(clearStatus: true)
     isConnected = false
     messages.removeAll()
+    pendingAppends.removeAll()
+    appendFlushScheduled = false
+    lastAppendFlushAt = .distantPast
+    smoothedMessageRate = 0
+    retokenizeCoalesceTask?.cancel()
+    retokenizeCoalesceTask = nil
     syncDrainTask?.cancel()
     syncDrainTask = nil
     syncBuffer.removeAll()
@@ -294,5 +352,30 @@ final class ChatService {
     channel = nil
     hasSentJoin = false
     hasCapAck = false
+  }
+
+  // MARK: - Chat line cache lifecycle
+
+  /// Clears the process-global chat line caches (precomputed segments, resolved
+  /// name colors, mention-highlight results, and the light-surface memo). Called
+  /// on channel change and on memory pressure so a long session across many
+  /// channels never renders against a previous channel's cached state and the
+  /// bounded caches don't sit full of dead entries.
+  static func clearLineCaches() {
+    RichChatLineView.clearSegmentCache()
+    ChatView.clearLineCaches()
+  }
+
+  /// Registers a single process-wide memory-pressure observer that drops the
+  /// chat line caches under warning/critical pressure. Idempotent.
+  static func installMemoryPressureObserverIfNeeded() {
+    guard memoryPressureSource == nil else { return }
+    let source = DispatchSource.makeMemoryPressureSource(
+      eventMask: [.warning, .critical], queue: .main)
+    source.setEventHandler {
+      MainActor.assumeIsolated { ChatService.clearLineCaches() }
+    }
+    source.resume()
+    memoryPressureSource = source
   }
 }

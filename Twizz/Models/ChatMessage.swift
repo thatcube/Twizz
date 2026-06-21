@@ -30,7 +30,7 @@ enum SystemNoticeIcon {
 }
 
 /// A single chat line parsed from Twitch IRC or YouTube Live Chat.
-struct ChatMessage: Identifiable {
+struct ChatMessage: Identifiable, Sendable {
     let id = UUID()
     let username: String
     /// Twitch user color as a `#RRGGBB` hex string, if the user set one.
