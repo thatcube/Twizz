@@ -590,6 +590,24 @@ struct PlayerView: View {
   /// offline paths own that), so it never reload-loops a dead stream.
   let frozenPlayheadNudgeSeconds: Double = 2
   let frozenPlayheadReloadSeconds: Double = 5
+  /// Alternate-source (YouTube simulcast) freeze watchdog. The main playback
+  /// watchdog above is Twitch-only — its recovery seeks the plain alt item
+  /// backward (accumulating latency) or rebuilds the Twitch pipeline — so
+  /// `samplePlaybackHealth` early-returns while the alt source is active and the
+  /// rate controller / watchdog tasks are stopped entirely. That leaves the alt
+  /// source with *no* stall recovery: AVPlayer can wedge non-advancing
+  /// (paused/idle, or a `.waitingToPlayAtSpecifiedRate` deadlock) while holding a
+  /// full forward buffer and sit frozen indefinitely — only a manual quality /
+  /// source change rebuilds the item and breaks it (the reported
+  /// `READY/paused · Rate 0.00x · buffer 59s` freeze). This lightweight, alt-safe
+  /// watchdog runs off the existing 1s latency monitor: once the playhead has
+  /// been stuck for `altFreezeNudgeSeconds` it kicks playback with
+  /// `playImmediately` (cheap, preserves DVR position); if that won't take within
+  /// `altFreezeReloadSeconds` it re-resolves a *fresh* YouTube manifest
+  /// (googlevideo URLs are IP-bound / time-expiring, so a new item is the correct
+  /// heavy recovery — exactly what the manual quality change did).
+  let altFreezeNudgeSeconds: Double = 3
+  let altFreezeReloadSeconds: Double = 12
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.

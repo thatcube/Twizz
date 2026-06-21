@@ -138,6 +138,18 @@ final class PlayerModel {
   /// switch (in either direction) is never yanked back. Reset on channel change.
   var didManuallySelectSource = false
 
+  /// Alt-source freeze watchdog bookkeeping (see `recoverAltSourceIfFrozen`).
+  /// `altLastPlayheadSeconds` is the previously sampled playhead;
+  /// `altStuckSince` marks when forward progress stopped (nil while advancing);
+  /// `altHasAdvanced` gates recovery on the stream having actually played at
+  /// least once, so initial manifest/buffer loading isn't mistaken for a freeze;
+  /// `lastAltFreezeNudgeAt` throttles the `playImmediately` kick. All reset when
+  /// a fresh alt item is built in `makeAltSourceItem`.
+  var altLastPlayheadSeconds: Double?
+  var altStuckSince: Date?
+  var altHasAdvanced = false
+  var lastAltFreezeNudgeAt = Date.distantPast
+
   // MARK: Stream Rewind (DVR) / scrub / VOD hand-off
 
   /// True while the viewer has explicitly paused the live stream. Pausing keeps
@@ -338,6 +350,22 @@ extension PlayerView {
   var didManuallySelectSource: Bool {
     get { model.didManuallySelectSource }
     nonmutating set { model.didManuallySelectSource = newValue }
+  }
+  var altLastPlayheadSeconds: Double? {
+    get { model.altLastPlayheadSeconds }
+    nonmutating set { model.altLastPlayheadSeconds = newValue }
+  }
+  var altStuckSince: Date? {
+    get { model.altStuckSince }
+    nonmutating set { model.altStuckSince = newValue }
+  }
+  var altHasAdvanced: Bool {
+    get { model.altHasAdvanced }
+    nonmutating set { model.altHasAdvanced = newValue }
+  }
+  var lastAltFreezeNudgeAt: Date {
+    get { model.lastAltFreezeNudgeAt }
+    nonmutating set { model.lastAltFreezeNudgeAt = newValue }
   }
   var isUserPaused: Bool {
     get { model.isUserPaused }

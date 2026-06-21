@@ -24,6 +24,12 @@ extension PlayerView {
   /// and playback stalls on a black frame even though the manifest resolved.
   func makeAltSourceItem(url: URL) -> AVPlayerItem {
     currentSourceURL = url
+    // Re-arm the alt-source freeze watchdog for this fresh item: a new manifest
+    // must prove forward progress again before recovery can fire.
+    altLastPlayheadSeconds = nil
+    altStuckSince = nil
+    altHasAdvanced = false
+    lastAltFreezeNudgeAt = Date.distantPast
     let asset = AVURLAsset(
       url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": Self.altSourceHTTPHeaders])
     let item = AVPlayerItem(asset: asset)
@@ -239,8 +245,74 @@ extension PlayerView {
       } else {
         altSourceStatus = "READY/paused · \(srcTag) · \(dims) · buffer \(ahead)"
       }
+      // Alt source has no main playback watchdog (it's Twitch-only): run the
+      // freeze recovery here so a wedged item with a healthy buffer doesn't sit
+      // frozen until the viewer manually changes quality.
+      recoverAltSourceIfFrozen(item: item)
     @unknown default:
       altSourceStatus = "\(srcTag) · unknown status"
+    }
+  }
+
+  /// Alt-source freeze watchdog. The main playback watchdog is disabled while the
+  /// YouTube simulcast is active (its Twitch-tuned recovery would seek the plain
+  /// alt item backward or rebuild the Twitch pipeline), so without this the alt
+  /// source has no stall recovery at all: AVPlayer can wedge non-advancing —
+  /// involuntarily paused/idle, or parked in `.waitingToPlayAtSpecifiedRate` —
+  /// while still holding a full forward buffer, and sit frozen until the viewer
+  /// manually changes quality (the reported `READY/paused · Rate 0.00x ·
+  /// buffer 59s` freeze, where every buffer/`timeControlStatus` check reads
+  /// green). Driven once per second from the latency monitor's
+  /// `updateAltSourceDiagnostics`, independent of whether the diagnostics overlay
+  /// is shown. Escalates: a cheap `playImmediately` nudge (un-pauses / breaks the
+  /// park without rebuffering, preserving the viewer's DVR position) first, then a
+  /// fresh-manifest re-resolve if the nudge won't take (googlevideo URLs are
+  /// IP-bound / time-expiring, so a new item — not a re-seek — is the correct
+  /// heavy recovery).
+  func recoverAltSourceIfFrozen(item: AVPlayerItem) {
+    // A deliberate viewer pause (DVR), an in-progress scrub, or a reload all hold
+    // the playhead in place legitimately — not a freeze.
+    guard isUsingAltSource, !isVOD, !isUserPaused, !isScrubbing, !isLoading else {
+      altStuckSince = nil
+      return
+    }
+
+    let playhead = CMTimeGetSeconds(item.currentTime())
+    guard playhead.isFinite else { return }
+
+    let advanced = altLastPlayheadSeconds.map { playhead - $0 > 0.05 } ?? false
+    altLastPlayheadSeconds = playhead
+    if advanced {
+      altHasAdvanced = true
+      altStuckSince = nil
+      lastAltFreezeNudgeAt = Date.distantPast
+      return
+    }
+
+    // Don't mistake initial manifest/buffer loading for a freeze: only recover a
+    // stream that has actually produced forward progress at least once.
+    guard altHasAdvanced else { return }
+
+    let now = Date()
+    if altStuckSince == nil { altStuckSince = now }
+    let stuckFor = now.timeIntervalSince(altStuckSince ?? now)
+
+    if stuckFor >= altFreezeReloadSeconds {
+      // Nudges aren't breaking it: rebuild from a fresh manifest.
+      // `resolveAndPlayAltSource` self-throttles (10s) and single-flights, and
+      // `makeAltSourceItem` re-arms this watchdog, so re-entry is safe.
+      if showLatencyDiagnostics { logDiagnosticsEvent("alt freeze -> re-resolve") }
+      altStuckSince = nil
+      Task { await resolveAndPlayAltSource(reason: "altFreeze") }
+    } else if stuckFor >= altFreezeNudgeSeconds,
+      now.timeIntervalSince(lastAltFreezeNudgeAt) >= 1
+    {
+      lastAltFreezeNudgeAt = now
+      player.playImmediately(atRate: 1.0)
+      if showLatencyDiagnostics {
+        let buf = bufferAheadSeconds(item).map { String(format: "%.1fs", $0) } ?? "—"
+        logDiagnosticsEvent("alt freeze nudge (buf \(buf))")
+      }
     }
   }
 }

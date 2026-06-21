@@ -363,6 +363,28 @@ of stalling, and the slow-down rides out short buffer dips.
   playhead)". **Status: this is the intended fix for the `Reloads: 0` freeze but
   it has NOT been reproduced/verified against a real freeze yet — the trigger is
   intermittent. Treat as a hypothesis until the overlay shows it catching one.**
+- **Alt-source (YouTube simulcast) freeze watchdog (`recoverAltSourceIfFrozen`).**
+  All of the above lives in `samplePlaybackHealth`, which **early-returns while the
+  YouTube simulcast is the active source** (its Twitch-tuned recovery would seek
+  the plain alt item backward or rebuild the Twitch pipeline), and
+  `switchToAltYouTubeSource` stops the watchdog/rate-controller tasks outright. So
+  the alt source had **no** stall recovery at all: AVPlayer could wedge
+  non-advancing — involuntarily paused/idle or parked in
+  `.waitingToPlayAtSpecifiedRate` — while still holding a full forward buffer, and
+  sit frozen indefinitely (observed as `Source: YouTube simulcast ·
+  READY/paused · Rate 0.00x · buffer 59s`, every buffer/`timeControlStatus` check
+  green) until the viewer manually changed quality (which rebuilds the item).
+  `recoverAltSourceIfFrozen` closes that gap with an alt-safe watchdog driven once
+  per second from the latency monitor's `updateAltSourceDiagnostics` (so it runs
+  with the diagnostics overlay off too). It tracks the playhead, and once it has
+  been stuck — having advanced at least once first, so initial buffering isn't
+  mistaken for a freeze — nudges with `player.playImmediately(atRate: 1.0)` after
+  `altFreezeNudgeSeconds` (3s; preserves the viewer's DVR position) and, if the
+  nudge won't take, re-resolves a *fresh* YouTube manifest after
+  `altFreezeReloadSeconds` (12s). The re-resolve (not a re-seek) is the correct
+  heavy recovery because googlevideo URLs are IP-bound / time-expiring — it is
+  what the manual quality change effectively did. Logs "alt freeze nudge (buf …)"
+  and "alt freeze -> re-resolve".
 - **End-of-stream / offline detection (the "stream ended but it just froze"
   bug).** When a broadcast ends or raids, Twitch's `streamLiveStatus` GraphQL
   keeps returning `.unknown` (not `.offline`) for tens of seconds to minutes, so
