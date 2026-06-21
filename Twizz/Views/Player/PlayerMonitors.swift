@@ -50,9 +50,6 @@ final class PlaybackMonitorBox {
   /// after repeated resyncs fail to stick.
   var lastLiveResyncAt = Date.distantPast
   var liveResyncAttempts = 0
-  /// Throttles the snap-to-true-live reload that fires when the viewer returns to
-  /// the live edge atop a stale seekable window.
-  var lastLiveEdgeSnapAt = Date.distantPast
   /// When the player first entered a sustained "waiting with a starved buffer"
   /// state. Drives the authoritative end-of-stream (offline) probe.
   var liveStallWaitingSince: Date?
@@ -148,21 +145,20 @@ struct PlayerTitleHeader: View {
     return counts
   }
 
-  /// Official platform logo for the viewer-count row. Twitch and YouTube use the
-  /// bundled official solid marks — Twitch tinted white, YouTube's two-tone
-  /// red/white mark drawn as-is — instead of the thin Tabler outline glyphs that
-  /// read as a faded/older variant over video. Kick keeps its Tabler brand
-  /// glyph, which already reads well here.
+  /// Official platform logo for the viewer-count row. Each platform uses its
+  /// bundled official solid mark — Twitch as the purple badge with the white
+  /// glitch, YouTube's two-tone red/white play badge, and Kick's filled green
+  /// glyph — instead of the thin Tabler outline glyphs that read as a
+  /// faded/older variant over video.
   @ViewBuilder
   private func brandLogo(for platform: PlatformViewerCount.Platform) -> some View {
     switch platform {
     case .twitch:
-      Image("twitch-logo")
-        .renderingMode(.template)
+      Image("twitch-badge")
+        .renderingMode(.original)
         .resizable()
         .scaledToFit()
         .frame(width: 24, height: 24)
-        .foregroundStyle(.white)
     case .youtube:
       Image("youtube-logo")
         .renderingMode(.original)
@@ -170,7 +166,11 @@ struct PlayerTitleHeader: View {
         .scaledToFit()
         .frame(width: 24, height: 24)
     case .kick:
-      Icon(glyph: platform.glyph, size: 24)
+      Image("kick-logo")
+        .renderingMode(.template)
+        .resizable()
+        .scaledToFit()
+        .frame(width: 24, height: 24)
         .foregroundStyle(platform.tint)
     }
   }

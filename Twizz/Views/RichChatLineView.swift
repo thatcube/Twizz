@@ -64,7 +64,9 @@ struct RichChatLineView: View {
             // Kick brand dark (green "K" sits on top).
             return Color(twitchHex: "#0B0E0F") ?? .black
         default:
-            return Color(twitchHex: "#FF0000") ?? .red
+            // YouTube uses its own official two-tone logo image, which carries the
+            // red field itself — so the tile behind it is clear.
+            return .clear
         }
     }
 
@@ -75,10 +77,6 @@ struct RichChatLineView: View {
 
     private var sourceBadgeCornerRadius: CGFloat {
         badgeSize * 0.28
-    }
-
-    private var sourceBadgePlayIconSize: CGFloat {
-        badgeSize * 0.44
     }
 
     private var nameFontSize: CGFloat {
@@ -249,9 +247,13 @@ struct RichChatLineView: View {
                 .frame(width: badgeSize * 0.74, height: badgeSize * 0.74)
                 .foregroundStyle(sourceBadgeIconColor)
         default:
-            Icon(glyph: .playerPlayFilled, size: sourceBadgePlayIconSize)
-                .foregroundStyle(sourceBadgeIconColor)
-                .offset(x: 0.8)
+            // YouTube's official two-tone play badge (red rounded field + white
+            // triangle), drawn as-is rather than a homebrewed red tile + glyph.
+            Image("youtube-logo")
+                .renderingMode(.original)
+                .resizable()
+                .scaledToFit()
+                .frame(width: sourceBadgeWidth, height: badgeSize)
         }
     }
 

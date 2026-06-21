@@ -141,6 +141,25 @@ Rules whenever you add or change any UI element:
    Transparency), and so future theme work doesn't have to chase down one-off
    hardcoded colors.
 
+## Player chat-settings menu: register every focusable (recurring trap)
+
+The in-player chat-settings panel (`PlayerView+Settings.swift`) has bitten us
+repeatedly with the same bug: a newly added control **looks** focusable but
+focus instantly bounces back up off it when you navigate to it.
+
+Cause: while the panel is open, the focus handler in `PlayerView.swift` reverts
+focus to the last known-good control whenever focus lands on a `Focusable` case
+that `isChatSettingsFocus(_:)` (in `PlayerView+BottomOverlay.swift`) does **not**
+return `true` for. That function is a hand-maintained allowlist, so it's a second
+source of truth that's easy to forget.
+
+**Whenever you add or move a control in the chat-settings panel** (a
+`settingsPill`, `settingsDisclosureRow`, `settingsStepperRow`, text field, or
+sub-page button), you MUST add its `Focusable` case to the switch in
+`isChatSettingsFocus(_:)`. Symptom if you forget: "focus jumps back up" / "can't
+focus the new control." Debug builds also print a `⚠️ [chat-settings focus]`
+warning naming the unregistered tag.
+
 
 
 The app uses **Tabler icons** (MIT) everywhere for iconography. Whenever you add

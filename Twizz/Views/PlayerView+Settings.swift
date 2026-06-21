@@ -162,7 +162,6 @@ extension PlayerView {
           applyChatSyncSettings()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .focusSection()
 
         Text("Holds chat back to line up with the broadcast delay, so messages appear as the moment they react to plays on screen.")
           .font(.caption2)
@@ -762,6 +761,8 @@ extension PlayerView {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
+    // NOTE: `focusTag` must be registered in `isChatSettingsFocus(_:)` or focus
+    // will bounce off this pill. See that function's doc comment.
     Button {
       pinChatFocus(focusTag)
       action()
@@ -798,6 +799,8 @@ extension PlayerView {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
+    // NOTE: `focusTag` must be registered in `isChatSettingsFocus(_:)` or focus
+    // will bounce off this row. See that function's doc comment.
     Button(action: action) {
       HStack(spacing: 10) {
         Text(title)
@@ -849,6 +852,8 @@ extension PlayerView {
   }
 
   func settingsStepperRow(_ field: ChatStepperField) -> some View {
+    // NOTE: the stepper's focus tags (.chatStepperDec/.chatStepperInc) must be
+    // registered in `isChatSettingsFocus(_:)` or focus will bounce off them.
     let config = chatStepperConfig(field)
     let canDecrement = config.value > config.range.lowerBound
     let canIncrement = config.value < config.range.upperBound

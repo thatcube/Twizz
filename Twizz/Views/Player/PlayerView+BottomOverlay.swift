@@ -399,6 +399,17 @@ extension PlayerView {
       lines.append("State: Playing/waiting · Waiting: \(diagWaitingReasonDescription())")
     }
     lines.append("Edge gap: \(edge) · Encoder: \(wall)")
+    if let w = currentSeekWindow() {
+      let span = max(w.end - w.start, 0)
+      let behind = max(w.end - w.now, 0)
+      lines.append(
+        "Rewind window: \(diagFormat(span, decimals: 1))s · pos -\(diagFormat(behind, decimals: 1))s")
+    } else {
+      lines.append("Rewind window: —")
+    }
+    let dvr = lowLatencyProxy.dvrStats
+    lines.append(
+      "Proxy DVR: \(diagFormat(dvr.retainedSeconds, decimals: 1))s · keys: \(dvr.keyCount)")
     lines.append("Chat hold: \(chatHold)")
     lines.append(
       "Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")
@@ -553,6 +564,18 @@ extension PlayerView {
   // A control missing from this switch is unreachable — the focus engine cannot
   // land on it and traps focus on the nearest registered neighbor. When you add
   // a new settings pill, update ALL THREE places (enum case, focusTag, here).
+  /// Allowlist of every focus tag that lives inside the chat-settings panel.
+  ///
+  /// ⚠️ THIS IS A REGISTRY YOU MUST KEEP IN SYNC. The focus handler in
+  /// `PlayerView` reverts focus to the last known-good control whenever it lands
+  /// on a tag this returns `false` for (see the `showChatSettings` branch in
+  /// `handleFocusChange`). So if you add ANY new control to the chat-settings UI
+  /// — a `settingsPill`, `settingsDisclosureRow`, `settingsStepperRow`, text
+  /// field, or sub-page button — and forget to add its `Focusable` case here,
+  /// the control will *look* focusable but focus will instantly bounce back up
+  /// off it. That exact omission has caused this bug repeatedly. Every
+  /// `focusTag:` / `.focused($focus, equals:)` used in `PlayerView+Settings`
+  /// must appear in this switch.
   func isChatSettingsFocus(_ focus: Focusable) -> Bool {
     switch focus {
     case .chatSettingsButton,
@@ -560,10 +583,13 @@ extension PlayerView {
       .chatAdvancedButton,
       .chatWidthOption,
       .chatLayoutOption,
+      .chatSyncToggle,
       .chatCaptionsToggle,
       .chatCaptionsBackgroundOption,
       .chatCaptionsColorOption,
       .chatCaptionsOutlineToggle,
+      .chatCaptionsShadowToggle,
+      .chatCaptionsWeightOption,
       .chatEventsButton,
       .chatRaidEventToggle,
       .chatHypeTrainEventToggle,

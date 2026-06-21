@@ -277,10 +277,6 @@ struct PlayerView: View {
     get { mon.lastLiveResyncAt }
     nonmutating set { mon.lastLiveResyncAt = newValue }
   }
-  var lastLiveEdgeSnapAt: Date {
-    get { mon.lastLiveEdgeSnapAt }
-    nonmutating set { mon.lastLiveEdgeSnapAt = newValue }
-  }
   var liveResyncAttempts: Int {
     get { mon.liveResyncAttempts }
     nonmutating set { mon.liveResyncAttempts = newValue }
@@ -507,15 +503,6 @@ struct PlayerView: View {
   let liveResyncCooldownSeconds: Double = 6
   /// After this many resync seeks fail to hold the edge, escalate to a full reload.
   let maxLiveResyncAttempts = 3
-  /// When the viewer returns to the live edge but the seekable window AVPlayer
-  /// holds trails the true broadcast by at least this much, a same-window seek
-  /// can't reach real live — so we force a fresh load that lands at the true edge.
-  /// Measured as wall-clock behind-live minus the in-window edge gap, so it only
-  /// fires when the cached playlist is genuinely stale (not for normal latency).
-  let staleLiveWindowSnapThresholdSeconds: Double = 10
-  /// Minimum spacing between snap-to-true-live reloads, so a single return-to-live
-  /// can never loop into repeated reloads.
-  let liveEdgeSnapCooldownSeconds: Double = 6
   let stallNotificationDebounceSeconds: Double = 2.5
   /// Stream-stability watchdog. It counts destabilizing events — stalls plus
   /// involuntary backward playhead jumps (an AVPlayer rewind we never request) —
@@ -642,6 +629,9 @@ struct PlayerView: View {
     // Stream Rewind transport bar
     case rewindScrubber
     // Main settings page
+    // ⚠️ Every chat-settings (`chat*` / *Merge*) case below must also be listed
+    // in `isChatSettingsFocus(_:)` (PlayerView+BottomOverlay.swift), or focus
+    // will bounce off the control. See that function's doc comment.
     case chatPresetOption(Int)
     case chatAdvancedButton
     case chatWidthOption(Int)
@@ -1196,6 +1186,20 @@ struct PlayerView: View {
         if isChatSettingsFocus(newFocus) {
           lastChatSettingsFocus = newFocus
         } else {
+          // Focus landed on something the chat-settings registry doesn't know,
+          // so bounce back to the last good control. If you just added a control
+          // to the settings panel and it won't hold focus, the cause is almost
+          // certainly a missing case in `isChatSettingsFocus(_:)` — this is the
+          // recurring trap. Surface it loudly in debug builds.
+          #if DEBUG
+          if showChatSettings, newFocus != .video {
+            print(
+              "⚠️ [chat-settings focus] '\(newFocus)' is not registered in "
+                + "isChatSettingsFocus(_:), so focus is bouncing off it. Add this "
+                + "case to that switch in PlayerView+BottomOverlay.swift."
+            )
+          }
+          #endif
           focus = lastChatSettingsFocus
         }
         return
@@ -1250,6 +1254,7 @@ struct PlayerView: View {
       altYouTubeMasterURL = nil
       altSourceStatus = nil
       youtubeSourceAvailable = false
+      youtubeViewerCount = nil
       // Auto-default vs. manual intent is per-channel: clear the manual flag so
       // the "prefer YouTube" auto-default can apply once on the new channel.
       didManuallySelectSource = false

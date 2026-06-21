@@ -6,16 +6,19 @@ import UIKit
 
 extension PlayerView {
   /// The concurrent YouTube viewer count to show in the player's per-platform
-  /// row, or `nil` when this stream's creator isn't live on YouTube. Resolves the
-  /// streamer's YouTube channel ID from either the followed-channel enrichment
-  /// (dual-platform follows) or the public Twitch→YouTube alias table (so it also
-  /// covers simulcasters the viewer doesn't follow), then reads that channel's
-  /// live presence from the same public snapshot the Home cards use. No YouTube
-  /// API call is made from the device, and a count is never shown unless that
-  /// YouTube channel is currently live — which also matches the source the player
-  /// now defaults to for simulcasters.
+  /// row, or `nil` when this stream's creator isn't live on YouTube. Primary
+  /// source is the live "watching now" count captured for free from the same
+  /// YouTube watch page the alt-source resolver already fetches for this stream —
+  /// so it reflects the actually-playing source for simulcasters and costs no
+  /// extra request and no metered YouTube Data API call. Falls back to the public
+  /// snapshot the Home cards use (keyed by the streamer's YouTube channel ID from
+  /// followed-channel enrichment or the Twitch→YouTube alias table) when the live
+  /// resolve hasn't produced a count yet; a count is never shown unless that
+  /// YouTube channel is currently live.
   var youtubeViewerCountForCurrentStream: Int? {
     guard !isVOD else { return nil }
+    if let live = youtubeViewerCount { return live }
+
     let login = activeChannel.isEmpty ? channel : activeChannel
     guard !login.isEmpty else { return nil }
 
@@ -25,8 +28,6 @@ extension PlayerView {
       ?? environment.youtubeAliases.youtubeChannelID(forTwitchLogin: login)
     else { return nil }
 
-    // Prefer the freshest snapshot reading, falling back to the value already
-    // enriched onto the followed channel; only show it while live on YouTube.
     let snapshot = environment.youtubeLive.presence(forChannelID: channelID)
     let isLive = snapshot?.isLive ?? followedPresence?.isLive ?? false
     guard isLive else { return nil }
