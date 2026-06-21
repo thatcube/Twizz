@@ -427,6 +427,10 @@ struct FollowedChannelsFetcher {
   }
 
   private func mapStream(_ stream: HelixStream, profileImageURL: URL?) -> FollowedChannel {
+    // 640x360 is the *ceiling*: this is a live preview, so it renders through
+    // `LiveThumbnail`, which downsizes the request to the bucket that fits the
+    // card (e.g. 320x180 for 6-across) and adds a cache-busting token. We keep
+    // the full size here so large cards still have a sharp source to scale from.
     let thumb = stream.thumbnailURL
       .replacingOccurrences(of: "{width}", with: "640")
       .replacingOccurrences(of: "{height}", with: "360")
@@ -446,7 +450,7 @@ struct FollowedChannelsFetcher {
   }
 
   private func performHelixRequest(_ req: URLRequest) async throws -> (Data, Int) {
-    let (data, response) = try await URLSession.shared.data(for: req)
+    let (data, response) = try await NetworkClient.api.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     return (data, status)
   }
