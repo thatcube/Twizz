@@ -809,7 +809,12 @@ struct PlayerView: View {
   }
 
   var body: some View {
-    ZStack {
+    // The player body is a very long SwiftUI modifier chain. Kept as a single
+    // expression it blows the Swift type-checker's solver budget ("unable to
+    // type-check this expression in reasonable time"). Breaking it into a few
+    // `let`-bound sub-expressions lets each group type-check independently
+    // without changing the order modifiers are applied or any behavior.
+    let base = ZStack {
       palette.playerBackdrop.ignoresSafeArea()
         // Attached to the backdrop (a child) rather than the root ZStack so it
         // doesn't collide with the sign-in `.fullScreenCover` below. Two
@@ -899,6 +904,7 @@ struct PlayerView: View {
     .environment(\.colorScheme, palette.chromeColorScheme)
     .animation(.motionAware(.easeInOut(duration: 0.35), reduceMotion: reduceMotion), value: hermes.currentMoment)
     .animation(.motionAware(.easeOut(duration: 0.25), reduceMotion: reduceMotion), value: goLive?.pending)
+    let g1 = base
     .onChange(of: chat.pendingRaid) { _, newRaid in
       // Incoming raids (someone raiding the channel you're watching) are purely
       // informational: show a passive banner and auto-dismiss it. We never steal
@@ -958,6 +964,7 @@ struct PlayerView: View {
         focus = .sleepKeepWatching
       }
     }
+    let g2 = g1
     .task {
       if activeChannel.isEmpty { activeChannel = channel }
       if isVOD {
@@ -1035,6 +1042,7 @@ struct PlayerView: View {
       goLive?.suppressedLogin = nil
       setIdleTimer(disabled: false)
     }
+    let g3 = g2
     .onExitCommand {
       if isSleeping {
         wakeFromSleep()
@@ -1109,6 +1117,7 @@ struct PlayerView: View {
         scheduleHide()
       }
     }
+    let g4 = g3
     .onChange(of: focus) { oldFocus, newFocus in
       // Disarm the chat-input hop the moment focus is back on a control button, so
       // the composer drops out of the engine again and a plain swipe can't reach it.
@@ -1231,6 +1240,7 @@ struct PlayerView: View {
         }
       }
     }
+    let g5 = g4
     .onChange(of: experimentalYouTubeMergeEnabled) { _, _ in
       applyExperimentalYouTubeSettings()
     }
@@ -1243,6 +1253,7 @@ struct PlayerView: View {
     .onChange(of: experimentalKickMergeChannelOrURL) { _, _ in
       applyExperimentalKickSettings()
     }
+    let g6 = g5
     .onChange(of: activeChannel) { _, _ in
       // A manual override is scoped to the channel it was entered for; clear it
       // when the channel changes (e.g. following a raid) so it can't leak.
@@ -1277,6 +1288,7 @@ struct PlayerView: View {
     .task(id: activeChannel) {
       await refreshKickAutoTarget()
     }
+    let g7 = g6
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
       guard !isVOD else { return }
       if suppressLowLatencyToggleReload {
@@ -1296,6 +1308,7 @@ struct PlayerView: View {
       configurePlayerForLive()
       Task { await load(reason: "rewindToggle", resetMetadata: false) }
     }
+    return g7
     .onChange(of: captionsEnabled) { _, _ in syncCaptions() }
     .onChange(of: captionsTimingOffset) { _, _ in syncCaptions() }
     .onChange(of: captionAudioSourceURL) { _, _ in syncCaptions() }
