@@ -211,6 +211,22 @@ final class PlayerModel {
   var lastGestureScrollAt = Date.distantPast
   var chatHoldTask: Task<Void, Never>?
   var lastHoldRepeatAt = Date.distantPast
+
+  // MARK: Channel identity & resolved metadata
+  var activeChannel: String = ""
+  var youtubeAutoResolvedTarget = ""
+  var kickAutoResolvedTarget = ""
+  var streamTitle: String = ""
+  var channelDisplayName: String = ""
+  var channelAvatarURL: URL?
+  var pendingSwitchLogin: String?
+  var chatReplayStartMessageID: ChatMessage.ID?
+
+  // MARK: Engine lifecycle tasks & observers
+  var vodTimeObserver: Any?
+  var latencyTask: Task<Void, Never>?
+  var playbackWatchdogTask: Task<Void, Never>?
+  var rateControlTask: Task<Void, Never>?
 }
 
 extension PlayerView {
@@ -505,5 +521,53 @@ extension PlayerView {
   var lastHoldRepeatAt: Date {
     get { model.lastHoldRepeatAt }
     nonmutating set { model.lastHoldRepeatAt = newValue }
+  }
+  var activeChannel: String {
+    get { model.activeChannel }
+    nonmutating set { model.activeChannel = newValue }
+  }
+  var youtubeAutoResolvedTarget: String {
+    get { model.youtubeAutoResolvedTarget }
+    nonmutating set { model.youtubeAutoResolvedTarget = newValue }
+  }
+  var kickAutoResolvedTarget: String {
+    get { model.kickAutoResolvedTarget }
+    nonmutating set { model.kickAutoResolvedTarget = newValue }
+  }
+  var streamTitle: String {
+    get { model.streamTitle }
+    nonmutating set { model.streamTitle = newValue }
+  }
+  var channelDisplayName: String {
+    get { model.channelDisplayName }
+    nonmutating set { model.channelDisplayName = newValue }
+  }
+  var channelAvatarURL: URL? {
+    get { model.channelAvatarURL }
+    nonmutating set { model.channelAvatarURL = newValue }
+  }
+  var pendingSwitchLogin: String? {
+    get { model.pendingSwitchLogin }
+    nonmutating set { model.pendingSwitchLogin = newValue }
+  }
+  var chatReplayStartMessageID: ChatMessage.ID? {
+    get { model.chatReplayStartMessageID }
+    nonmutating set { model.chatReplayStartMessageID = newValue }
+  }
+  var vodTimeObserver: Any? {
+    get { model.vodTimeObserver }
+    nonmutating set { model.vodTimeObserver = newValue }
+  }
+  var latencyTask: Task<Void, Never>? {
+    get { model.latencyTask }
+    nonmutating set { model.latencyTask = newValue }
+  }
+  var playbackWatchdogTask: Task<Void, Never>? {
+    get { model.playbackWatchdogTask }
+    nonmutating set { model.playbackWatchdogTask = newValue }
+  }
+  var rateControlTask: Task<Void, Never>? {
+    get { model.rateControlTask }
+    nonmutating set { model.rateControlTask = newValue }
   }
 }

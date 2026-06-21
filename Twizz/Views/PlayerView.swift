@@ -268,7 +268,7 @@ struct PlayerView: View {
 
 
   /// The currently-active channel, which can change if the user follows a raid.
-  @State var activeChannel: String = ""
+  /// (State now on PlayerModel.)
 
   @Environment(\.dismiss) var dismiss
   @Environment(\.themePalette) var palette
@@ -315,16 +315,14 @@ struct PlayerView: View {
   /// with whatever handle was last entered).
   @State var experimentalYouTubeMergeChannelOrURL = ""
   /// Best-effort YouTube target derived from the active Twitch channel (its
-  /// social links, then description, then a name-based guess).
-  @State var youtubeAutoResolvedTarget = ""
+  /// social links, then description, then a name-based guess). (State on PlayerModel.)
   @AppStorage("experimentalKickMergeEnabled") var experimentalKickMergeEnabled = false
   /// Optional manual override for the Kick merge target. Per-channel and
   /// non-persistent for the same reason as the YouTube override, so a handle
   /// entered for one streamer never leaks into another.
   @State var experimentalKickMergeChannelOrURL = ""
   /// Best-effort Kick target derived from the active Twitch channel (its social
-  /// links, then description, then a name-based guess).
-  @State var kickAutoResolvedTarget = ""
+  /// links, then description, then a name-based guess). (State on PlayerModel.)
   @AppStorage(LowLatencyHLSProxy.settingsKey) var lowLatencyProxyEnabled = true
   @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) var streamRewindEnabled = true
   @AppStorage("showLatencyDiagnostics") var showLatencyDiagnostics = false
@@ -367,13 +365,12 @@ struct PlayerView: View {
   /// the forwarding accessors in `PlayerModel.swift`.
   @State var model = PlayerModel()
   /// Periodic player time observer used in VOD mode to sync chat replay + the
-  /// seek readout to the playhead.
-  @State var vodTimeObserver: Any?
+  /// seek readout to the playhead. (vodTimeObserver now on PlayerModel.)
   /// Debug-only cursor for the "Simulate Interactive Moment" cycle button.
   @State var debugMomentIndex = 0
   @State var showChat: Bool =
     UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
-  @State var chatReplayStartMessageID: ChatMessage.ID?
+  // chatReplayStartMessageID now lives in PlayerModel.
   @State var showSignInSheet = false
   @State var showChatSettings = false
   @State var chatSettingsPage: ChatSettingsPage = .main
@@ -381,13 +378,11 @@ struct PlayerView: View {
   /// floating panel to its content and animate when the page/content changes.
   @State var chatSettingsContentHeight: CGFloat = 0
   @State var showControls = false
-  @State var streamTitle: String = ""
-  @State var channelDisplayName: String = ""
-  @State var channelAvatarURL: URL?
+  // streamTitle / channelDisplayName / channelAvatarURL now live in PlayerModel.
   @State var channelPageTarget: ChannelPageTarget?
   /// When the user picks a "More like this" channel from the channel page, we
   /// stash its login and switch to it once the page cover finishes dismissing.
-  @State var pendingSwitchLogin: String?
+  /// (pendingSwitchLogin now on PlayerModel.)
   @State var chatDraft: String = ""
   @State var chatInputActivationToken: Int = 0
   @State var youtubeInputActivationToken: Int = 0
@@ -397,12 +392,10 @@ struct PlayerView: View {
   @State var hideTask: Task<Void, Never>?
   @State var focusRecoveryTask: Task<Void, Never>?
   @State var isQualityMenuPresented = false
-  @State var latencyTask: Task<Void, Never>?
-  @State var playbackWatchdogTask: Task<Void, Never>?
-  /// Drives the adaptive playback-rate controller at a sub-second cadence — far
-  /// faster than the 1 Hz latency monitor — so the anti-stall slow-down can react
-  /// to a draining buffer before it empties into a hard stall.
-  @State var rateControlTask: Task<Void, Never>?
+  // latencyTask / playbackWatchdogTask / rateControlTask now live in PlayerModel.
+  // The adaptive playback-rate controller runs at a sub-second cadence — far
+  // faster than the 1 Hz latency monitor — so the anti-stall slow-down can react
+  // to a draining buffer before it empties into a hard stall.
   // The latency / watchdog / rewind monitoring boxes (`mon`, `latencyReadout`,
   // `rewindReadout`), the scrub-input coordinator and the trackpad monitor now
   // live on `PlayerModel` and are reached via forwarding accessors. They use
