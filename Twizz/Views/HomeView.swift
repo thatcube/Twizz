@@ -410,7 +410,6 @@ struct HomeView: View {
       ScrollView(.vertical, showsIndicators: false) {
         VStack(alignment: .leading, spacing: 72) {
           followingSection(rail: rail)
-          youtubeSubscriptionsSection(rail: rail)
           recommendedForYouSection(rail: rail)
           topStreamsSection(rail: rail)
           recommendedCategoriesSection(rail: rail)
@@ -468,7 +467,7 @@ struct HomeView: View {
 
       ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: rail.spacing) {
-          ForEach(follows.channels) { channel in
+          ForEach(followingRowChannels) { channel in
             let itemID = "following-\(channel.id)"
             let isFocused = focusedItemID == itemID
 
@@ -484,15 +483,21 @@ struct HomeView: View {
                 mediaCornerRadius: mediaCornerRadius
               ),
               showsGameName: true,
-              onWatch: { selectedChannel = $0 },
-              onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
+              onWatch: { openFollowingChannel($0) },
+              onGoToChannel: { channel in
+                if isYouTubeOnly(channel) {
+                  playYouTube(channel)
+                } else {
+                  channelPageTarget = ChannelPageTarget(channel: channel)
+                }
+              }
             )
             .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
             .focusable(true)
             .focused($focusedItemID, equals: itemID)
             .focusEffectDisabled()
             .onTapGesture {
-              selectedChannel = channel
+              openFollowingChannel(channel)
             }
             .accessibilityAddTraits(.isButton)
             .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
@@ -504,7 +509,7 @@ struct HomeView: View {
       }
       .scrollClipDisabled()
 
-      if follows.channels.isEmpty {
+      if followingRowChannels.isEmpty {
         Text(follows.isUsingDemoData ? "No trending channels are available right now." : "No followed channels are available yet.")
           .foregroundStyle(.secondary)
       }
@@ -514,27 +519,45 @@ struct HomeView: View {
 
   // MARK: - YouTube subscriptions
 
-  /// YouTube channel IDs already represented by a Twitch-followed card (either
-  /// already enriched with YouTube presence, or known via the alias table), so
-  /// the YouTube row doesn't duplicate a streamer who's also on the Following rail.
-  private var twitchRepresentedYouTubeChannelIDs: Set<String> {
-    var ids = Set(follows.channels.compactMap { $0.youtube?.channelID })
-    for channel in follows.channels {
-      if let mapped = youtubeAliases.youtubeChannelID(forTwitchLogin: channel.login) {
-        ids.insert(mapped)
-      }
-    }
-    return ids
+  /// Normalizes a streamer name for cross-platform identity matching: lowercased
+  /// with everything but letters/digits stripped, so "Ludwig" (Twitch) and
+  /// "Ludwig" (YouTube), or "fuslie"/"Fuslie", collapse to the same key.
+  private func normalizedStreamerKey(_ name: String) -> String {
+    name.lowercased().unicodeScalars.filter {
+      CharacterSet.alphanumerics.contains($0)
+    }.map(String.init).joined()
   }
 
-  /// Subscribed YouTube streamers who are live right now, as unified cards, with
-  /// any streamer already shown on the Following (Twitch) rail removed.
+  /// Identity keys for streamers already shown on the Following (Twitch) rail —
+  /// by YouTube channel ID (enriched presence or alias table) and by normalized
+  /// display name / login — so a streamer live on both platforms is never
+  /// duplicated as a separate YouTube card.
+  private var twitchRepresentedKeys: (channelIDs: Set<String>, names: Set<String>) {
+    var channelIDs = Set(follows.channels.compactMap { $0.youtube?.channelID })
+    var names = Set<String>()
+    for channel in follows.channels {
+      if let mapped = youtubeAliases.youtubeChannelID(forTwitchLogin: channel.login) {
+        channelIDs.insert(mapped)
+      }
+      names.insert(normalizedStreamerKey(channel.displayName))
+      names.insert(normalizedStreamerKey(channel.login))
+    }
+    names.remove("")
+    return (channelIDs, names)
+  }
+
+  /// Subscribed YouTube streamers who are live right now, as standard cards, with
+  /// any streamer already on the Following (Twitch) rail removed so there's a
+  /// single card per streamer. Rendered with the shared `LiveBadge` like every
+  /// other card — `isLive`/`viewerCount` carry the YouTube live state.
   private var liveYouTubeSubscriptionCards: [FollowedChannel] {
-    let represented = twitchRepresentedYouTubeChannelIDs
+    guard showYouTubeSubscriptions else { return [] }
+    let represented = twitchRepresentedKeys
     return youtubeSubscriptions.subscriptions.compactMap { sub in
       guard let presence = youtubeResolver.presence(forChannelID: sub.channelID),
         presence.isLive,
-        !represented.contains(sub.channelID)
+        !represented.channelIDs.contains(sub.channelID),
+        !represented.names.contains(normalizedStreamerKey(sub.title))
       else { return nil }
 
       let thumbnailURL = presence.videoID.flatMap {
@@ -546,13 +569,32 @@ struct HomeView: View {
         displayName: sub.title,
         title: presence.title ?? "",
         gameName: "",
-        viewerCount: nil,
+        viewerCount: presence.viewerCount,
         thumbnailURL: thumbnailURL,
         profileImageURL: sub.thumbnailURL,
-        isLive: false
+        isLive: true
       )
       channel.youtube = presence
       return channel
+    }
+  }
+
+  /// The single Following rail: Twitch follows plus the deduped, currently-live
+  /// YouTube-only subscriptions.
+  private var followingRowChannels: [FollowedChannel] {
+    follows.channels + liveYouTubeSubscriptionCards
+  }
+
+  /// A merged card that should play via YouTube (no Twitch equivalent).
+  private func isYouTubeOnly(_ channel: FollowedChannel) -> Bool {
+    channel.id.hasPrefix("yt-")
+  }
+
+  private func openFollowingChannel(_ channel: FollowedChannel) {
+    if isYouTubeOnly(channel) {
+      playYouTube(channel)
+    } else {
+      selectedChannel = channel
     }
   }
 
@@ -560,67 +602,6 @@ struct HomeView: View {
     guard youtubeAuth.isAuthenticated, showYouTubeSubscriptions else { return }
     let ids = youtubeSubscriptions.subscriptions.map(\.channelID)
     await youtubeResolver.refresh(channelIDs: ids, using: youtubeAuth, force: force)
-  }
-
-  @ViewBuilder
-  private func youtubeSubscriptionsSection(rail: ChannelRailMetrics) -> some View {
-    let cards = showYouTubeSubscriptions ? liveYouTubeSubscriptionCards : []
-
-    if !cards.isEmpty {
-      VStack(alignment: .leading, spacing: 2) {
-        HStack {
-          Text("Live on YouTube")
-            .font(.system(size: 32, weight: .bold))
-            .accessibilityAddTraits(.isHeader)
-
-          if youtubeResolver.isResolving {
-            ProgressView()
-              .scaleEffect(0.85)
-          }
-
-          Spacer()
-        }
-
-        ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: rail.spacing) {
-            ForEach(cards) { channel in
-              let itemID = "youtube-\(channel.id)"
-              let isFocused = focusedItemID == itemID
-
-              StreamChannelCard(
-                channel: channel,
-                isFocused: isFocused,
-                layout: .rail(
-                  mediaWidth: rail.mediaWidth,
-                  mediaHeight: rail.mediaHeight,
-                  focusHorizontalInset: focusHorizontalInset,
-                  focusVerticalInset: focusVerticalInset,
-                  cardCornerRadius: cardCornerRadius,
-                  mediaCornerRadius: mediaCornerRadius
-                ),
-                showsGameName: false,
-                onWatch: { playYouTube($0) },
-                onGoToChannel: { playYouTube($0) }
-              )
-              .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
-              .focusable(true)
-              .focused($focusedItemID, equals: itemID)
-              .focusEffectDisabled()
-              .onTapGesture {
-                playYouTube(channel)
-              }
-              .accessibilityAddTraits(.isButton)
-              .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-              .animation(AppLayout.focusScaleAnimation, value: isFocused)
-              .zIndex(isFocused ? 2 : 0)
-            }
-          }
-          .padding(.vertical, channelRailVerticalPadding)
-        }
-        .scrollClipDisabled()
-      }
-      .focusSection()
-    }
   }
 
   private func playYouTube(_ channel: FollowedChannel) {
