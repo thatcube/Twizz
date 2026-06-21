@@ -254,11 +254,15 @@ struct SignInView: View {
   }
 }
 
-/// Casual "we're waiting on you" status shown while polling Twitch for
-/// authorization. Cycles through a set of playful, Twitch-flavored phrases —
-/// each paired with a real third-party emote (7TV / BTTV / FFZ) so the app's
-/// native emote support is on show right from the sign-in screen.
-private struct SignInWaitingView: View {
+/// Casual "we're waiting on you" status shown while polling Twitch *or* YouTube
+/// for authorization (shared by `SignInView` and `YouTubeSignInView`). Cycles
+/// through a broad, randomized set of playful stream-culture phrases — each
+/// paired with a real third-party emote (7TV / BTTV / FFZ) so the app's native
+/// emote support is on show right from the sign-in screen. `accent` tints the
+/// pulsing dots to match the host screen.
+struct SignInWaitingView: View {
+  var accent: Color = Color(red: 0.58, green: 0.41, blue: 0.96)
+
   private struct Line {
     let text: String
     let emote: String
@@ -271,21 +275,40 @@ private struct SignInWaitingView: View {
     Line(text: "No rush, chat", emote: "FeelsGoodMan"),
     Line(text: "Easy clap", emote: "EZ"),
     Line(text: "Hop in already", emote: "AYAYA"),
-    Line(text: "Vibing till you're in", emote: "ffzJam"),
+    Line(text: "Vibing till you're in", emote: "catJAM"),
     Line(text: "Let's gooo", emote: "PepePls"),
+    Line(text: "Is it loading yet", emote: "PauseChamp"),
+    Line(text: "Mods are asleep", emote: "monkaW"),
+    Line(text: "Two more minutes", emote: "Copium"),
+    Line(text: "Trust the process", emote: "Prayge"),
+    Line(text: "First!", emote: "KEKW"),
+    Line(text: "Hold the W", emote: "Pog"),
+    Line(text: "Still here, still hyping", emote: "peepoClap"),
+    Line(text: "Source? Just wait", emote: "Susge"),
+    Line(text: "Big if true", emote: "Pepega"),
+    Line(text: "Patiently malding", emote: "Madge"),
+    Line(text: "Buffering good vibes", emote: "widepeepoHappy"),
+    Line(text: "NODDERS while we wait", emote: "NODDERS"),
+    Line(text: "Chat's been patient", emote: "Sadge"),
+    Line(text: "Sub goal: you signing in", emote: "peepoHappy"),
+    Line(text: "Sheeesh, take your time", emote: "EZ"),
+    Line(text: "Clip it when you're in", emote: "KEKW"),
+    Line(text: "We ball regardless", emote: "Pepega"),
+    Line(text: "Number go up soon", emote: "Copium"),
   ]
 
+  @State private var deck: [Line] = SignInWaitingView.lines.shuffled()
   @State private var index = 0
   @State private var emoteURLs: [String: URL] = [:]
   @State private var visible = true
 
   private let timer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
-  private var line: Line { Self.lines[index % Self.lines.count] }
+  private var line: Line { deck[index % deck.count] }
 
   var body: some View {
     HStack(spacing: 24) {
-      PulsingDots()
+      PulsingDots(accent: accent)
 
       HStack(spacing: 18) {
         Text(line.text)
@@ -310,6 +333,9 @@ private struct SignInWaitingView: View {
       withAnimation(.easeInOut(duration: 0.35)) { visible = false }
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
         index += 1
+        // Reshuffle each time we exhaust the deck so the order stays random
+        // rather than repeating the same sequence on a loop.
+        if index % deck.count == 0 { deck.shuffle() }
         withAnimation(.easeInOut(duration: 0.35)) { visible = true }
       }
     }
@@ -328,8 +354,11 @@ private struct SignInWaitingView: View {
 }
 
 /// Three dots that fade and scale in sequence to signal ongoing background work
-/// (e.g. polling Twitch for authorization).
-private struct PulsingDots: View {
+/// (e.g. polling Twitch for authorization). `accent` tints the dots to match the
+/// host sign-in screen.
+struct PulsingDots: View {
+  var accent: Color = Color(red: 0.58, green: 0.41, blue: 0.96)
+
   private let dotCount = 3
   @State private var isAnimating = false
 
@@ -337,7 +366,7 @@ private struct PulsingDots: View {
     HStack(spacing: 10) {
       ForEach(0..<dotCount, id: \.self) { index in
         Circle()
-          .fill(Color(red: 0.58, green: 0.41, blue: 0.96))
+          .fill(accent)
           .frame(width: 14, height: 14)
           .scaleEffect(isAnimating ? 1.0 : 0.4)
           .opacity(isAnimating ? 1.0 : 0.3)

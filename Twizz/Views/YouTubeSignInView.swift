@@ -50,8 +50,10 @@ struct YouTubeSignInView: View {
   private var signInContent: some View {
     VStack(spacing: 64) {
       HStack(spacing: 28) {
-        Icon(glyph: .brandYoutube, size: 56)
-          .foregroundStyle(youTubeRed)
+        Image("youtube-logo")
+          .resizable()
+          .aspectRatio(contentMode: .fit)
+          .frame(height: 56)
         Text("Sign in to YouTube")
           .font(.system(size: 52, weight: .bold))
       }
@@ -182,12 +184,7 @@ struct YouTubeSignInView: View {
         .foregroundStyle(.orange)
         .multilineTextAlignment(.center)
     } else if auth.isAuthenticating {
-      HStack(spacing: 18) {
-        ProgressView()
-        Text(auth.statusMessage ?? "Waiting on you…")
-          .font(.title3)
-          .foregroundStyle(.secondary)
-      }
+      SignInWaitingView(accent: youTubeRed)
     } else if let status = auth.statusMessage {
       Text(status)
         .font(.title3)
