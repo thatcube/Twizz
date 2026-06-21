@@ -2,9 +2,15 @@ import CoreImage.CIFilterBuiltins
 import SwiftUI
 import UIKit
 
-/// A scan-to-sign-in QR code on a white rounded card with the service's brand
-/// logo inset in the center. Shared by the Twitch and YouTube sign-in screens so
-/// both pages render an identical, on-brand code.
+/// A scan-to-sign-in QR code inset with the service's brand logo, framed by a
+/// theme-aware card. Shared by the Twitch and YouTube sign-in screens so both
+/// pages render an identical, on-brand code.
+///
+/// The outer card follows the active `ThemePalette` (white in Light, dark in
+/// Dark/OLED) so it sits naturally on every background. The QR itself stays on
+/// an opaque white tile that supplies the light quiet zone scanners need —
+/// brand-color modules on white — so it never inverts to a hard-to-scan
+/// light-on-dark code regardless of theme.
 ///
 /// The center logo occludes part of the code, so the QR is generated at the
 /// highest error-correction level ("H", ~30% recoverable) to stay scannable.
@@ -19,7 +25,21 @@ struct BrandQRCodeView: View {
   /// Side length of the QR image inside the white card.
   var size: CGFloat = 500
 
+  @Environment(\.themePalette) private var palette
+
   var body: some View {
+    qrTile
+      .padding(24)
+      .background(palette.cardOpaqueSurface, in: RoundedRectangle(cornerRadius: 52))
+      .overlay {
+        RoundedRectangle(cornerRadius: 52)
+          .strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
+      }
+  }
+
+  /// The scannable code on its required white quiet-zone tile. White here is
+  /// intentional (the QR background scanners expect), not a themed surface.
+  private var qrTile: some View {
     Group {
       if let image = Self.makeQRCode(from: payload, moduleColor: moduleColor) {
         Image(uiImage: image)
@@ -29,7 +49,7 @@ struct BrandQRCodeView: View {
           .overlay { logoBadge }
       } else {
         RoundedRectangle(cornerRadius: 16)
-          .fill(Color.white.opacity(0.1))
+          .fill(Color.black.opacity(0.05))
           .overlay(ProgressView())
       }
     }
