@@ -20,6 +20,12 @@ extension PlayerView {
     async let metadataTask: Void = refreshChannelMetadata()
     do {
       let url = try await PlaybackService.vodMasterURL(id: vod.id)
+      // Dismissed mid-resolve: don't resurrect playback on an orphaned AVPlayer.
+      if Task.isCancelled {
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        return
+      }
       let asset = AVURLAsset(
         url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders])
       currentSourceURL = url

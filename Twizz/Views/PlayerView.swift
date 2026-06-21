@@ -1413,6 +1413,7 @@ struct PlayerView: View {
       removeVODTimeObserver()
       replay.stop()
       player.pause()
+      player.replaceCurrentItem(with: nil)
       captionController.stop()
       chat.disconnect()
       eventSub.stop()
