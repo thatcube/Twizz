@@ -3672,6 +3672,15 @@ private struct QualityMenu: View, Equatable {
         } label: {
           Label(qualityMenuLabel, systemImage: "rectangle.on.rectangle")
         }
+        // The control-button style paints its label a *concrete* white
+        // (`palette.chromeOnOpaque`) when unfocused, and a Menu propagates that
+        // foreground into its presented rows. A concrete color can't take part
+        // in tvOS's focus inversion, so the system disclosure chevron stayed
+        // white and vanished on the white focus pill. Re-stating the rows'
+        // foreground as the *semantic* `.primary` lets tvOS invert it (light on
+        // the dark menu material, dark on the focused white pill) so the chevron
+        // and icon stay visible in every theme.
+        .foregroundStyle(.primary)
         .onAppear(perform: onMenuPresented)
         .onDisappear(perform: onMenuDismissed)
 
@@ -3689,6 +3698,7 @@ private struct QualityMenu: View, Equatable {
           } label: {
             Label(sourceMenuLabel, systemImage: "dot.radiowaves.left.and.right")
           }
+          .foregroundStyle(.primary)
         }
 
         Divider()
@@ -3705,6 +3715,7 @@ private struct QualityMenu: View, Equatable {
         } label: {
           Label(sleepMenuLabel, systemImage: "moon.zzz")
         }
+        .foregroundStyle(.primary)
       } label: {
         qualityLabelText(buttonLabel)
           .accessibilityLabel("Quality, \(buttonLabel)")

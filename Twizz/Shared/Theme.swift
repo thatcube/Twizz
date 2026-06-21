@@ -184,6 +184,14 @@ struct ThemePalette: Equatable {
   )
 
   /// Twitch brand purple (#9146FF).
+  ///
+  /// DO NOT use this for buttons, controls, focus states, tints, chevrons, or
+  /// any general UI element. It is reserved for the few places that already
+  /// reference it (e.g. the subtle `topGlow` accent) and must only be applied
+  /// elsewhere when the maintainer explicitly asks for brand purple by name.
+  /// Default to theme-palette colors (`ThemePalette` / `chromeOnOpaque` etc.)
+  /// for everything else. Agents: do not reach for this to fix contrast or
+  /// styling problems — pick a palette-derived color instead.
   static let brandPurple = Color(red: 0.569, green: 0.275, blue: 1.0)
 
   // MARK: Player-chrome appearance (translucent / glass-enabled path)
