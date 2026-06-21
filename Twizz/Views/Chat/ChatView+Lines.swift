@@ -412,6 +412,17 @@ extension ChatView {
   private static var colorCacheOrder: [String] = []
   private static let colorCacheLimit = 3000
 
+  /// Drops the process-global chat line caches (resolved name colors,
+  /// mention-highlight results, and the light-surface memo). Called on channel
+  /// change and on memory pressure (see `ChatService.clearLineCaches`).
+  static func clearLineCaches() {
+    colorCache.removeAll(keepingCapacity: false)
+    colorCacheOrder.removeAll(keepingCapacity: false)
+    highlightCache.removeAll(keepingCapacity: false)
+    highlightCacheOrder.removeAll(keepingCapacity: false)
+    lightSurfaceMemo = nil
+  }
+
   /// Bright, readable defaults (Twitch-style) for users with no color set.
   private static let fallbackPalette: [Color] = [
     Color(twitchHex: "#FF4500")!, Color(twitchHex: "#1E90FF")!, Color(twitchHex: "#00C896")!,

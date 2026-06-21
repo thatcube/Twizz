@@ -115,14 +115,14 @@ struct ChatView: View {
     return value
   }
 
-  private struct LightSurfaceSignature: Equatable {
+  struct LightSurfaceSignature: Equatable {
     let palette: ThemePalette
     let glassDisabled: Bool
     let isSideLayout: Bool
     let useLighterOverlayBackground: Bool
   }
 
-  private static var lightSurfaceMemo: (signature: LightSurfaceSignature, value: Bool)?
+  static var lightSurfaceMemo: (signature: LightSurfaceSignature, value: Bool)?
 
   private var messageSpacingValue: CGFloat {
     messageSpacing
