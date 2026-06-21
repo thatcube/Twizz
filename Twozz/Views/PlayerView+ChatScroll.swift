@@ -188,7 +188,13 @@ extension PlayerView {
     // coasts to a stop a fraction of a message short still rejoins the live feed
     // instead of stranding the chat frozen just above it.
     if idx >= lastIndex - 0.5 {
-      resumeChatLive()
+      // A swipe/hold that coasts to the live bottom must hand focus back to the
+      // composer, exactly like the discrete down-press does (stepChatScroll →
+      // resumeChatLive(restoreFocus: true)). Without restoreFocus, the row's
+      // buttons re-enter the focus engine with focus unset and tvOS grabs the
+      // leftmost control (the channel button) instead of the message field.
+      // VOD has no composer, so leave its read-only focus handling unchanged.
+      resumeChatLive(restoreFocus: !isVOD)
       return false
     }
     let clamped = max(0, idx)
