@@ -60,10 +60,8 @@ struct SettingsNightShiftSection: View {
       switch control {
       case .dimness, .warmth:
         nightShift.isPreviewing = true
-      case .location, .preview:
+      case .location, .preview, nil:
         nightShift.isPreviewing = false
-      case nil:
-        break  // transient (e.g. a menu is open) — keep the current preview state
       }
     }
     .onDisappear { nightShift.isPreviewing = false }
