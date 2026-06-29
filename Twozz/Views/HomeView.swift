@@ -3,12 +3,11 @@ import SwiftUI
 struct HomeView: View {
   let deepLinkRouter: DeepLinkRouter
 
-  private let channelRailVerticalPadding: CGFloat = 20
-  private let focusVerticalInset: CGFloat = 18
-  /// Mirror of the shared rail inset so the card-render sites keep one name.
-  private var focusHorizontalInset: CGFloat { ChannelRailLayout.focusHorizontalInset }
-  private let cardCornerRadius: CGFloat = 30
-  private let mediaCornerRadius: CGFloat = 18
+  private var channelRailVerticalPadding: CGFloat { CardMetrics.railVerticalPadding }
+  private var focusVerticalInset: CGFloat { CardMetrics.focusInset }
+  private var focusHorizontalInset: CGFloat { CardMetrics.focusInset }
+  private var cardCornerRadius: CGFloat { CardMetrics.cardCornerRadius }
+  private var mediaCornerRadius: CGFloat { CardMetrics.mediaCornerRadius }
   private let autoRefreshStaleInterval: TimeInterval = 5 * 60
 
   @State private var selectedSidebarTab: SidebarTab = .home

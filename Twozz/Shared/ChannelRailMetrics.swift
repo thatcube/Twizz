@@ -22,21 +22,20 @@ enum ChannelRailLayout {
   /// rail scrolls.
   static let peekCardFraction: CGFloat = 0.08
   /// Breathing room reserved on each side of a card for its focus halo/scale.
-  static let focusHorizontalInset: CGFloat = 18
+  static var focusHorizontalInset: CGFloat { CardMetrics.focusInset }
   static let minMediaWidth: CGFloat = 220
   static let maxMediaWidth: CGFloat = 900
 
   /// Base gap between cards before the size-aware scale is applied. Shared by
   /// the Browse grid so rails and grids tighten in lockstep.
-  static let baseCardSpacing: CGFloat = 20
+  static var baseCardSpacing: CGFloat { CardMetrics.cardSpacing }
 
   /// Subtly tightens the gap between cards as they get smaller (more cards
   /// across). Smaller cards don't need as wide a gutter, and reclaiming that
   /// space lets each card render a touch larger in the same width. Full base
   /// spacing at 2-across, easing down to ~68% at 6-across.
   static func spacingScale(forVisibleCardCount count: Int) -> CGFloat {
-    let clamped = CGFloat(min(max(count, 2), 6))
-    return 1.0 - (clamped - 2) * 0.08
+    CardMetrics.spacingScale(forVisibleCardCount: count)
   }
 
   /// Solve the per-card width so `visibleCardCount` full cards (plus a peek of

@@ -15,19 +15,19 @@ struct MediaContentCard: View {
 
   var mediaWidth: CGFloat
   var mediaHeight: CGFloat
-  var focusHorizontalInset: CGFloat = 18
-  var focusVerticalInset: CGFloat = 18
-  var cardCornerRadius: CGFloat = 22
-  var mediaCornerRadius: CGFloat = 18
+  var focusHorizontalInset: CGFloat = CardMetrics.focusInset
+  var focusVerticalInset: CGFloat = CardMetrics.focusInset
+  var cardCornerRadius: CGFloat = CardMetrics.cardCornerRadius
+  var mediaCornerRadius: CGFloat = CardMetrics.mediaCornerRadius
 
   @Environment(\.themePalette) private var palette
   @Environment(\.glassDisabled) private var glassDisabled
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: CardMetrics.captionSpacing) {
       media
 
-      VStack(alignment: .leading, spacing: 4) {
+      VStack(alignment: .leading, spacing: CardMetrics.captionLineSpacing) {
         Text(title)
           .font(.subheadline.weight(.semibold))
           .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
@@ -51,7 +51,11 @@ struct MediaContentCard: View {
       isFocused: isFocused,
       palette: palette
     )
-    .shadow(color: Color.black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+    .shadow(
+      color: Color.black.opacity(isFocused ? CardMetrics.focusShadowOpacity : 0),
+      radius: CardMetrics.focusShadowRadius,
+      y: CardMetrics.focusShadowY
+    )
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilityLabel)
   }

@@ -13,9 +13,9 @@ struct StreamChannelCard: View {
       mediaCornerRadius: CGFloat
     )
     case grid(
-      cardCornerRadius: CGFloat = 16,
-      mediaCornerRadius: CGFloat = 12,
-      contentInset: CGFloat = 14
+      cardCornerRadius: CGFloat = CardMetrics.gridCardCornerRadius,
+      mediaCornerRadius: CGFloat = CardMetrics.gridMediaCornerRadius,
+      contentInset: CGFloat = CardMetrics.gridContentInset
     )
 
     var cardCornerRadius: CGFloat {
@@ -75,9 +75,9 @@ struct StreamChannelCard: View {
     var avatarSize: CGFloat {
       switch self {
       case .rail:
-        62
+        CardMetrics.railAvatarSize
       case .grid:
-        68
+        CardMetrics.gridAvatarSize
       }
     }
 
@@ -115,10 +115,10 @@ struct StreamChannelCard: View {
   @State private var hasConfiguredPreviewPlayer = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: CardMetrics.captionSpacing) {
       media
 
-      HStack(alignment: .top, spacing: 10) {
+      HStack(alignment: .top, spacing: CardMetrics.avatarTextSpacing) {
         CachedAsyncImage(url: channel.profileImageURL) { image in
           image.resizable().scaledToFill()
         } placeholder: {
@@ -128,7 +128,7 @@ struct StreamChannelCard: View {
         .frame(width: layout.avatarSize, height: layout.avatarSize)
         .clipShape(Circle())
 
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: CardMetrics.captionLineSpacing) {
           Text(channel.displayName)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
@@ -163,8 +163,8 @@ struct StreamChannelCard: View {
     )
     .shadow(
       color: Color.black.opacity(layout.usesFocusedShadow && isFocused ? focusedShadowOpacity : 0),
-      radius: layout.usesFocusedShadow ? 20 : 0,
-      y: layout.usesFocusedShadow ? 10 : 0
+      radius: layout.usesFocusedShadow ? CardMetrics.focusShadowRadius : 0,
+      y: layout.usesFocusedShadow ? CardMetrics.focusShadowY : 0
     )
     .onAppear {
       configurePreviewPlayerIfNeeded()
@@ -291,7 +291,7 @@ struct StreamChannelCard: View {
   /// light page the dark shadow otherwise muddies into the focused card's
   /// darkening tint, so the lift reads as a smudge rather than a float.
   private var focusedShadowOpacity: Double {
-    palette.isLight ? 0.12 : 0.36
+    palette.isLight ? CardMetrics.focusShadowOpacityLight : CardMetrics.focusShadowOpacity
   }
 
   @MainActor

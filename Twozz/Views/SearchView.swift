@@ -136,7 +136,7 @@ private struct SearchResultsView: View {
             onWatch: channel.isLive ? { onWatchChannel($0) } : nil,
             onGoToChannel: { onSelectChannel($0) }
           )
-          .contentShape(RoundedRectangle(cornerRadius: 16))
+          .contentShape(RoundedRectangle(cornerRadius: CardMetrics.gridCardCornerRadius))
           .focusable(true)
           .focused($focusedID, equals: id)
           .focusEffectDisabled()

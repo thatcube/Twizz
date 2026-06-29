@@ -189,7 +189,7 @@ struct CategoryStreamsView: View {
                   onWatch: { selectedChannel = $0 },
                   onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 16))
+                .contentShape(RoundedRectangle(cornerRadius: CardMetrics.gridCardCornerRadius))
                 .focusable(true)
                 .focused($focusedStreamID, equals: channel.id)
                 .focusEffectDisabled()

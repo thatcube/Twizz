@@ -6,12 +6,12 @@ import SwiftUI
 /// There should be no per-page horizontal padding overrides — use these.
 enum AppLayout {
   /// The single horizontal page gutter shared by every top-level view.
-  static let horizontalPadding: CGFloat = 24
+  static var horizontalPadding: CGFloat { CardMetrics.screenPadding }
 
   /// The single focus/hover zoom applied to every interactive content card
   /// (channels, categories, search results, etc.) so the scale is consistent
   /// everywhere instead of varying per surface.
-  static let focusedCardScale: CGFloat = 1.07
+  static var focusedCardScale: CGFloat { CardMetrics.focusedScale }
 
   /// Shared focus/hover animation used by interactive cards.
   static var focusScaleAnimation: Animation? {

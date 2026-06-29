@@ -39,12 +39,11 @@ struct ChannelPageView: View {
   private let avatarSize: CGFloat = 96
   private let tileWidth: CGFloat = 360
   private var tileMediaHeight: CGFloat { tileWidth * 9 / 16 }
-  // Match the rail-card metrics used across the rest of the app (HomeView).
-  private let focusHInset: CGFloat = 18
-  private let focusVInset: CGFloat = 18
-  private let cardCorner: CGFloat = 30
-  private let mediaCorner: CGFloat = 18
-  private let heroCorner: CGFloat = 28
+  private var focusHInset: CGFloat { CardMetrics.focusInset }
+  private var focusVInset: CGFloat { CardMetrics.focusInset }
+  private var cardCorner: CGFloat { CardMetrics.cardCornerRadius }
+  private var mediaCorner: CGFloat { CardMetrics.mediaCornerRadius }
+  private var heroCorner: CGFloat { CardMetrics.heroCornerRadius }
   /// Full-bleed banner height. The hero identity card overlaps its bottom edge by
   /// half, and a mirrored, blurred reflection fills the rest of the page below it.
   private let bannerHeight: CGFloat = 380

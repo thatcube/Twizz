@@ -13,12 +13,12 @@ struct CategoryCardView: View {
 
   /// Match the stream cards: aggressive outer glass rounding with the inner box
   /// art rounded to the same radius the stream card media uses.
-  private let outerCornerRadius: CGFloat = 30
-  private let artCornerRadius: CGFloat = 18
+  private var outerCornerRadius: CGFloat { CardMetrics.cardCornerRadius }
+  private var artCornerRadius: CGFloat { CardMetrics.mediaCornerRadius }
   private let artRatio: CGFloat = 285.0 / 380.0
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: CardMetrics.captionSpacing) {
       CachedAsyncImage(url: category.boxArtURL) { img in
         img.resizable().scaledToFill()
       } placeholder: {
@@ -27,7 +27,7 @@ struct CategoryCardView: View {
       .modifier(ArtSizing(width: width, artRatio: artRatio))
       .clipShape(RoundedRectangle(cornerRadius: artCornerRadius, style: .continuous))
 
-      VStack(alignment: .leading, spacing: 4) {
+      VStack(alignment: .leading, spacing: CardMetrics.captionLineSpacing) {
         Text(category.name)
           .font(.subheadline.weight(.semibold))
           .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
@@ -46,10 +46,10 @@ struct CategoryCardView: View {
             .hidden()
         }
       }
-      .padding(.horizontal, 10)
-      .padding(.bottom, 12)
+      .padding(.horizontal, CardMetrics.categoryInset)
+      .padding(.bottom, CardMetrics.cardInset)
     }
-    .padding(10)
+    .padding(CardMetrics.categoryInset)
     .modifier(CardSizing(width: width))
     .twozzLiquidGlassCard(
       cornerRadius: outerCornerRadius,
@@ -71,7 +71,7 @@ struct CategoryCardView: View {
 
   /// The corner radius callers should use for the focus/hit-test content shape so
   /// it matches the card's outer rounding.
-  static let contentShapeCornerRadius: CGFloat = 30
+  static var contentShapeCornerRadius: CGFloat { CardMetrics.cardCornerRadius }
 
   private var usesLiftFocusedText: Bool {
     twozzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
